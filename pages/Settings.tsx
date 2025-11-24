@@ -368,24 +368,40 @@ const Settings: React.FC = () => {
                      {/* Hours Config */}
                      <div className="space-y-4">
                          <h3 className="text-xl font-bold text-white flex items-center gap-2"><Clock size={20} className="text-neon-blue"/> Horários de Funcionamento</h3>
-                         <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700 space-y-2">
+                         <div className="bg-slate-900/50 p-2 sm:p-4 rounded-lg border border-slate-700 space-y-2">
                             {settings.businessHours.map((h, i) => (
-                                <div key={i} className="flex items-center gap-4 py-2 border-b border-slate-700/50 last:border-0">
-                                    <span className="w-24 text-sm font-bold text-slate-400">{daysOfWeek[i]}</span>
-                                    <label className="flex items-center gap-2 cursor-pointer">
-                                        <input type="checkbox" checked={h.isOpen} onChange={e => updateDayConfig(i, 'isOpen', e.target.checked)} className="w-4 h-4 accent-neon-blue rounded"/>
-                                        <span className="text-xs text-slate-500">{h.isOpen ? 'Aberto' : 'Fechado'}</span>
-                                    </label>
+                                <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-3 border-b border-slate-700/50 last:border-0">
+                                    {/* Header: Day + Toggle */}
+                                    <div className="flex items-center justify-between sm:justify-start gap-4 w-full sm:w-auto">
+                                        <span className="text-sm font-bold text-slate-300 w-auto sm:w-24">{daysOfWeek[i]}</span>
+                                        
+                                        <label className="flex items-center gap-2 cursor-pointer bg-slate-800 px-3 py-1.5 rounded-full border border-slate-700 hover:border-slate-500 transition select-none">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={h.isOpen} 
+                                                onChange={e => updateDayConfig(i, 'isOpen', e.target.checked)} 
+                                                className="w-4 h-4 accent-neon-blue rounded cursor-pointer"
+                                            />
+                                            <span className={`text-xs font-bold ${h.isOpen ? 'text-neon-blue' : 'text-slate-500'}`}>
+                                                {h.isOpen ? 'Aberto' : 'Fechado'}
+                                            </span>
+                                        </label>
+                                    </div>
+
+                                    {/* Time Selectors */}
                                     {h.isOpen && (
-                                        <div className="flex items-center gap-2 flex-1">
-                                            <select value={h.start} onChange={e => updateDayConfig(i, 'start', parseInt(e.target.value))} className="bg-slate-800 border-slate-600 text-white rounded p-1 text-sm focus:border-neon-blue outline-none">
-                                                {hoursOptions.map(o => <option key={o} value={o}>{o}:00</option>)}
-                                            </select>
-                                            <span className="text-slate-500">-</span>
-                                            <select value={h.end} onChange={e => updateDayConfig(i, 'end', parseInt(e.target.value))} className="bg-slate-800 border-slate-600 text-white rounded p-1 text-sm focus:border-neon-blue outline-none">
-                                                <option value={0}>00:00 (Meia-noite)</option>
-                                                {hoursOptions.filter(o=>o>0).map(o => <option key={o} value={o}>{o}:00</option>)}
-                                            </select>
+                                        <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end bg-slate-800/50 sm:bg-transparent p-2 sm:p-0 rounded-lg">
+                                            <span className="text-xs text-slate-500 sm:hidden font-medium">Horário:</span>
+                                            <div className="flex items-center gap-2">
+                                                <select value={h.start} onChange={e => updateDayConfig(i, 'start', parseInt(e.target.value))} className="bg-slate-800 border-slate-600 text-white rounded p-1.5 text-sm focus:border-neon-blue outline-none min-w-[70px]">
+                                                    {hoursOptions.map(o => <option key={o} value={o}>{o}:00</option>)}
+                                                </select>
+                                                <span className="text-slate-500 font-bold">-</span>
+                                                <select value={h.end} onChange={e => updateDayConfig(i, 'end', parseInt(e.target.value))} className="bg-slate-800 border-slate-600 text-white rounded p-1.5 text-sm focus:border-neon-blue outline-none min-w-[70px]">
+                                                    <option value={0}>00:00 (Meia-noite)</option>
+                                                    {hoursOptions.filter(o=>o>0).map(o => <option key={o} value={o}>{o}:00</option>)}
+                                                </select>
+                                            </div>
                                         </div>
                                     )}
                                 </div>
