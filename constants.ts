@@ -1,5 +1,3 @@
-
-
 import { EventType, FunnelStage, ReservationStatus, UserRole, AppSettings, User } from './types';
 
 export const MOCK_DELAY = 500;
@@ -9,15 +7,20 @@ export const FUNNEL_STAGES = Object.values(FunnelStage);
 export const STATUSES = Object.values(ReservationStatus);
 export const TAGS = ['Lead novo', 'Cliente recorrente', 'Aniversário', 'Empresa', 'VIP', 'Frio', 'Quente'];
 
-const DEFAULT_HOURS = Array(7).fill({
-  isOpen: true,
-  start: 18,
-  end: 0 
-});
-
-DEFAULT_HOURS[0] = { isOpen: true, start: 16, end: 0 }; 
-DEFAULT_HOURS[5] = { isOpen: true, start: 18, end: 2 }; 
-DEFAULT_HOURS[6] = { isOpen: true, start: 16, end: 2 }; 
+// 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sab
+// Regras: 
+// - Terça a Sexta: 18:00 as 00:00
+// - Sabado e Domingo: 17:00 as 00:00
+// - Segunda: Fechado
+const DEFAULT_HOURS = [
+  { isOpen: true, start: 17, end: 0 },  // Domingo
+  { isOpen: false, start: 18, end: 0 }, // Segunda (Fechado)
+  { isOpen: true, start: 18, end: 0 },  // Terça
+  { isOpen: true, start: 18, end: 0 },  // Quarta
+  { isOpen: true, start: 18, end: 0 },  // Quinta
+  { isOpen: true, start: 18, end: 0 },  // Sexta
+  { isOpen: true, start: 17, end: 0 },  // Sábado
+];
 
 export const INITIAL_SETTINGS: AppSettings = {
   establishmentName: 'Tô Na Pista Boliche',
@@ -26,8 +29,8 @@ export const INITIAL_SETTINGS: AppSettings = {
   whatsappLink: 'https://wa.me/5521999999999',
   logoUrl: '',
   activeLanes: 6,
-  weekdayPrice: 140, 
-  weekendPrice: 160, 
+  weekdayPrice: 99.90, 
+  weekendPrice: 140, 
   onlinePaymentEnabled: false,
   mercadopagoPublicKey: 'APP_USR-598f3b9a-91d1-419e-9b82-53b7afccd6e9', 
   mercadopagoAccessToken: '',

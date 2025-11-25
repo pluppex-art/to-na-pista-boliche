@@ -395,7 +395,7 @@ const Settings: React.FC = () => {
                                             <span className="text-xs text-slate-500 sm:hidden font-medium">Horário:</span>
                                             <div className="flex items-center gap-2">
                                                 <select value={h.start} onChange={e => updateDayConfig(i, 'start', parseInt(e.target.value))} className="bg-slate-800 border-slate-600 text-white rounded p-1.5 text-sm focus:border-neon-blue outline-none min-w-[70px]">
-                                                    {hoursOptions.map(o => <option key={o} value={o}>{o}:00</option>)}
+                                                    {hoursOptions.map(o => <option key={o} value={o}>{o === 0 ? '00:00' : `${o}:00`}</option>)}
                                                 </select>
                                                 <span className="text-slate-500 font-bold">-</span>
                                                 <select value={h.end} onChange={e => updateDayConfig(i, 'end', parseInt(e.target.value))} className="bg-slate-800 border-slate-600 text-white rounded p-1.5 text-sm focus:border-neon-blue outline-none min-w-[70px]">

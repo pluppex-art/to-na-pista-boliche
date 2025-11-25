@@ -60,7 +60,7 @@ const Layout = ({ children }: LayoutProps) => {
   const navItems = [
     { 
         path: '/agenda', 
-        label: 'AGENDAMENTOS', 
+        label: 'Agenda', 
         icon: CalendarDays, 
         // Exibe se for Admin OU tiver a permissão específica true
         check: (u: User) => u.role === UserRole.ADMIN || u.perm_view_agenda 
@@ -79,7 +79,7 @@ const Layout = ({ children }: LayoutProps) => {
     },
     { 
         path: '/configuracoes', 
-        label: 'Configurações', 
+        label: 'Config', 
         icon: Settings, 
         check: (u: User) => u.role === UserRole.ADMIN 
     },
@@ -98,7 +98,7 @@ const Layout = ({ children }: LayoutProps) => {
             <div className="flex h-16 md:h-20 items-center justify-between">
                 
                 {/* LEFT SIDE: Mobile Trigger + Logo + Brand + Desktop Menu */}
-                <div className="flex items-center gap-6 md:gap-8 flex-1">
+                <div className="flex items-center gap-4 lg:gap-8 flex-1">
                     
                     {/* Mobile Menu Button */}
                     <div className="md:hidden">
@@ -108,45 +108,46 @@ const Layout = ({ children }: LayoutProps) => {
                     </div>
 
                     {/* Logo & Brand Name */}
-                    <div className="flex items-center gap-3 md:gap-4 flex-shrink-0">
+                    <div className="flex items-center gap-3 flex-shrink-0">
                         {logoUrl && !imgError ? (
                         <img 
                             src={logoUrl} 
                             alt={establishmentName}
-                            className="h-10 md:h-12 w-auto object-contain drop-shadow-[0_0_8px_rgba(249,115,22,0.3)]" 
+                            className="h-8 md:h-10 lg:h-12 w-auto object-contain drop-shadow-[0_0_8px_rgba(249,115,22,0.3)]" 
                             onError={() => setImgError(true)}
                         />
                         ) : (
-                        <div className="w-10 h-10 bg-neon-orange/20 rounded-full flex items-center justify-center border border-neon-orange/50">
-                            <span className="text-neon-orange font-bold text-lg">TP</span>
+                        <div className="w-8 h-8 md:w-10 md:h-10 bg-neon-orange/20 rounded-full flex items-center justify-center border border-neon-orange/50">
+                            <span className="text-neon-orange font-bold text-sm md:text-lg">TP</span>
                         </div>
                         )}
                         
                         <div className="flex flex-col">
-                            <h1 className="text-lg md:text-xl font-bold text-neon-orange font-sans tracking-tighter leading-none whitespace-nowrap">
+                            <h1 className="text-sm md:text-lg lg:text-xl font-bold text-neon-orange font-sans tracking-tighter leading-none whitespace-nowrap">
                                 {establishmentName.toUpperCase()}
                             </h1>
-                            <p className="text-[9px] text-slate-400 tracking-widest uppercase hidden md:block">
+                            {/* Oculta subtítulo em tablet (md) para economizar espaço, exibe em Large (lg) */}
+                            <p className="text-[9px] text-slate-400 tracking-widest uppercase hidden lg:block">
                                 Sistema de Gestão
                             </p>
                         </div>
                     </div>
 
                     {/* Desktop Navigation (Embedded in the Bar) */}
-                    <nav className="hidden md:flex items-center gap-1 ml-4 overflow-x-auto no-scrollbar">
+                    <nav className="hidden md:flex items-center gap-1 ml-2 lg:ml-4 overflow-x-auto no-scrollbar">
                         {allowedItems.map((item) => {
                         const isActive = location.pathname === item.path;
                         return (
                             <Link
                             key={item.path}
                             to={item.path}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wide transition-all duration-200 border border-transparent whitespace-nowrap ${
+                            className={`flex items-center gap-1.5 lg:gap-2 px-3 py-1.5 lg:px-4 lg:py-2 rounded-lg text-[10px] lg:text-xs font-bold uppercase tracking-wide transition-all duration-200 border border-transparent whitespace-nowrap ${
                                 isActive 
                                 ? 'bg-slate-800 text-neon-orange border-slate-700 shadow-sm' 
                                 : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/50'
                             }`}
                             >
-                            <item.icon size={16} />
+                            <item.icon size={14} className="lg:w-4 lg:h-4" />
                             <span>{item.label}</span>
                             </Link>
                         );
@@ -155,11 +156,11 @@ const Layout = ({ children }: LayoutProps) => {
                 </div>
 
                 {/* RIGHT SIDE: User Profile & Logout */}
-                <div className="flex items-center gap-4 flex-shrink-0">
-                    <div className="hidden md:flex flex-col items-end mr-2">
+                <div className="flex items-center gap-2 lg:gap-4 flex-shrink-0">
+                    <div className="hidden lg:flex flex-col items-end mr-2">
                          {user && (
                             <>
-                                <span className="text-xs text-white font-bold">{user.name}</span>
+                                <span className="text-xs text-white font-bold max-w-[100px] truncate">{user.name}</span>
                                 <span className="text-[10px] text-slate-500 uppercase">{user.role === UserRole.GESTOR ? 'Usuário' : user.role}</span>
                             </>
                         )}
@@ -169,7 +170,7 @@ const Layout = ({ children }: LayoutProps) => {
                         className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition"
                         title="Sair do Sistema"
                     >
-                        <LogOut size={20} />
+                        <LogOut size={18} className="lg:w-5 lg:h-5" />
                     </button>
                 </div>
 
@@ -216,7 +217,7 @@ const Layout = ({ children }: LayoutProps) => {
       )}
 
       {/* Main Content */}
-      <main className="flex-1 p-4 md:p-8 overflow-y-auto w-full max-w-[1600px] mx-auto">
+      <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-y-auto w-full max-w-[1600px] mx-auto">
         {children}
       </main>
     </div>

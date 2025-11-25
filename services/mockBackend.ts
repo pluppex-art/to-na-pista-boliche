@@ -184,6 +184,40 @@ export const db = {
       const phoneClean = cleanPhone(client.phone);
       const initialStage = client.funnelStage || FunnelStage.NOVO;
 
+      // 1. Tenta buscar existente primeiro para evitar conflito de PK no Upsert/Insert
+      const { data: existingClient } = await supabase
+          .from('clientes')
+          .select('*')
+          .eq('phone', phoneClean)
+          .maybeSingle();
+
+      if (existingClient) {
+          // UPDATE: Cliente existe. Atualizamos dados, mas preservamos o ID original (PK).
+          const updatePayload = {
+              name: client.name,
+              email: client.email,
+              tags: currentTags, 
+              last_contact_at: client.lastContactAt,
+              funnel_stage: initialStage
+          };
+          
+          const { error: updateError } = await supabase
+              .from('clientes')
+              .update(updatePayload)
+              .eq('client_id', existingClient.client_id);
+
+          if (updateError) console.error("Erro ao atualizar cliente existente no create:", updateError);
+
+          // Retorna o objeto cliente com o ID real do banco
+          return { 
+              ...client, 
+              id: existingClient.client_id, 
+              phone: phoneClean, 
+              tags: currentTags 
+          };
+      }
+
+      // 2. INSERT: Cliente é novo
       const dbClient = {
         client_id: client.id, 
         name: client.name,
@@ -196,6 +230,14 @@ export const db = {
       };
       
       const { error } = await supabase.from('clientes').insert(dbClient);
+      
+      // Tratamento de Race Condition (inserido por outro processo entre o select e o insert)
+      if (error && error.code === '23505') { // Postgres Unique Violation
+          const { data: retryClient } = await supabase.from('clientes').select('*').eq('phone', phoneClean).maybeSingle();
+          if (retryClient) {
+             return { ...client, id: retryClient.client_id, phone: phoneClean };
+          }
+      }
       
       if (error) throw error;
       
@@ -256,7 +298,11 @@ export const db = {
         guests: r.guests || [],
         lanes: r.lanes || [],
         checkedInIds: r.checked_in_ids || [], 
-        noShowIds: r.no_show_ids || []       
+        noShowIds: r.no_show_ids || [],
+        // Novos campos
+        hasTableReservation: r.has_table_reservation,
+        birthdayName: r.birthday_name,
+        tableSeatCount: r.table_seat_count
       }));
     },
     create: async (res: Reservation) => {
@@ -278,7 +324,11 @@ export const db = {
         lanes: res.lanes,
         created_at: res.createdAt,
         checked_in_ids: res.checkedInIds || [], 
-        no_show_ids: res.noShowIds || []        
+        no_show_ids: res.noShowIds || [],
+        // Novos campos
+        has_table_reservation: res.hasTableReservation,
+        birthday_name: res.birthdayName,
+        table_seat_count: res.tableSeatCount
       };
       
       const { error } = await supabase.from('reservas').insert(dbRes);
@@ -299,7 +349,11 @@ export const db = {
         payment_status: res.paymentStatus,
         guests: res.guests,
         checked_in_ids: res.checkedInIds || [], 
-        no_show_ids: res.noShowIds || []        
+        no_show_ids: res.noShowIds || [],
+        // Novos campos
+        has_table_reservation: res.hasTableReservation,
+        birthday_name: res.birthdayName,
+        table_seat_count: res.tableSeatCount
       };
       
       const { error } = await supabase.from('reservas').update(dbRes).eq('id', res.id);

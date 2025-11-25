@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { db, cleanPhone } from '../services/mockBackend';
 import { Integrations } from '../services/integrations';
 import { EventType, AppSettings, ReservationStatus, Guest, User, PaymentStatus, Reservation, FunnelStage } from '../types';
 import { EVENT_TYPES, INITIAL_SETTINGS } from '../constants';
-import { CheckCircle, Calendar as CalendarIcon, Clock, Users, ChevronRight, DollarSign, ChevronLeft, Lock, LayoutDashboard, Loader2, UserPlus, Mail, Phone, User as UserIcon, AlertCircle, XCircle, ShieldCheck, CreditCard, ArrowRight } from 'lucide-react';
+import { CheckCircle, Calendar as CalendarIcon, Clock, Users, ChevronRight, DollarSign, ChevronLeft, Lock, LayoutDashboard, Loader2, UserPlus, Mail, Phone, User as UserIcon, AlertCircle, XCircle, ShieldCheck, CreditCard, ArrowRight, Cake, Utensils } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
 // Adicionado passo extra "Pagamento"
@@ -21,8 +20,12 @@ const PublicBooking: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Validation State
+  const [errors, setErrors] = useState<Record<string, boolean>>({});
+
   // Draft State - Store created IDs to pass to checkout
   const [createdReservationIds, setCreatedReservationIds] = useState<string[]>([]);
+  const [clientId, setClientId] = useState<string>(''); // Armazena ID do cliente criado/encontrado
 
   // Form State
   const [selectedDate, setSelectedDate] = useState('');
@@ -37,6 +40,11 @@ const PublicBooking: React.FC = () => {
     type: EventType.JOGO_NORMAL,
     obs: '',
     
+    // Table Reservation Data
+    wantsTable: false,
+    birthdayName: '',
+    tableSeatCount: 0,
+
     // Main Responsible
     name: '',
     whatsapp: '',
@@ -88,8 +96,75 @@ const PublicBooking: React.FC = () => {
     fetchData();
   }, []);
 
+  // Format Phone Mask: (XX) XXXXX-XXXX
+  const formatPhone = (value: string) => {
+    const numbers = value.replace(/\D/g, '');
+    if (numbers.length <= 2) return numbers;
+    if (numbers.length <= 7) return `(${numbers.slice(0, 2)}) ${numbers.slice(2)}`;
+    return `(${numbers.slice(0, 2)}) ${numbers.slice(2, 7)}-${numbers.slice(7, 11)}`;
+  };
+
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>, field: 'whatsapp' | 'secondWhatsapp') => {
+      const formatted = formatPhone(e.target.value);
+      setFormData(prev => ({ ...prev, [field]: formatted }));
+      // Limpa erro ao digitar
+      if (errors[field]) setErrors(prev => ({ ...prev, [field]: false }));
+  };
+
+  const handleInputChange = (field: string, value: any) => {
+      setFormData(prev => ({ ...prev, [field]: value }));
+      if (errors[field]) setErrors(prev => ({ ...prev, [field]: false }));
+  };
+
+  const isValidEmail = (email: string) => {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  };
+
+  const isValidPhone = (phone: string) => {
+      const clean = phone.replace(/\D/g, '');
+      return clean.length >= 10 && clean.length <= 11;
+  };
+
+  const validateStep = () => {
+      const newErrors: Record<string, boolean> = {};
+      let isValid = true;
+
+      if (currentStep === 1) { // Config
+          if (formData.wantsTable) {
+              if (formData.type === EventType.ANIVERSARIO) {
+                  if (!formData.birthdayName) newErrors.birthdayName = true;
+                  if (!formData.tableSeatCount) newErrors.tableSeatCount = true;
+              } else {
+                   if (!formData.tableSeatCount) newErrors.tableSeatCount = true;
+              }
+          }
+          if (selectedTimes.length === 0) {
+              alert("Por favor, selecione pelo menos um horário.");
+              isValid = false;
+          }
+      }
+
+      if (currentStep === 2) { // Dados
+          if (!formData.name.trim()) newErrors.name = true;
+          
+          if (!formData.email.trim() || !isValidEmail(formData.email)) newErrors.email = true;
+          
+          if (!formData.whatsapp.trim() || !isValidPhone(formData.whatsapp)) newErrors.whatsapp = true;
+      }
+
+      setErrors(newErrors);
+      if (Object.keys(newErrors).length > 0) isValid = false;
+      return isValid;
+  };
+
   const handleNext = async () => {
-    if (currentStep === 2) {
+    if (!validateStep()) return;
+
+    if (currentStep === 1) {
+        // Validação passou, avança
+        setCurrentStep(c => c + 1);
+
+    } else if (currentStep === 2) {
         // --- STEP 2 to 3: SAVE LEAD ---
         setIsSaving(true);
         try {
@@ -98,7 +173,7 @@ const PublicBooking: React.FC = () => {
             
             if (!client) {
                 // Create new Lead
-                await db.clients.create({
+                client = await db.clients.create({
                     id: uuidv4(),
                     name: formData.name,
                     phone: formData.whatsapp,
@@ -117,6 +192,7 @@ const PublicBooking: React.FC = () => {
                     lastContactAt: new Date().toISOString()
                 });
             }
+            setClientId(client.id);
             setCurrentStep(c => c + 1);
         } catch (error) {
             console.error(error);
@@ -124,6 +200,9 @@ const PublicBooking: React.FC = () => {
         } finally {
             setIsSaving(false);
         }
+    } else if (currentStep === 3) {
+        // --- STEP 3 to 4: CREATE PENDING RESERVATION ---
+        await createPendingReservations();
     } else if (currentStep < steps.length - 1) {
         setCurrentStep(c => c + 1);
     }
@@ -366,8 +445,14 @@ const PublicBooking: React.FC = () => {
     return blocks;
   };
 
-  // --- Logic to Confirm Booking ---
-  const handleConfirmBooking = async (staffOverride: boolean = false) => {
+  // --- Logic to Create PENDING Booking (Step 3 -> 4) ---
+  const createPendingReservations = async () => {
+      if (createdReservationIds.length > 0) {
+          // Já criadas, apenas avança
+          setCurrentStep(4);
+          return;
+      }
+
       setIsSaving(true);
       try {
           const blocks = getReservationBlocks();
@@ -395,20 +480,7 @@ const PublicBooking: React.FC = () => {
              }
           }
 
-          // Fetch Client ID (Should be saved from Step 2)
-          let client = await db.clients.getByPhone(formData.whatsapp);
-          if (!client) {
-             client = await db.clients.create({
-                 id: uuidv4(),
-                 name: formData.name,
-                 phone: formData.whatsapp,
-                 email: formData.email,
-                 tags: ['Lead'],
-                 createdAt: new Date().toISOString(),
-                 lastContactAt: new Date().toISOString(),
-                 funnelStage: FunnelStage.NOVO
-             });
-          }
+          if (!clientId) throw new Error("ID do cliente não encontrado");
 
           // Create Reservations as PENDING
           const newIds: string[] = [];
@@ -418,7 +490,7 @@ const PublicBooking: React.FC = () => {
              
              const res: Reservation = {
                  id: uuidv4(),
-                 clientId: client.id,
+                 clientId: clientId,
                  clientName: formData.name,
                  date: selectedDate,
                  time: block.time,
@@ -428,13 +500,17 @@ const PublicBooking: React.FC = () => {
                  totalValue: blockTotalValue,
                  eventType: formData.type,
                  observations: formData.obs,
-                 status: ReservationStatus.PENDENTE,
+                 status: ReservationStatus.PENDENTE, // Creates as Pending - Blocks the slot!
                  paymentStatus: PaymentStatus.PENDENTE,
                  createdAt: new Date().toISOString(),
                  guests: [],
                  lanes: [],
                  checkedInIds: [],
-                 noShowIds: []
+                 noShowIds: [],
+                 // New Fields
+                 hasTableReservation: formData.wantsTable,
+                 birthdayName: formData.wantsTable ? formData.birthdayName : undefined,
+                 tableSeatCount: formData.wantsTable ? formData.tableSeatCount : undefined
              };
 
              await db.reservations.create(res);
@@ -443,10 +519,27 @@ const PublicBooking: React.FC = () => {
 
           setCreatedReservationIds(newIds);
           
+          // Refresh local availability cache
+          setExistingReservations(await db.reservations.getAll());
+          
+          setCurrentStep(4); // Advance to Payment Screen
+
+      } catch (e) {
+          console.error(e);
+          alert("Erro ao criar agendamento.");
+      } finally {
+          setIsSaving(false);
+      }
+  };
+
+  // --- Logic to Process Payment/Redirect ---
+  const handlePaymentProcess = async (staffOverride: boolean = false) => {
+      setIsSaving(true);
+      try {
           // --- LOGIC: DIRECT REDIRECT ---
           if (settings.onlinePaymentEnabled && !staffOverride) {
               const compositeRes = { 
-                  id: newIds[0], // Use first ID as ref
+                  id: createdReservationIds[0], // Use first ID as ref
                   totalValue: totalValue,
                   clientName: formData.name,
                   clientEmail: formData.email
@@ -460,16 +553,16 @@ const PublicBooking: React.FC = () => {
               } else {
                   // Fallback se MP falhar
                   alert("Houve um erro ao conectar com o banco. Redirecionando para método manual.");
-                  navigate('/checkout', { state: { ...formData, date: selectedDate, time: selectedTimes[0], totalValue, reservationBlocks, reservationIds: newIds } });
+                  navigate('/checkout', { state: { ...formData, date: selectedDate, time: selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
               }
           } else {
              // Modo offline/legado OU Staff Presencial
-             navigate('/checkout', { state: { ...formData, date: selectedDate, time: selectedTimes[0], totalValue, reservationBlocks, reservationIds: newIds } });
+             navigate('/checkout', { state: { ...formData, date: selectedDate, time: selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
           }
 
       } catch (e) {
           console.error(e);
-          alert("Erro ao criar reserva.");
+          alert("Erro ao processar pagamento.");
       } finally {
           setIsSaving(false);
       }
@@ -477,7 +570,6 @@ const PublicBooking: React.FC = () => {
 
   const formattedDateDisplay = selectedDate ? selectedDate.split('-').reverse().join('/') : '';
   const reservationBlocks = getReservationBlocks();
-  const showPaymentButton = settings.onlinePaymentEnabled;
 
   if (isLoading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="animate-spin text-neon-orange" size={48} /></div>;
 
@@ -626,12 +718,77 @@ const PublicBooking: React.FC = () => {
                             <select 
                             className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 focus:border-neon-orange focus:outline-none text-white"
                             value={formData.type}
-                            onChange={e => setFormData({...formData, type: e.target.value as EventType})}
+                            onChange={e => {
+                                const newType = e.target.value as EventType;
+                                setFormData(prev => ({
+                                    ...prev, 
+                                    type: newType,
+                                    wantsTable: false, // Reset table check on type change
+                                    birthdayName: '',
+                                    tableSeatCount: 0
+                                }));
+                            }}
                             >
                             {EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                             </select>
                         </div>
                     </div>
+                    
+                    {/* TABLE RESERVATION LOGIC */}
+                    {formData.type !== EventType.JOGO_NORMAL && (
+                        <div className="mt-4 pt-4 border-t border-slate-700 animate-fade-in">
+                            <label className="flex items-center gap-3 cursor-pointer group mb-4">
+                                <div className={`w-5 h-5 rounded border flex items-center justify-center transition ${formData.wantsTable ? 'bg-neon-blue border-neon-blue' : 'border-slate-600 group-hover:border-slate-400'}`}>
+                                    {formData.wantsTable && <CheckCircle size={14} className="text-white" />}
+                                </div>
+                                <input 
+                                    type="checkbox" 
+                                    className="hidden"
+                                    checked={formData.wantsTable}
+                                    onChange={e => handleInputChange('wantsTable', e.target.checked)}
+                                />
+                                <span className="font-bold text-slate-300 group-hover:text-white transition flex items-center gap-2">
+                                    <Utensils size={16}/> Reservar Mesa?
+                                </span>
+                            </label>
+
+                            {formData.wantsTable && (
+                                <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700 grid grid-cols-1 md:grid-cols-2 gap-4 animate-fade-in">
+                                    {formData.type === EventType.ANIVERSARIO && (
+                                        <div>
+                                            <label className={`block text-xs font-medium mb-1 ${errors.birthdayName ? 'text-red-500' : 'text-slate-400'}`}>
+                                                Nome do Aniversariante *
+                                            </label>
+                                            <div className="relative">
+                                                <Cake size={14} className="absolute left-3 top-3 text-slate-500"/>
+                                                <input 
+                                                    type="text"
+                                                    className={`w-full bg-slate-800 border rounded-lg p-2 pl-9 focus:outline-none text-white ${errors.birthdayName ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`}
+                                                    value={formData.birthdayName}
+                                                    onChange={e => handleInputChange('birthdayName', e.target.value)}
+                                                    placeholder="Nome do aniversariante"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div className={formData.type === EventType.ANIVERSARIO ? "" : "md:col-span-2"}>
+                                        <label className={`block text-xs font-medium mb-1 ${errors.tableSeatCount ? 'text-red-500' : 'text-slate-400'}`}>
+                                            {formData.type === EventType.ANIVERSARIO ? 'Qtd. Convidados (Cadeiras) *' : 'Qtd. Pessoas (Cadeiras) *'}
+                                        </label>
+                                        <input 
+                                            type="number"
+                                            min={1}
+                                            className={`w-full bg-slate-800 border rounded-lg p-2 focus:outline-none text-white ${errors.tableSeatCount ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`}
+                                            value={formData.tableSeatCount}
+                                            onChange={e => handleInputChange('tableSeatCount', parseInt(e.target.value) || 0)}
+                                            placeholder="Ex: 10"
+                                        />
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* Price Indicator */}
                     <div className="mt-3 pt-3 border-t border-slate-700 flex justify-end">
                         <span className="text-sm text-slate-400">
@@ -705,49 +862,60 @@ const PublicBooking: React.FC = () => {
                   <Users className="text-neon-orange" /> Seus Dados
                 </h2>
                 
+                <p className="text-xs text-slate-500 mb-4 bg-slate-800/50 p-2 rounded border border-slate-700">
+                    Os campos marcados com <span className="text-neon-orange font-bold">*</span> são de preenchimento obrigatório.
+                </p>
+
                 {/* Main Contact */}
                 <div>
                     <h3 className="text-sm font-bold text-slate-300 uppercase mb-3 flex items-center gap-2">
                         <span className="w-6 h-6 rounded-full bg-neon-blue text-white flex items-center justify-center text-xs">1</span> 
-                        Responsável Principal (Obrigatório)
+                        Responsável pela reserva
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         <div>
-                            <label className="block text-xs font-medium text-slate-500 mb-1">Nome Completo</label>
+                            <label className={`block text-xs font-medium mb-1 ${errors.name ? 'text-red-500' : 'text-slate-500'}`}>
+                                Nome Completo <span className="text-neon-orange">*</span>
+                            </label>
                             <div className="relative">
                                 <UserIcon size={16} className="absolute left-3 top-3 text-slate-500" />
                                 <input 
                                 type="text"
                                 placeholder="Nome e Sobrenome"
-                                className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 pl-10 focus:border-neon-orange focus:outline-none text-white"
+                                className={`w-full bg-slate-800 border rounded-lg p-3 pl-10 focus:outline-none text-white ${errors.name ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`}
                                 value={formData.name}
-                                onChange={e => setFormData({...formData, name: e.target.value})}
+                                onChange={e => handleInputChange('name', e.target.value)}
                                 />
                             </div>
                         </div>
                         <div>
-                            <label className="block text-xs font-medium text-slate-500 mb-1">WhatsApp</label>
+                            <label className={`block text-xs font-medium mb-1 ${errors.whatsapp ? 'text-red-500' : 'text-slate-500'}`}>
+                                WhatsApp <span className="text-neon-orange">*</span>
+                            </label>
                             <div className="relative">
                                 <Phone size={16} className="absolute left-3 top-3 text-slate-500" />
                                 <input 
                                 type="tel"
+                                maxLength={15}
                                 placeholder="(00) 00000-0000"
-                                className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 pl-10 focus:border-neon-orange focus:outline-none text-white"
+                                className={`w-full bg-slate-800 border rounded-lg p-3 pl-10 focus:outline-none text-white ${errors.whatsapp ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`}
                                 value={formData.whatsapp}
-                                onChange={e => setFormData({...formData, whatsapp: e.target.value})}
+                                onChange={e => handlePhoneChange(e, 'whatsapp')}
                                 />
                             </div>
                         </div>
                         <div className="md:col-span-2 lg:col-span-1">
-                            <label className="block text-xs font-medium text-slate-500 mb-1">E-mail</label>
+                            <label className={`block text-xs font-medium mb-1 ${errors.email ? 'text-red-500' : 'text-slate-500'}`}>
+                                E-mail <span className="text-neon-orange">*</span>
+                            </label>
                             <div className="relative">
                                 <Mail size={16} className="absolute left-3 top-3 text-slate-500" />
                                 <input 
                                 type="email"
                                 placeholder="seu@email.com"
-                                className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 pl-10 focus:border-neon-orange focus:outline-none text-white"
+                                className={`w-full bg-slate-800 border rounded-lg p-3 pl-10 focus:outline-none text-white ${errors.email ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`}
                                 value={formData.email}
-                                onChange={e => setFormData({...formData, email: e.target.value})}
+                                onChange={e => handleInputChange('email', e.target.value)}
                                 />
                             </div>
                         </div>
@@ -764,7 +932,7 @@ const PublicBooking: React.FC = () => {
                             type="checkbox" 
                             className="hidden"
                             checked={formData.hasSecondResponsible}
-                            onChange={e => setFormData({...formData, hasSecondResponsible: e.target.checked})}
+                            onChange={e => handleInputChange('hasSecondResponsible', e.target.checked)}
                         />
                         <span className="font-bold text-slate-300 group-hover:text-white transition">Adicionar Segundo Responsável? <span className="text-xs font-normal text-slate-500">(Opcional)</span></span>
                     </label>
@@ -782,16 +950,18 @@ const PublicBooking: React.FC = () => {
                                     type="text"
                                     className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 focus:border-neon-orange focus:outline-none text-white"
                                     value={formData.secondName}
-                                    onChange={e => setFormData({...formData, secondName: e.target.value})}
+                                    onChange={e => handleInputChange('secondName', e.target.value)}
                                     />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-medium text-slate-500 mb-1">WhatsApp</label>
                                     <input 
                                     type="tel"
+                                    maxLength={15}
+                                    placeholder="(00) 00000-0000"
                                     className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 focus:border-neon-orange focus:outline-none text-white"
                                     value={formData.secondWhatsapp}
-                                    onChange={e => setFormData({...formData, secondWhatsapp: e.target.value})}
+                                    onChange={e => handlePhoneChange(e, 'secondWhatsapp')}
                                     />
                                 </div>
                                 <div className="md:col-span-2 lg:col-span-1">
@@ -800,7 +970,7 @@ const PublicBooking: React.FC = () => {
                                     type="email"
                                     className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 focus:border-neon-orange focus:outline-none text-white"
                                     value={formData.secondEmail}
-                                    onChange={e => setFormData({...formData, secondEmail: e.target.value})}
+                                    onChange={e => handleInputChange('secondEmail', e.target.value)}
                                     />
                                 </div>
                             </div>
@@ -813,7 +983,7 @@ const PublicBooking: React.FC = () => {
                     <textarea 
                       className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 focus:border-neon-orange focus:outline-none h-20 text-white"
                       value={formData.obs}
-                      onChange={e => setFormData({...formData, obs: e.target.value})}
+                      onChange={e => handleInputChange('obs', e.target.value)}
                     />
                 </div>
 
@@ -821,7 +991,7 @@ const PublicBooking: React.FC = () => {
                    <button onClick={handleBack} className="text-slate-400 hover:text-white font-medium">Voltar</button>
                    <div className="flex flex-col items-end gap-2">
                      <button 
-                      disabled={!formData.name || !formData.whatsapp || !formData.email || isSaving}
+                      disabled={isSaving}
                       onClick={handleNext}
                       className="px-8 py-3 bg-neon-blue text-white font-bold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-400 transition flex items-center gap-2"
                      >
@@ -841,7 +1011,7 @@ const PublicBooking: React.FC = () => {
 
                 <div className="bg-slate-800/50 rounded-xl p-6 space-y-4 border border-slate-700">
                   <div className="flex justify-between border-b border-slate-700 pb-2">
-                     <span className="text-slate-400">Responsável Principal</span>
+                     <span className="text-slate-400">Responsável pela reserva</span>
                      <div className="text-right">
                          <span className="font-bold text-white block">{formData.name}</span>
                          <span className="text-xs text-slate-500 block">{formData.whatsapp} | {formData.email}</span>
@@ -868,7 +1038,16 @@ const PublicBooking: React.FC = () => {
 
                    <div className="flex justify-between border-b border-slate-700 pb-2">
                      <span className="text-slate-400">Detalhes Gerais</span>
-                     <span className="font-bold text-white">{formData.people} pessoas / {formData.lanes} pista(s) / {totalDuration}h total</span>
+                     <div className="text-right">
+                         <span className="font-bold text-white block">{formData.people} pessoas / {formData.lanes} pista(s) / {totalDuration}h total</span>
+                         <span className="text-xs text-neon-orange font-bold uppercase">{formData.type}</span>
+                         {formData.wantsTable && (
+                             <div className="mt-1 text-xs text-slate-400 flex flex-col items-end">
+                                 <span className="flex items-center gap-1"><Utensils size={10}/> Reserva de Mesa ({formData.tableSeatCount} lug.)</span>
+                                 {formData.birthdayName && <span className="text-neon-blue">Aniv: {formData.birthdayName}</span>}
+                             </div>
+                         )}
+                     </div>
                   </div>
                   
                   <div className="flex justify-between items-center pt-2">
@@ -883,10 +1062,11 @@ const PublicBooking: React.FC = () => {
                    <button onClick={handleBack} className="text-slate-400 hover:text-white font-medium">Voltar e Editar</button>
                    
                    <button 
-                      onClick={() => setCurrentStep(4)}
+                      onClick={handleNext}
+                      disabled={isSaving}
                       className="px-8 py-3 bg-neon-blue text-white font-bold rounded-lg hover:bg-blue-500 transition flex items-center gap-2"
                    >
-                      Avançar <ChevronRight size={18}/>
+                      {isSaving ? <Loader2 className="animate-spin" /> : <>Avançar <ChevronRight size={18}/></>}
                    </button>
                 </div>
               </div>
@@ -898,10 +1078,10 @@ const PublicBooking: React.FC = () => {
                      <div className="w-20 h-20 bg-neon-blue/20 rounded-full flex items-center justify-center mx-auto mb-6 shadow-[0_0_30px_rgba(59,130,246,0.3)]">
                         <Lock size={40} className="text-neon-blue" />
                      </div>
-                     <h2 className="text-3xl font-bold text-white mb-4">Garantia de Reserva</h2>
+                     <h2 className="text-3xl font-bold text-white mb-4">Pré agendamento realizado</h2>
                      <p className="text-slate-300 max-w-lg mx-auto mb-8 text-lg">
-                        Seu pré-agendamento foi gerado! <br/>
-                        <span className="text-neon-orange font-bold">Atenção:</span> Para garantir a reserva da pista, é necessário efetuar o pagamento antecipado.
+                        Seu horário foi reservado temporariamente! <br/>
+                        <span className="text-neon-orange font-bold">Atenção:</span> Para confirmar definitivamente, é necessário efetuar o pagamento antecipado.
                      </p>
 
                      <div className="bg-slate-800 p-4 rounded-lg max-w-md mx-auto mb-8 border border-slate-700">
@@ -915,13 +1095,13 @@ const PublicBooking: React.FC = () => {
                         {/* Botão Principal - Mercado Pago */}
                          <button 
                             disabled={isSaving}
-                            onClick={() => handleConfirmBooking(false)}
+                            onClick={() => handlePaymentProcess(false)}
                             className={`w-full py-4 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-3 transition transform hover:-translate-y-1 bg-gradient-to-r from-neon-green to-emerald-600 hover:shadow-[0_0_20px_rgba(34,197,94,0.4)]`}
                         >
                             {isSaving ? (
                                 <><Loader2 className="animate-spin" /> Processando...</>
                             ) : (
-                                <><ShieldCheck size={24}/> Garantir Reserva e Pagar</>
+                                <><ShieldCheck size={24}/> Pagar Agora</>
                             )}
                         </button>
                         
@@ -933,7 +1113,7 @@ const PublicBooking: React.FC = () => {
                         {currentUser && (
                              <button 
                                 disabled={isSaving}
-                                onClick={() => handleConfirmBooking(true)}
+                                onClick={() => handlePaymentProcess(true)}
                                 className="mt-4 w-full py-3 bg-slate-800 border border-slate-700 text-slate-300 font-bold rounded-lg hover:bg-slate-700 hover:text-white transition flex items-center justify-center gap-2"
                              >
                                 <CreditCard size={18}/> Pagar no Local (Equipe)

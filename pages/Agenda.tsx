@@ -1,9 +1,10 @@
 
+
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
 import { Reservation, ReservationStatus, AppSettings, FunnelStage, EventType, User, UserRole } from '../types';
 import { INITIAL_SETTINGS } from '../constants';
-import { ChevronLeft, ChevronRight, LayoutGrid, X, Users, PlusCircle, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone } from 'lucide-react';
+import { ChevronLeft, ChevronRight, LayoutGrid, X, Users, PlusCircle, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, CheckCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -271,6 +272,8 @@ const Agenda: React.FC = () => {
         times.push(`${startHour + i}:00`);
     }
     setSelectedEditTimes(times);
+    
+    // Initialize form with all fields including table info
     setEditForm({
         date: res.date,
         peopleCount: res.peopleCount,
@@ -278,7 +281,11 @@ const Agenda: React.FC = () => {
         time: res.time,
         observations: res.observations,
         eventType: res.eventType,
-        duration: res.duration
+        duration: res.duration,
+        // New Fields
+        hasTableReservation: res.hasTableReservation || false,
+        birthdayName: res.birthdayName || '',
+        tableSeatCount: res.tableSeatCount || 0
     });
   };
 
@@ -357,7 +364,10 @@ const Agenda: React.FC = () => {
                  ...editingRes, 
                  ...editForm, 
                  time: firstBlock.time, 
-                 duration: firstBlock.duration 
+                 duration: firstBlock.duration,
+                 // Ensure table data consistency based on boolean
+                 birthdayName: editForm.hasTableReservation ? editForm.birthdayName : undefined,
+                 tableSeatCount: editForm.hasTableReservation ? editForm.tableSeatCount : undefined
              };
              await db.reservations.update(updated);
              
@@ -443,7 +453,7 @@ const Agenda: React.FC = () => {
     if (isNoShow) return 'border-red-500 bg-red-900/10 grayscale-[0.5] opacity-70';
     
     switch (status) {
-      case ReservationStatus.CONFIRMADA: return 'border-green-500 bg-green-900/20';
+      case ReservationStatus.CONFIRMADA: return 'border-neon-blue bg-blue-900/20'; // CHANGED: Blue for Confirmed
       case ReservationStatus.PENDENTE: return 'border-yellow-500/50 bg-yellow-900/10';
       case ReservationStatus.CANCELADA: return 'border-red-500/30 bg-red-900/10';
       default: return 'border-slate-700 bg-slate-800';
@@ -519,14 +529,14 @@ const Agenda: React.FC = () => {
          </div>
 
          {/* Confirmadas */}
-         <div className="bg-slate-800 p-3 rounded-xl border border-green-500/30 flex items-center justify-between shadow-sm">
+         <div className="bg-slate-800 p-3 rounded-xl border border-neon-blue/30 flex items-center justify-between shadow-sm">
              <div className="flex items-center gap-3">
-                <div className="p-2 bg-green-500/10 rounded-lg text-green-500">
+                <div className="p-2 bg-neon-blue/10 rounded-lg text-neon-blue">
                     <Check size={18} />
                 </div>
-                <span className="text-xs text-green-500 uppercase font-bold">Confirmadas</span>
+                <span className="text-xs text-neon-blue uppercase font-bold">Confirmadas</span>
              </div>
-             <span className="text-2xl font-bold text-green-500">{loading ? '-' : metrics.confirmedSlots}</span>
+             <span className="text-2xl font-bold text-neon-blue">{loading ? '-' : metrics.confirmedSlots}</span>
          </div>
 
          {/* Check-in */}
@@ -641,7 +651,7 @@ const Agenda: React.FC = () => {
                                                 <span className="text-[10px] font-bold text-red-400 bg-red-500/20 px-1 rounded uppercase">NO-SHOW</span>
                                             ) : (
                                                 <span className={`text-[10px] font-bold px-1 rounded uppercase ${
-                                                    res.status === ReservationStatus.CONFIRMADA ? 'text-green-400 bg-green-900/40 border border-green-500/30' :
+                                                    res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border border-neon-blue/30' : // CHANGED: Blue for badge
                                                     res.status === ReservationStatus.PENDENTE ? 'text-yellow-400 bg-yellow-900/40 border border-yellow-500/30' :
                                                     'text-slate-400 bg-slate-800'
                                                 }`}>
@@ -676,6 +686,22 @@ const Agenda: React.FC = () => {
                                      <span className="flex items-center gap-1"><Users size={12}/> {Math.ceil(res.peopleCount / numberOfCards)}~</span>
                                      <span className="truncate max-w-[100px]">{res.eventType}</span>
                                   </div>
+
+                                  {/* Table Reservation Info - Compact for Grid */}
+                                  {res.hasTableReservation && (
+                                      <div className="mt-2 pt-2 border-t border-slate-700/50">
+                                          <div className="flex flex-col gap-1">
+                                              <span className="text-[10px] font-bold text-neon-orange uppercase tracking-wider flex items-center gap-1">
+                                                  <Utensils size={10} /> Mesa: {res.tableSeatCount} lug.
+                                              </span>
+                                              {res.birthdayName && (
+                                                  <span className="text-[10px] text-neon-blue flex items-center gap-1 truncate font-bold" title="Aniversariante">
+                                                      <Cake size={10} /> {res.birthdayName}
+                                                  </span>
+                                              )}
+                                          </div>
+                                      </div>
+                                  )}
                                </div>
                              )});
                            })}
@@ -734,6 +760,29 @@ const Agenda: React.FC = () => {
                             {editingRes.laneCount} Pista(s) / {editingRes.peopleCount} Pessoas
                         </p>
                         </div>
+                        
+                        {/* Table Detail View */}
+                        {editingRes.hasTableReservation && (
+                             <div className="col-span-2 bg-slate-900/50 p-3 rounded border border-slate-700/50 flex gap-4 items-center">
+                                 <div className="flex items-center gap-2">
+                                     <div className="p-2 bg-neon-orange/10 rounded text-neon-orange"><Utensils size={16}/></div>
+                                     <div>
+                                         <p className="text-slate-400 text-xs">Mesa Reservada</p>
+                                         <p className="text-white font-bold">{editingRes.tableSeatCount} Cadeiras</p>
+                                     </div>
+                                 </div>
+                                 {editingRes.birthdayName && (
+                                     <div className="flex items-center gap-2 pl-4 border-l border-slate-700">
+                                         <div className="p-2 bg-neon-blue/10 rounded text-neon-blue"><Cake size={16}/></div>
+                                         <div>
+                                             <p className="text-slate-400 text-xs">Aniversariante</p>
+                                             <p className="text-white font-bold">{editingRes.birthdayName}</p>
+                                         </div>
+                                     </div>
+                                 )}
+                             </div>
+                        )}
+
                         <div className="col-span-2">
                         <p className="text-slate-400">Observações</p>
                         <p className="text-slate-300 italic bg-slate-900 p-2 rounded">{editingRes.observations || 'Nenhuma.'}</p>
@@ -861,6 +910,60 @@ const Agenda: React.FC = () => {
                              {Object.values(EventType).map(t => <option key={t} value={t}>{t}</option>)}
                           </select>
                        </div>
+
+                       {/* Table Reservation Logic (Replicating PublicBooking UX) */}
+                       <div className="col-span-2 pt-2 border-t border-slate-700">
+                           <label className="flex items-center gap-3 cursor-pointer group mb-4">
+                               <div className={`w-5 h-5 rounded border flex items-center justify-center transition ${editForm.hasTableReservation ? 'bg-neon-blue border-neon-blue' : 'border-slate-600 group-hover:border-slate-400'}`}>
+                                   {editForm.hasTableReservation && <CheckCircle size={14} className="text-white" />}
+                               </div>
+                               <input 
+                                   type="checkbox" 
+                                   className="hidden"
+                                   checked={editForm.hasTableReservation}
+                                   onChange={e => setEditForm({...editForm, hasTableReservation: e.target.checked})}
+                               />
+                               <span className="font-bold text-slate-300 group-hover:text-white transition flex items-center gap-2">
+                                   <Utensils size={16}/> Reservar Mesa?
+                               </span>
+                           </label>
+
+                           {editForm.hasTableReservation && (
+                               <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700 grid grid-cols-1 sm:grid-cols-2 gap-4 animate-fade-in">
+                                   {editForm.eventType === 'Aniversário' && (
+                                       <div>
+                                           <label className="block text-xs font-medium mb-1 text-slate-400">
+                                               Nome do Aniversariante
+                                           </label>
+                                           <div className="relative">
+                                               <Cake size={14} className="absolute left-3 top-3 text-slate-500"/>
+                                               <input 
+                                                   type="text"
+                                                   className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 pl-9 focus:border-neon-orange focus:outline-none text-white"
+                                                   value={editForm.birthdayName}
+                                                   onChange={e => setEditForm({...editForm, birthdayName: e.target.value})}
+                                                   placeholder="Aniversariante"
+                                               />
+                                           </div>
+                                       </div>
+                                   )}
+                                   <div className={editForm.eventType === 'Aniversário' ? "" : "sm:col-span-2"}>
+                                       <label className="block text-xs font-medium mb-1 text-slate-400">
+                                           Qtd. Pessoas (Cadeiras)
+                                       </label>
+                                       <input 
+                                           type="number"
+                                           min={1}
+                                           className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 focus:border-neon-orange focus:outline-none text-white"
+                                           value={editForm.tableSeatCount}
+                                           onChange={e => setEditForm({...editForm, tableSeatCount: parseInt(e.target.value) || 0})}
+                                           placeholder="Ex: 10"
+                                       />
+                                   </div>
+                               </div>
+                           )}
+                       </div>
+
                        <div className="col-span-2">
                           <label className="block text-xs text-slate-400 mb-1">Observações</label>
                           <textarea 

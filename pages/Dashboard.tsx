@@ -1,10 +1,11 @@
 
+
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
 import { Reservation, ReservationStatus, FunnelStage, EventType, AppSettings, User, UserRole } from '../types';
 import { INITIAL_SETTINGS } from '../constants';
 import { Link } from 'react-router-dom';
-import { Calendar, Users, AlertCircle, CheckCircle2, ArrowRight, Plus, Clock, Smartphone, Ban, UserCheck, X, Pencil, Save, ChevronLeft, ChevronRight, Loader2, LayoutGrid, Undo2, RotateCcw } from 'lucide-react';
+import { Calendar, Users, AlertCircle, CheckCircle2, ArrowRight, Plus, Clock, Smartphone, Ban, UserCheck, X, Pencil, Save, ChevronLeft, ChevronRight, Loader2, LayoutGrid, Undo2, RotateCcw, Utensils, Cake } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
 // Helper interface for the "Exploded" view
@@ -339,7 +340,7 @@ const Dashboard: React.FC = () => {
               };
           case 'CONFIRMED':
               return {
-                  card: 'border-neon-blue/50 bg-slate-800',
+                  card: 'border-neon-blue/50 bg-blue-900/20', // Changed bg-slate-800 to bg-blue-900/20
                   stripe: 'bg-neon-blue',
                   icon: 'text-neon-blue border-neon-blue/30 bg-blue-500/10',
                   badge: 'bg-blue-500/20 text-blue-400 border-blue-500/30'
@@ -494,6 +495,28 @@ const Dashboard: React.FC = () => {
                                 <span className="hidden sm:inline w-1 h-1 bg-slate-700 rounded-full"></span>
                                 <span className="text-xs text-slate-500">Ref: {res.uniqueDisplayId.slice(-8)}</span>
                             </div>
+                            
+                            {/* Table Reservation Info in Card (Highlight Version) */}
+                            {res.hasTableReservation && (
+                                <div className="mt-3 w-full max-w-sm bg-slate-950 border border-neon-orange/50 rounded-lg p-2.5 flex items-center justify-between shadow-[0_0_10px_rgba(249,115,22,0.1)] relative overflow-hidden">
+                                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-neon-orange"></div>
+                                    <div className="pl-2 flex flex-col">
+                                        <span className="text-[10px] font-bold text-neon-orange uppercase tracking-wider flex items-center gap-1">
+                                            <Utensils size={10} /> Reserva de Mesa
+                                        </span>
+                                        <span className="text-white font-bold text-sm">
+                                            {res.tableSeatCount} Cadeiras
+                                        </span>
+                                    </div>
+                                    {res.birthdayName && (
+                                         <div className="flex items-center gap-1 bg-slate-900 border border-slate-700 px-2 py-1 rounded text-xs text-neon-blue">
+                                            <Cake size={12}/> 
+                                            <span className="font-bold truncate max-w-[80px] sm:max-w-[120px]">{res.birthdayName}</span>
+                                         </div>
+                                    )}
+                                </div>
+                            )}
+
                           </div>
                           
                           <div className="flex items-center gap-2 mt-2 md:mt-3">
@@ -533,7 +556,7 @@ const Dashboard: React.FC = () => {
                                 <button 
                                 disabled={!canEdit}
                                 onClick={() => handleNoShow(res.id, res.uniqueDisplayId)}
-                                className={`px-3 py-2 rounded-lg transition border ${!canEdit ? 'bg-slate-800 text-slate-600 border-slate-700 cursor-not-allowed' : 'bg-slate-700 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/50 text-slate-300 border-slate-600'}`}
+                                className={`px-3 py-2 rounded-lg transition border ${!canEdit ? 'bg-slate-800 text-slate-600 border-slate-700 cursor-not-allowed' : 'bg-slate-800 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/50 text-slate-300 border-slate-600'}`}
                                 title="No-Show apenas para este horário/pista"
                                 >
                                 <Ban size={18} />

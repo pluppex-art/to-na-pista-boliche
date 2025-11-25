@@ -89,6 +89,11 @@ export interface Reservation {
   guests?: Guest[];
   checkedInIds?: string[]; 
   noShowIds?: string[]; 
+  
+  // Novos campos para mesa
+  hasTableReservation?: boolean;
+  birthdayName?: string;
+  tableSeatCount?: number;
 }
 
 export interface FunnelCard {
