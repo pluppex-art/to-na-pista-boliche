@@ -75,7 +75,7 @@ const PublicBooking: React.FC = () => {
 
   const currentPrice = getPricePerHour();
   const totalDuration = selectedTimes.length;
-  const totalValue = currentPrice * formData.lanes * totalDuration;
+  const totalValue = currentPrice * formData.lanes * (totalDuration || 0); // Handle 0 duration safely
 
   useEffect(() => {
     const fetchData = async () => {
@@ -679,7 +679,9 @@ const PublicBooking: React.FC = () => {
                 
                 <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 mb-6">
                     <h3 className="text-sm font-bold text-slate-300 uppercase mb-3">Detalhes do Evento</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    
+                    {/* CHANGED: Removed Total Hours input from this grid and adjusted columns */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
                             <label className="block text-xs font-medium text-slate-500 mb-1">Nº Pessoas</label>
                             <input 
@@ -706,13 +708,7 @@ const PublicBooking: React.FC = () => {
                             }}
                             />
                         </div>
-                        <div>
-                            <label className="block text-xs font-medium text-slate-500 mb-1">Total Horas</label>
-                            <div className="w-full bg-slate-800/50 border border-slate-600 rounded-lg p-2 text-white font-bold flex items-center justify-between">
-                                <span>{totalDuration}h</span>
-                                <span className="text-[10px] text-slate-400 font-normal">Selecionadas</span>
-                            </div>
-                        </div>
+                        {/* "Total Horas" field removed from here */}
                         <div>
                             <label className="block text-xs font-medium text-slate-500 mb-1">Tipo</label>
                             <select 
@@ -789,11 +785,20 @@ const PublicBooking: React.FC = () => {
                         </div>
                     )}
 
-                    {/* Price Indicator */}
-                    <div className="mt-3 pt-3 border-t border-slate-700 flex justify-end">
-                        <span className="text-sm text-slate-400">
-                            Valor por hora/pista: <strong className="text-neon-green">{currentPrice.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</strong>
-                        </span>
+                    {/* NEW Price & Hours Indicator Section */}
+                    <div className="mt-4 pt-4 border-t border-slate-700 flex flex-col md:flex-row justify-between items-end md:items-center gap-2">
+                        <div className="text-sm text-slate-300">
+                            <span className="text-slate-500">Total Horas Selecionadas:</span> <strong className="text-white bg-slate-900 px-2 py-1 rounded border border-slate-700">{totalDuration}h</strong>
+                        </div>
+                        
+                        <div className="text-right">
+                            <div className="text-[10px] sm:text-xs text-slate-500 font-mono mb-1">
+                                {currentPrice.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})} x {formData.lanes} pista(s) x {totalDuration} hora(s)
+                            </div>
+                            <span className="text-sm text-slate-400">
+                                Total Estimado: <strong className="text-xl text-neon-green ml-1">{totalValue.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</strong>
+                            </span>
+                        </div>
                     </div>
                 </div>
 
