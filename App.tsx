@@ -1,6 +1,6 @@
-import React, { useEffect } from 'react';
-import { HashRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { AppProvider, useApp } from './contexts/AppContext'; // Import Provider
+import React from 'react';
+import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AppProvider, useApp } from './contexts/AppContext'; 
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import PublicBooking from './pages/PublicBooking';
@@ -11,10 +11,8 @@ import Settings from './pages/Settings';
 import Financeiro from './pages/Financeiro';
 import ClientDashboard from './pages/ClientDashboard';
 import { UserRole, User } from './types';
-import { supabase } from './services/supabaseClient';
-import { db } from './services/mockBackend';
 
-// Protected Route Wrapper (Refactored to use Context)
+// Protected Route Wrapper
 interface ProtectedRouteProps {
   children: React.ReactNode;
   allowedRoles?: UserRole[];
@@ -24,18 +22,16 @@ interface ProtectedRouteProps {
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles, requiredPermission }) => {
   const { user, loading } = useApp();
   
-  if (loading) return <div className="min-h-screen bg-slate-950"></div>; // Wait for context
+  if (loading) return <div className="min-h-screen bg-slate-950"></div>; 
 
   if (!user) {
     return <Navigate to="/login" replace />;
   }
 
-  // 1. Check Roles first (optional)
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     return <Navigate to="/agenda" replace />; 
   }
 
-  // 2. Check Specific Permission
   if (requiredPermission && user.role !== UserRole.ADMIN) {
      const hasPermission = user[requiredPermission];
      if (hasPermission !== true) {
