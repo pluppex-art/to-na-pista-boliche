@@ -12,7 +12,6 @@ import Financeiro from './pages/Financeiro';
 import ClientDashboard from './pages/ClientDashboard';
 import { UserRole, User } from './types';
 
-// Protected Route Wrapper
 interface ProtectedRouteProps {
   children: React.ReactNode;
   allowedRoles?: UserRole[];

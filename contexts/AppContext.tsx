@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { AppSettings, User } from '../types';
 import { INITIAL_SETTINGS } from '../constants';
@@ -33,11 +32,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (stored) {
       try {
         const parsedUser = JSON.parse(stored);
-        // Opcional: Buscar permissões atualizadas do banco para garantir segurança
+        setUser(parsedUser);
+        
         db.users.getById(parsedUser.id).then(freshUser => {
              if (freshUser) setUser(freshUser);
-             else setUser(parsedUser); // Fallback
-        }).catch(() => setUser(parsedUser));
+        }).catch(() => {});
       } catch (e) {
         setUser(null);
       }
@@ -49,13 +48,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => {
     const init = async () => {
       setLoading(true);
+      refreshUser(); 
       await refreshSettings();
-      refreshUser();
       setLoading(false);
     };
     init();
 
-    // Listener para atualização de settings em tempo real (ex: mudou logo)
     const handleSettingsUpdate = () => refreshSettings();
     window.addEventListener('settings_updated', handleSettingsUpdate);
 
