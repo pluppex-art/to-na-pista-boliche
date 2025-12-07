@@ -17,7 +17,7 @@ const safeTags = (tags: any): string[] => {
 
 export const db = {
   users: {
-    login: async (email: string, password: string): Promise<{ user?: User; error?: string }> => {
+    login: async (email: string, password: string): Promise<{ user?: User; isFirstAccess?: boolean; error?: string }> => {
       try {
         const { data, error } = await supabase
           .from('usuarios')
@@ -26,8 +26,8 @@ export const db = {
           .maybeSingle();
 
         if (error) {
-          console.error("[Login] Erro do Supabase:", error);
-          return { error: `Erro técnico: ${error.message}` };
+          console.error("Erro Supabase:", error);
+          return { error: `Erro técnico.` };
         }
 
         if (!data) return { error: 'E-mail não encontrado.' };
@@ -37,15 +37,18 @@ export const db = {
 
           const roleNormalized = (data.role || '').toUpperCase() as UserRole;
           const isAdmin = roleNormalized === UserRole.ADMIN;
+          
+          // DETECTA PRIMEIRO ACESSO (Senha Padrão)
+          const isFirstAccess = password === '123456';
 
           return {
+            isFirstAccess, 
             user: {
               id: data.id,
               name: data.nome,
               email: data.email,
-              role: Object.values(UserRole).includes(roleNormalized) ? roleNormalized : UserRole.COMUM,
+              role: roleNormalized,
               passwordHash: '',
-              // Se for ADMIN, força TRUE no código para segurança
               perm_view_agenda: isAdmin ? true : (data.perm_view_agenda ?? false),
               perm_view_financial: isAdmin ? true : (data.perm_view_financial ?? false),
               perm_view_crm: isAdmin ? true : (data.perm_view_crm ?? false),
@@ -60,7 +63,7 @@ export const db = {
           return { error: 'Senha incorreta.' };
         }
       } catch (err) {
-        return { error: 'Erro inesperado ao conectar.' };
+        return { error: 'Erro inesperado.' };
       }
     },
     getAll: async (): Promise<User[]> => {
