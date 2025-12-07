@@ -13,7 +13,10 @@ const steps = ['Data', 'Configuração & Horário', 'Seus Dados', 'Resumo', 'Pag
 
 const PublicBooking: React.FC = () => {
   const navigate = useNavigate();
-  const { settings, user: currentUser, loading: appLoading } = useApp();
+  const { settings, user: staffUser, loading: appLoading } = useApp();
+  
+  // Client Authentication State
+  const [clientUser, setClientUser] = useState<any>(null);
   
   const [currentStep, setCurrentStep] = useState(0);
   const [imgError, setImgError] = useState(false);
@@ -40,6 +43,7 @@ const PublicBooking: React.FC = () => {
     name: '',
     whatsapp: '',
     email: '',
+    password: '', // New field for registration
     hasSecondResponsible: false,
     secondName: '',
     secondWhatsapp: '',
@@ -47,6 +51,26 @@ const PublicBooking: React.FC = () => {
   });
 
   const [viewDate, setViewDate] = useState(new Date());
+
+  // Check for logged in client on mount
+  useEffect(() => {
+      const storedClient = localStorage.getItem('tonapista_client_auth');
+      if (storedClient) {
+          try {
+              const parsedClient = JSON.parse(storedClient);
+              setClientUser(parsedClient);
+              setFormData(prev => ({
+                  ...prev,
+                  name: parsedClient.name,
+                  email: parsedClient.email,
+                  whatsapp: parsedClient.phone
+              }));
+              setClientId(parsedClient.id);
+          } catch (e) {
+              console.error("Error parsing client auth", e);
+          }
+      }
+  }, []);
 
   const getPricePerHour = () => {
       if (!selectedDate || !settings) return INITIAL_SETTINGS.weekdayPrice;
@@ -122,6 +146,11 @@ const PublicBooking: React.FC = () => {
           if (!formData.name.trim()) newErrors.name = true;
           if (!formData.email.trim() || !isValidEmail(formData.email)) newErrors.email = true;
           if (!formData.whatsapp.trim() || !isValidPhone(formData.whatsapp)) newErrors.whatsapp = true;
+          
+          // Validate password if not logged in
+          if (!clientUser && !formData.password.trim()) {
+              newErrors.password = true;
+          }
       }
 
       setErrors(newErrors);
@@ -133,35 +162,48 @@ const PublicBooking: React.FC = () => {
     if (!validateStep()) return;
 
     if (currentStep === 1) {
-        setCurrentStep(c => c + 1);
+        // Skip Data Step if logged in
+        if (clientUser) {
+            setCurrentStep(3); // Go straight to Summary
+        } else {
+            setCurrentStep(c => c + 1);
+        }
     } else if (currentStep === 2) {
         setIsSaving(true);
         try {
-            let client = await db.clients.getByPhone(formData.whatsapp);
-            if (!client) {
-                client = await db.clients.create({
-                    id: uuidv4(),
-                    name: formData.name,
-                    phone: formData.whatsapp,
-                    email: formData.email,
-                    tags: ['Lead'], 
-                    createdAt: new Date().toISOString(),
-                    lastContactAt: new Date().toISOString(),
-                    funnelStage: FunnelStage.NOVO
-                });
-            } else {
-                await db.clients.update({
-                    ...client,
-                    name: formData.name,
-                    email: formData.email,
-                    lastContactAt: new Date().toISOString()
-                });
+            // Register/Update Client Logic
+            // If user is here, they are NOT logged in (skipped otherwise)
+            // So we try to register or find existing
+            
+            const newClientData = {
+                id: uuidv4(),
+                name: formData.name,
+                phone: formData.whatsapp,
+                email: formData.email,
+                tags: ['Lead'], 
+                createdAt: new Date().toISOString(),
+                lastContactAt: new Date().toISOString(),
+                funnelStage: FunnelStage.NOVO
+            };
+
+            const { client, error } = await db.clients.register(newClientData, formData.password);
+
+            if (error) {
+                alert(error);
+                setIsSaving(false);
+                return;
             }
-            setClientId(client.id);
-            setCurrentStep(c => c + 1);
+
+            if (client) {
+                // Auto-login logic
+                localStorage.setItem('tonapista_client_auth', JSON.stringify(client));
+                setClientUser(client);
+                setClientId(client.id);
+                setCurrentStep(c => c + 1);
+            }
         } catch (error) {
             console.error(error);
-            alert("Erro ao salvar dados do cliente. Tente novamente.");
+            alert("Erro ao processar dados. Tente novamente.");
         } finally {
             setIsSaving(false);
         }
@@ -173,7 +215,12 @@ const PublicBooking: React.FC = () => {
   };
 
   const handleBack = () => {
-    if (currentStep > 0) setCurrentStep(c => c - 1);
+    if (currentStep === 3 && clientUser) {
+        // If logged in, going back from Summary goes to Settings (skip data)
+        setCurrentStep(1);
+    } else if (currentStep > 0) {
+        setCurrentStep(c => c - 1);
+    }
   };
 
   const isDateAllowed = (date: Date) => {
@@ -404,10 +451,14 @@ const PublicBooking: React.FC = () => {
           
           <div className="flex items-center gap-4">
             <div className="hidden md:block text-xs font-medium px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-400">Agendamento Online</div>
-            {currentUser ? (
+            {staffUser ? (
               <Link to="/dashboard" className="flex items-center gap-2 text-neon-blue hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded-lg transition font-medium text-sm border border-slate-700">
                 <LayoutDashboard size={16} /><span className="hidden md:inline">Voltar ao Dashboard</span>
               </Link>
+            ) : clientUser ? (
+                <Link to="/minha-conta" className="flex items-center gap-2 text-neon-green hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded-lg transition font-medium text-sm border border-slate-700">
+                    <UserIcon size={16} /><span className="hidden md:inline">Minha Conta</span>
+                </Link>
             ) : (
               <Link to="/login" className="text-slate-600 hover:text-neon-blue transition p-2 rounded-full hover:bg-slate-800" title="Área da Equipe"><Lock size={18} /></Link>
             )}
@@ -420,9 +471,13 @@ const PublicBooking: React.FC = () => {
           {currentStep < 5 && (
             <div className="mb-8">
                 <div className="flex justify-between mb-2">
-                {steps.map((step, i) => (
-                    <div key={i} className={`text-[10px] md:text-sm font-medium ${i <= currentStep ? 'text-neon-blue' : 'text-slate-600'}`}>{step}</div>
-                ))}
+                {steps.map((step, i) => {
+                    // Logic to hide 'Seus Dados' step if skipped
+                    if (clientUser && i === 2) return null;
+                    return (
+                        <div key={i} className={`text-[10px] md:text-sm font-medium ${i <= currentStep ? 'text-neon-blue' : 'text-slate-600'}`}>{step}</div>
+                    );
+                })}
                 </div>
                 <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
                 <div className="h-full bg-gradient-to-r from-neon-orange to-neon-blue transition-all duration-500 ease-out" style={{ width: `${((currentStep + 1) / steps.length) * 100}%` }}></div>
@@ -448,8 +503,10 @@ const PublicBooking: React.FC = () => {
               <div className="animate-fade-in">
                 <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><Clock className="text-neon-orange" /> Configuração e Horário</h2>
                 
+                {/* ... (Mesmo código de configuração de antes) ... */}
+                {/* Por brevidade, mantendo o bloco de configuração igual */}
                 <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 mb-6">
-                    <h3 className="text-sm font-bold text-slate-300 uppercase mb-3">Detalhes do Evento</h3>
+                    {/* ... Inputs de Pessoas, Pistas, Tipo ... */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
                             <label className="block text-xs font-medium text-slate-500 mb-1">Nº Pessoas</label>
@@ -466,7 +523,7 @@ const PublicBooking: React.FC = () => {
                             </select>
                         </div>
                     </div>
-                    
+                    {/* ... Checkbox Mesa ... */}
                     {formData.type !== EventType.JOGO_NORMAL && (
                         <div className="mt-4 pt-4 border-t border-slate-700 animate-fade-in">
                             <label className="flex items-center gap-3 cursor-pointer group mb-4">
@@ -493,7 +550,7 @@ const PublicBooking: React.FC = () => {
                             )}
                         </div>
                     )}
-
+                    {/* ... Price Summary ... */}
                     <div className="mt-4 pt-4 border-t border-slate-700 flex flex-col md:flex-row justify-between items-end md:items-center gap-2">
                         <div className="text-sm text-slate-300"><span className="text-slate-500">Total Horas Selecionadas:</span> <strong className="text-white bg-slate-900 px-2 py-1 rounded border border-slate-700">{totalDuration}h</strong></div>
                         <div className="text-right">
@@ -509,7 +566,7 @@ const PublicBooking: React.FC = () => {
                   {timeSlots.length === 0 ? <div className="col-span-3 md:col-span-5 text-center text-slate-500 py-4 italic">Fechado nesta data.</div> : (
                     timeSlots.map(({ time, label, available, left, isPast }) => {
                         const isSelected = selectedTimes.includes(time);
-                        const isDisabled = (!available && !isSelected) || (available && left < formData.lanes && !isSelected); // Check lanes fit
+                        const isDisabled = (!available && !isSelected) || (available && left < formData.lanes && !isSelected); 
                         return (
                             <button key={time} disabled={isDisabled} onClick={() => toggleTimeSelection(time)} className={`p-3 rounded-xl border transition-all flex flex-col items-center justify-center relative overflow-hidden ${isSelected ? 'bg-neon-blue text-white border-neon-blue shadow-[0_0_15px_rgba(59,130,246,0.5)] transform scale-105 z-10' : isDisabled ? 'border-slate-800 bg-slate-900/50 text-slate-600 cursor-not-allowed opacity-60' : 'border-slate-700 bg-slate-800 hover:border-slate-500 text-slate-300 hover:bg-slate-700'}`}>
                             <div className="text-sm md:text-base font-bold">{label}</div>
@@ -528,24 +585,41 @@ const PublicBooking: React.FC = () => {
               </div>
             )}
 
-            {/* STEP 3: DETAILS */}
+            {/* STEP 3: DETAILS (Modified for Registration) */}
             {currentStep === 2 && (
               <div className="animate-fade-in space-y-6">
                 <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><Users className="text-neon-orange" /> Seus Dados</h2>
-                <p className="text-xs text-slate-500 mb-4 bg-slate-800/50 p-2 rounded border border-slate-700">Os campos marcados com <span className="text-neon-orange font-bold">*</span> são de preenchimento obrigatório.</p>
-                <div>
-                    <h3 className="text-sm font-bold text-slate-300 uppercase mb-3 flex items-center gap-2"><span className="w-6 h-6 rounded-full bg-neon-blue text-white flex items-center justify-center text-xs">1</span> Responsável pela reserva</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div><label className={`block text-xs font-medium mb-1 ${errors.name ? 'text-red-500' : 'text-slate-500'}`}>Nome Completo <span className="text-neon-orange">*</span></label><div className="relative"><UserIcon size={16} className="absolute left-3 top-3 text-slate-500" /><input type="text" placeholder="Nome e Sobrenome" className={`w-full bg-slate-800 border rounded-lg p-3 pl-10 focus:outline-none text-white ${errors.name ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`} value={formData.name} onChange={e => handleInputChange('name', e.target.value)} /></div></div>
-                        <div><label className={`block text-xs font-medium mb-1 ${errors.whatsapp ? 'text-red-500' : 'text-slate-500'}`}>WhatsApp <span className="text-neon-orange">*</span></label><div className="relative"><Phone size={16} className="absolute left-3 top-3 text-slate-500" /><input type="tel" maxLength={15} placeholder="(00) 00000-0000" className={`w-full bg-slate-800 border rounded-lg p-3 pl-10 focus:outline-none text-white ${errors.whatsapp ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`} value={formData.whatsapp} onChange={e => handlePhoneChange(e, 'whatsapp')} /></div></div>
-                        <div className="md:col-span-2 lg:col-span-1"><label className={`block text-xs font-medium mb-1 ${errors.email ? 'text-red-500' : 'text-slate-500'}`}>E-mail <span className="text-neon-orange">*</span></label><div className="relative"><Mail size={16} className="absolute left-3 top-3 text-slate-500" /><input type="email" placeholder="seu@email.com" className={`w-full bg-slate-800 border rounded-lg p-3 pl-10 focus:outline-none text-white ${errors.email ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`} value={formData.email} onChange={e => handleInputChange('email', e.target.value)} /></div></div>
+                
+                <div className="bg-slate-800/50 p-4 rounded-xl border border-neon-blue/30 mb-6">
+                    <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2"><Lock size={18} className="text-neon-green"/> Criar Conta Rápida</h3>
+                    <p className="text-sm text-slate-400 mb-4">Para sua segurança e acesso ao clube de fidelidade, criaremos uma conta automaticamente.</p>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className={`block text-xs font-medium mb-1 ${errors.name ? 'text-red-500' : 'text-slate-500'}`}>Nome Completo <span className="text-neon-orange">*</span></label>
+                            <input type="text" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.name ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`} value={formData.name} onChange={e => handleInputChange('name', e.target.value)} />
+                        </div>
+                        <div>
+                            <label className={`block text-xs font-medium mb-1 ${errors.whatsapp ? 'text-red-500' : 'text-slate-500'}`}>WhatsApp <span className="text-neon-orange">*</span></label>
+                            <input type="tel" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.whatsapp ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`} value={formData.whatsapp} onChange={e => handlePhoneChange(e, 'whatsapp')} placeholder="(00) 00000-0000"/>
+                        </div>
+                        <div>
+                            <label className={`block text-xs font-medium mb-1 ${errors.email ? 'text-red-500' : 'text-slate-500'}`}>E-mail <span className="text-neon-orange">*</span></label>
+                            <input type="email" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.email ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`} value={formData.email} onChange={e => handleInputChange('email', e.target.value)} />
+                        </div>
+                        <div>
+                            <label className={`block text-xs font-medium mb-1 ${errors.password ? 'text-red-500' : 'text-slate-500'}`}>Crie uma Senha <span className="text-neon-orange">*</span></label>
+                            <input type="password" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.password ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`} value={formData.password} onChange={e => handleInputChange('password', e.target.value)} placeholder="Mínimo 6 caracteres"/>
+                        </div>
                     </div>
                 </div>
+
                 <div className="pt-4 border-t border-slate-800">
                     <label className="flex items-center gap-3 cursor-pointer group"><div className={`w-6 h-6 rounded border flex items-center justify-center transition ${formData.hasSecondResponsible ? 'bg-neon-blue border-neon-blue' : 'border-slate-600 group-hover:border-slate-400'}`}>{formData.hasSecondResponsible && <CheckCircle size={16} className="text-white" />}</div><input type="checkbox" className="hidden" checked={formData.hasSecondResponsible} onChange={e => handleInputChange('hasSecondResponsible', e.target.checked)} /><span className="font-bold text-slate-300 group-hover:text-white transition">Adicionar Segundo Responsável? <span className="text-xs font-normal text-slate-500">(Opcional)</span></span></label>
                     {formData.hasSecondResponsible && (<div className="mt-4 animate-fade-in p-4 bg-slate-800/30 rounded-lg border border-slate-700/50"><h3 className="text-sm font-bold text-slate-300 uppercase mb-3 flex items-center gap-2"><span className="w-6 h-6 rounded-full bg-slate-700 text-white flex items-center justify-center text-xs">2</span> Segundo Responsável</h3><div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"><div><label className="block text-xs font-medium text-slate-500 mb-1">Nome Completo</label><input type="text" className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 focus:border-neon-orange focus:outline-none text-white" value={formData.secondName} onChange={e => handleInputChange('secondName', e.target.value)} /></div><div><label className="block text-xs font-medium text-slate-500 mb-1">WhatsApp</label><input type="tel" maxLength={15} placeholder="(00) 00000-0000" className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 focus:border-neon-orange focus:outline-none text-white" value={formData.secondWhatsapp} onChange={e => handlePhoneChange(e, 'secondWhatsapp')} /></div><div className="md:col-span-2 lg:col-span-1"><label className="block text-xs font-medium text-slate-500 mb-1">E-mail (Opcional)</label><input type="email" className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 focus:border-neon-orange focus:outline-none text-white" value={formData.secondEmail} onChange={e => handleInputChange('secondEmail', e.target.value)} /></div></div></div>)}
                 </div>
                 <div><label className="block text-sm font-medium text-slate-400 mb-1">Observações</label><textarea className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 focus:border-neon-orange focus:outline-none h-20 text-white" value={formData.obs} onChange={e => handleInputChange('obs', e.target.value)} /></div>
+                 
                  <div className="mt-8 flex justify-between items-center"><button onClick={handleBack} className="text-slate-400 hover:text-white font-medium">Voltar</button><div className="flex flex-col items-end gap-2"><button disabled={isSaving} onClick={handleNext} className="px-8 py-3 bg-neon-blue text-white font-bold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-400 transition flex items-center gap-2">{isSaving ? <Loader2 className="animate-spin" size={20} /> : 'Próximo'}</button></div></div>
               </div>
             )}
@@ -573,9 +647,11 @@ const PublicBooking: React.FC = () => {
                      <p className="text-slate-300 max-w-lg mx-auto mb-8 text-lg">Seu horário foi reservado temporariamente! <br/><span className="text-neon-orange font-bold">Atenção:</span> Para confirmar definitivamente, é necessário efetuar o pagamento.</p>
                      <div className="bg-slate-800 p-4 rounded-lg max-w-md mx-auto mb-8 border border-slate-700"><p className="text-sm text-slate-400 mb-1">Valor Total</p><p className="text-3xl font-bold text-neon-green">{totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p></div>
                      <div className="flex flex-col gap-4 max-w-sm mx-auto">
-                      <button disabled={isSaving} onClick={() => handlePaymentProcess(false)} className={`w-full py-4 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-3 transition transform hover:-translate-y-1 bg-gradient-to-r from-neon-green to-emerald-600`}> {isSaving ? <><Loader2 className="animate-spin" /> Processando...</> : <><ShieldCheck size={24}/> Pagar Agora</>} </button>
+                      <button disabled={isSaving} onClick={() => handlePaymentProcess(false)} className={`w-full py-4 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-3 transition transform hover:-translate-y-1 bg-gradient-to-r from-neon-green to-emerald-600`}>
+                          {isSaving ? <><Loader2 className="animate-spin" /> Processando...</> : <><ShieldCheck size={24}/> Pagar Agora</>}
+                      </button>
                         <p className="text-xs text-slate-500 mt-1">Redirecionamento seguro para Mercado Pago.</p>
-                        {currentUser && (<button disabled={isSaving} onClick={() => handlePaymentProcess(true)} className="mt-4 w-full py-3 bg-slate-800 border border-slate-700 text-slate-300 font-bold rounded-lg hover:bg-slate-700 hover:text-white transition flex items-center justify-center gap-2"><CreditCard size={18}/> Pagar no Local (Equipe)</button>)}
+                        {staffUser && (<button disabled={isSaving} onClick={() => handlePaymentProcess(true)} className="mt-4 w-full py-3 bg-slate-800 border border-slate-700 text-slate-300 font-bold rounded-lg hover:bg-slate-700 hover:text-white transition flex items-center justify-center gap-2"><CreditCard size={18}/> Pagar no Local (Equipe)</button>)}
                         <button onClick={handleBack} className="mt-4 text-slate-500 hover:text-white text-sm">Voltar</button>
                      </div>
                 </div>
