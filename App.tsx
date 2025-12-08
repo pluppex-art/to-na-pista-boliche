@@ -1,5 +1,5 @@
-import React from 'react';
-import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { HashRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { AppProvider, useApp } from './contexts/AppContext'; 
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -44,9 +44,20 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles,
   return <>{children}</>;
 };
 
-const App: React.FC = () => {
-  return (
-    <AppProvider>
+// Componente Wrapper para injetar lógica global (como Favicon)
+const AppContent: React.FC = () => {
+    const { settings } = useApp();
+
+    // Atualiza o Favicon dinamicamente
+    useEffect(() => {
+        const link = document.querySelector("link[rel*='icon']") || document.createElement('link');
+        link.type = 'image/x-icon';
+        link.rel = 'shortcut icon';
+        link.href = settings.logoUrl || '/vite.svg'; // Fallback para vite.svg se sem logo
+        document.getElementsByTagName('head')[0].appendChild(link);
+    }, [settings.logoUrl]);
+
+    return (
         <Router>
             <Routes>
                 {/* Public Routes */}
@@ -88,6 +99,13 @@ const App: React.FC = () => {
                 <Route path="/funil" element={<Navigate to="/clientes" />} />
             </Routes>
         </Router>
+    );
+};
+
+const App: React.FC = () => {
+  return (
+    <AppProvider>
+        <AppContent />
     </AppProvider>
   );
 };
