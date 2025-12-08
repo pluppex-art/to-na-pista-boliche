@@ -32,6 +32,10 @@ const PublicBooking: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedTimes, setSelectedTimes] = useState<string[]>([]);
   
+  // State for Inputs (Allow empty string for typing)
+  const [peopleInput, setPeopleInput] = useState<string>('6');
+  const [lanesInput, setLanesInput] = useState<string>('1');
+
   const [formData, setFormData] = useState({
     people: 6, 
     lanes: 1,
@@ -43,7 +47,7 @@ const PublicBooking: React.FC = () => {
     name: '',
     whatsapp: '',
     email: '',
-    password: '', // New field for registration
+    password: '', 
     hasSecondResponsible: false,
     secondName: '',
     secondWhatsapp: '',
@@ -117,6 +121,50 @@ const PublicBooking: React.FC = () => {
       if (errors[field]) setErrors(prev => ({ ...prev, [field]: false }));
   };
 
+  // --- INPUT HANDLERS (PEOPLE & LANES) ---
+  const handlePeopleChange = (val: string) => {
+      setPeopleInput(val);
+      if (val === '') return;
+      const num = parseInt(val);
+      if (!isNaN(num)) {
+          // Calcula pistas sugeridas mas não trava
+          const suggestedLanes = Math.ceil(num / 6);
+          setFormData(prev => ({ ...prev, people: num, lanes: suggestedLanes }));
+          setLanesInput(suggestedLanes.toString());
+      }
+  };
+
+  const handlePeopleBlur = () => {
+      let num = parseInt(peopleInput);
+      if (isNaN(num) || num < 1) num = 1;
+      if (num > 36) num = 36; // MAX 36
+      setPeopleInput(num.toString());
+      
+      const suggestedLanes = Math.ceil(num / 6);
+      setFormData(prev => ({ ...prev, people: num, lanes: suggestedLanes }));
+      setLanesInput(suggestedLanes.toString());
+  };
+
+  const handleLanesChange = (val: string) => {
+      setLanesInput(val);
+      if (val === '') return;
+      const num = parseInt(val);
+      if (!isNaN(num)) {
+          setFormData(prev => ({ ...prev, lanes: num }));
+          setSelectedTimes([]); // Reset times if lanes change
+      }
+  };
+
+  const handleLanesBlur = () => {
+      let num = parseInt(lanesInput);
+      if (isNaN(num) || num < 1) num = 1;
+      if (num > settings.activeLanes) num = settings.activeLanes;
+      setLanesInput(num.toString());
+      setFormData(prev => ({ ...prev, lanes: num }));
+      setSelectedTimes([]);
+  };
+  // ----------------------------------------
+
   const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   const isValidPhone = (phone: string) => {
       const clean = phone.replace(/\D/g, '');
@@ -147,7 +195,6 @@ const PublicBooking: React.FC = () => {
           if (!formData.email.trim() || !isValidEmail(formData.email)) newErrors.email = true;
           if (!formData.whatsapp.trim() || !isValidPhone(formData.whatsapp)) newErrors.whatsapp = true;
           
-          // Validate password if not logged in
           if (!clientUser && !formData.password.trim()) {
               newErrors.password = true;
           }
@@ -162,19 +209,14 @@ const PublicBooking: React.FC = () => {
     if (!validateStep()) return;
 
     if (currentStep === 1) {
-        // Skip Data Step if logged in
         if (clientUser) {
-            setCurrentStep(3); // Go straight to Summary
+            setCurrentStep(3); 
         } else {
             setCurrentStep(c => c + 1);
         }
     } else if (currentStep === 2) {
         setIsSaving(true);
         try {
-            // Register/Update Client Logic
-            // If user is here, they are NOT logged in (skipped otherwise)
-            // So we try to register or find existing
-            
             const newClientData = {
                 id: uuidv4(),
                 name: formData.name,
@@ -195,7 +237,6 @@ const PublicBooking: React.FC = () => {
             }
 
             if (client) {
-                // Auto-login logic
                 localStorage.setItem('tonapista_client_auth', JSON.stringify(client));
                 setClientUser(client);
                 setClientId(client.id);
@@ -216,7 +257,6 @@ const PublicBooking: React.FC = () => {
 
   const handleBack = () => {
     if (currentStep === 3 && clientUser) {
-        // If logged in, going back from Summary goes to Settings (skip data)
         setCurrentStep(1);
     } else if (currentStep > 0) {
         setCurrentStep(c => c - 1);
@@ -304,11 +344,6 @@ const PublicBooking: React.FC = () => {
               return [...prev, time].sort((a, b) => parseInt(a) - parseInt(b));
           }
       });
-  };
-
-  const handlePeopleChange = (num: number) => {
-    const suggestedLanes = Math.ceil(num / 6);
-    setFormData(prev => ({ ...prev, people: num, lanes: suggestedLanes }));
   };
 
   const getReservationBlocks = () => {
@@ -472,7 +507,7 @@ const PublicBooking: React.FC = () => {
             <div className="mb-8">
                 <div className="flex justify-between mb-2">
                 {steps.map((step, i) => {
-                    // Logic to hide 'Seus Dados' step if skipped
+                    // Hide 'Seus Dados' step if skipped (client logged in)
                     if (clientUser && i === 2) return null;
                     return (
                         <div key={i} className={`text-[10px] md:text-sm font-medium ${i <= currentStep ? 'text-neon-blue' : 'text-slate-600'}`}>{step}</div>
@@ -503,18 +538,25 @@ const PublicBooking: React.FC = () => {
               <div className="animate-fade-in">
                 <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><Clock className="text-neon-orange" /> Configuração e Horário</h2>
                 
-                {/* ... (Mesmo código de configuração de antes) ... */}
-                {/* Por brevidade, mantendo o bloco de configuração igual */}
                 <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 mb-6">
-                    {/* ... Inputs de Pessoas, Pistas, Tipo ... */}
+                    <h3 className="text-sm font-bold text-slate-300 uppercase mb-3">Detalhes do Evento</h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* INPUTS CORRIGIDOS: AGORA USAM peopleInput E lanesInput COM ONBLUR */}
                         <div>
                             <label className="block text-xs font-medium text-slate-500 mb-1">Nº Pessoas</label>
-                            <input type="number" min={1} className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 focus:border-neon-orange focus:outline-none text-white" value={formData.people} onChange={e => handlePeopleChange(parseInt(e.target.value) || 1)} />
+                            <input type="number" min="1" max="36" className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 focus:border-neon-orange focus:outline-none text-white" 
+                                value={peopleInput} 
+                                onChange={e => handlePeopleChange(e.target.value)}
+                                onBlur={handlePeopleBlur} 
+                            />
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-slate-500 mb-1">Nº Pistas</label>
-                            <input type="number" min={1} max={settings.activeLanes} className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 focus:border-neon-orange focus:outline-none text-white font-bold" value={formData.lanes} onChange={e => { const count = parseInt(e.target.value) || 1; setFormData(prev => ({...prev, lanes: count})); setSelectedTimes([]); }} />
+                            <input type="number" min="1" max={settings.activeLanes} className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 focus:border-neon-orange focus:outline-none text-white font-bold" 
+                                value={lanesInput} 
+                                onChange={e => handleLanesChange(e.target.value)} 
+                                onBlur={handleLanesBlur}
+                            />
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-slate-500 mb-1">Tipo</label>
@@ -523,7 +565,7 @@ const PublicBooking: React.FC = () => {
                             </select>
                         </div>
                     </div>
-                    {/* ... Checkbox Mesa ... */}
+                    
                     {formData.type !== EventType.JOGO_NORMAL && (
                         <div className="mt-4 pt-4 border-t border-slate-700 animate-fade-in">
                             <label className="flex items-center gap-3 cursor-pointer group mb-4">
@@ -550,7 +592,7 @@ const PublicBooking: React.FC = () => {
                             )}
                         </div>
                     )}
-                    {/* ... Price Summary ... */}
+
                     <div className="mt-4 pt-4 border-t border-slate-700 flex flex-col md:flex-row justify-between items-end md:items-center gap-2">
                         <div className="text-sm text-slate-300"><span className="text-slate-500">Total Horas Selecionadas:</span> <strong className="text-white bg-slate-900 px-2 py-1 rounded border border-slate-700">{totalDuration}h</strong></div>
                         <div className="text-right">
