@@ -48,6 +48,8 @@ const PublicBooking: React.FC = () => {
     whatsapp: '',
     email: '',
     password: '', 
+    // Option to create account or continue as guest (default true for loyalty unless staff)
+    createAccount: true, 
     hasSecondResponsible: false,
     secondName: '',
     secondWhatsapp: '',
@@ -67,14 +69,20 @@ const PublicBooking: React.FC = () => {
                   ...prev,
                   name: parsedClient.name,
                   email: parsedClient.email,
-                  whatsapp: parsedClient.phone
+                  whatsapp: parsedClient.phone,
+                  createAccount: false // Already has account
               }));
               setClientId(parsedClient.id);
           } catch (e) {
               console.error("Error parsing client auth", e);
           }
+      } else {
+          // If staff is booking for someone else, default createAccount to false (guest mode default)
+          if (staffUser) {
+              setFormData(prev => ({ ...prev, createAccount: false }));
+          }
       }
-  }, []);
+  }, [staffUser]);
 
   const getPricePerHour = () => {
       if (!selectedDate || !settings) return INITIAL_SETTINGS.weekdayPrice;
@@ -125,9 +133,9 @@ const PublicBooking: React.FC = () => {
   const handlePeopleChange = (val: string) => {
       setPeopleInput(val);
       if (val === '') return;
+      
       const num = parseInt(val);
       if (!isNaN(num)) {
-          // Calcula pistas sugeridas mas não trava
           const suggestedLanes = Math.ceil(num / 6);
           setFormData(prev => ({ ...prev, people: num, lanes: suggestedLanes }));
           setLanesInput(suggestedLanes.toString());
@@ -137,7 +145,10 @@ const PublicBooking: React.FC = () => {
   const handlePeopleBlur = () => {
       let num = parseInt(peopleInput);
       if (isNaN(num) || num < 1) num = 1;
-      if (num > 36) num = 36; // MAX 36
+      if (num > 36) {
+          num = 36; 
+          alert("Máximo de 36 pessoas por reserva.");
+      }
       setPeopleInput(num.toString());
       
       const suggestedLanes = Math.ceil(num / 6);
@@ -148,10 +159,11 @@ const PublicBooking: React.FC = () => {
   const handleLanesChange = (val: string) => {
       setLanesInput(val);
       if (val === '') return;
+      
       const num = parseInt(val);
       if (!isNaN(num)) {
           setFormData(prev => ({ ...prev, lanes: num }));
-          setSelectedTimes([]); // Reset times if lanes change
+          setSelectedTimes([]); 
       }
   };
 
@@ -159,6 +171,7 @@ const PublicBooking: React.FC = () => {
       let num = parseInt(lanesInput);
       if (isNaN(num) || num < 1) num = 1;
       if (num > settings.activeLanes) num = settings.activeLanes;
+      
       setLanesInput(num.toString());
       setFormData(prev => ({ ...prev, lanes: num }));
       setSelectedTimes([]);
@@ -195,7 +208,8 @@ const PublicBooking: React.FC = () => {
           if (!formData.email.trim() || !isValidEmail(formData.email)) newErrors.email = true;
           if (!formData.whatsapp.trim() || !isValidPhone(formData.whatsapp)) newErrors.whatsapp = true;
           
-          if (!clientUser && !formData.password.trim()) {
+          // Validate password ONLY if creating account and NOT logged in and NOT Staff
+          if (!clientUser && !staffUser && formData.createAccount && !formData.password.trim()) {
               newErrors.password = true;
           }
       }
@@ -210,8 +224,10 @@ const PublicBooking: React.FC = () => {
 
     if (currentStep === 1) {
         if (clientUser) {
+            // Logged in client -> Skip Data Step
             setCurrentStep(3); 
         } else {
+            // Not logged in (or Staff) -> Go to Data Step
             setCurrentStep(c => c + 1);
         }
     } else if (currentStep === 2) {
@@ -228,17 +244,24 @@ const PublicBooking: React.FC = () => {
                 funnelStage: FunnelStage.NOVO
             };
 
-            const { client, error } = await db.clients.register(newClientData, formData.password);
-
-            if (error) {
-                alert(error);
-                setIsSaving(false);
-                return;
-            }
-
-            if (client) {
-                localStorage.setItem('tonapista_client_auth', JSON.stringify(client));
-                setClientUser(client);
+            // Logic Split: Create Account vs Guest
+            if (formData.createAccount && !staffUser) {
+                // Register with password (Client Mode)
+                const { client, error } = await db.clients.register(newClientData, formData.password);
+                if (error) {
+                    alert(error);
+                    setIsSaving(false);
+                    return;
+                }
+                if (client) {
+                    localStorage.setItem('tonapista_client_auth', JSON.stringify(client));
+                    setClientUser(client);
+                    setClientId(client.id);
+                    setCurrentStep(c => c + 1);
+                }
+            } else {
+                // Just create/update client without password (Guest or Staff entry)
+                const client = await db.clients.create(newClientData);
                 setClientId(client.id);
                 setCurrentStep(c => c + 1);
             }
@@ -632,28 +655,42 @@ const PublicBooking: React.FC = () => {
               <div className="animate-fade-in space-y-6">
                 <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><Users className="text-neon-orange" /> Seus Dados</h2>
                 
-                <div className="bg-slate-800/50 p-4 rounded-xl border border-neon-blue/30 mb-6">
-                    <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2"><Lock size={18} className="text-neon-green"/> Criar Conta Rápida</h3>
-                    <p className="text-sm text-slate-400 mb-4">Para sua segurança e acesso ao clube de fidelidade, criaremos uma conta automaticamente.</p>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className={`block text-xs font-medium mb-1 ${errors.name ? 'text-red-500' : 'text-slate-500'}`}>Nome Completo <span className="text-neon-orange">*</span></label>
-                            <input type="text" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.name ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`} value={formData.name} onChange={e => handleInputChange('name', e.target.value)} />
-                        </div>
-                        <div>
-                            <label className={`block text-xs font-medium mb-1 ${errors.whatsapp ? 'text-red-500' : 'text-slate-500'}`}>WhatsApp <span className="text-neon-orange">*</span></label>
-                            <input type="tel" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.whatsapp ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`} value={formData.whatsapp} onChange={e => handlePhoneChange(e, 'whatsapp')} placeholder="(00) 00000-0000"/>
-                        </div>
-                        <div>
-                            <label className={`block text-xs font-medium mb-1 ${errors.email ? 'text-red-500' : 'text-slate-500'}`}>E-mail <span className="text-neon-orange">*</span></label>
-                            <input type="email" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.email ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`} value={formData.email} onChange={e => handleInputChange('email', e.target.value)} />
-                        </div>
+                {/* Se não for Staff, mostra opção de criar conta */}
+                {!staffUser && (
+                    <div className="bg-slate-800/50 p-4 rounded-xl border border-neon-blue/30 mb-6">
+                        <label className="flex items-center gap-3 cursor-pointer">
+                            <div className={`w-6 h-6 rounded border flex items-center justify-center transition ${formData.createAccount ? 'bg-neon-blue border-neon-blue' : 'border-slate-600'}`}>
+                                {formData.createAccount && <CheckCircle size={16} className="text-white" />}
+                            </div>
+                            <input type="checkbox" className="hidden" checked={formData.createAccount} onChange={e => handleInputChange('createAccount', e.target.checked)} />
+                            <div className="flex flex-col">
+                                <span className="font-bold text-white text-sm">Criar conta e acumular pontos?</span>
+                                <span className="text-xs text-slate-400">Recomendado para participar do programa de fidelidade.</span>
+                            </div>
+                        </label>
+                    </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className={`block text-xs font-medium mb-1 ${errors.name ? 'text-red-500' : 'text-slate-500'}`}>Nome Completo <span className="text-neon-orange">*</span></label>
+                        <input type="text" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.name ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`} value={formData.name} onChange={e => handleInputChange('name', e.target.value)} />
+                    </div>
+                    <div>
+                        <label className={`block text-xs font-medium mb-1 ${errors.whatsapp ? 'text-red-500' : 'text-slate-500'}`}>WhatsApp <span className="text-neon-orange">*</span></label>
+                        <input type="tel" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.whatsapp ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`} value={formData.whatsapp} onChange={e => handlePhoneChange(e, 'whatsapp')} placeholder="(00) 00000-0000"/>
+                    </div>
+                    <div>
+                        <label className={`block text-xs font-medium mb-1 ${errors.email ? 'text-red-500' : 'text-slate-500'}`}>E-mail <span className="text-neon-orange">*</span></label>
+                        <input type="email" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.email ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`} value={formData.email} onChange={e => handleInputChange('email', e.target.value)} />
+                    </div>
+                    {/* Exibe senha apenas se estiver criando conta e não for Staff */}
+                    {formData.createAccount && !staffUser && (
                         <div>
                             <label className={`block text-xs font-medium mb-1 ${errors.password ? 'text-red-500' : 'text-slate-500'}`}>Crie uma Senha <span className="text-neon-orange">*</span></label>
                             <input type="password" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.password ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`} value={formData.password} onChange={e => handleInputChange('password', e.target.value)} placeholder="Mínimo 6 caracteres"/>
                         </div>
-                    </div>
+                    )}
                 </div>
 
                 <div className="pt-4 border-t border-slate-800">

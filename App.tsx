@@ -12,6 +12,7 @@ import Financeiro from './pages/Financeiro';
 import ClientDashboard from './pages/ClientDashboard';
 import { UserRole, User } from './types';
 
+// Protected Route Wrapper
 interface ProtectedRouteProps {
   children: React.ReactNode;
   allowedRoles?: UserRole[];
@@ -21,16 +22,18 @@ interface ProtectedRouteProps {
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles, requiredPermission }) => {
   const { user, loading } = useApp();
   
-  if (loading) return <div className="min-h-screen bg-slate-950"></div>; 
+  if (loading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500">Carregando...</div>; 
 
   if (!user) {
     return <Navigate to="/login" replace />;
   }
 
+  // 1. Check Roles first (optional)
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     return <Navigate to="/agenda" replace />; 
   }
 
+  // 2. Check Specific Permission
   if (requiredPermission && user.role !== UserRole.ADMIN) {
      const hasPermission = user[requiredPermission];
      if (hasPermission !== true) {

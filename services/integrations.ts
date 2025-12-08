@@ -1,4 +1,3 @@
-
 import { Reservation, AppSettings } from '../types';
 
 export const Integrations = {
