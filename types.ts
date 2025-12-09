@@ -147,4 +147,5 @@ export interface AppSettings {
   mercadopagoClientId?: string;     
   mercadopagoClientSecret?: string; 
   businessHours: DayConfig[];
+  blockedDates: string[]; // Novas datas bloqueadas (YYYY-MM-DD)
 }

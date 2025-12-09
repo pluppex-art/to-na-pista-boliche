@@ -50,7 +50,7 @@ const AppContent: React.FC = () => {
 
     // Atualiza o Favicon dinamicamente
     useEffect(() => {
-        const link = document.querySelector("link[rel*='icon']") || document.createElement('link');
+        const link = (document.querySelector("link[rel*='icon']") || document.createElement('link')) as HTMLLinkElement;
         link.type = 'image/x-icon';
         link.rel = 'shortcut icon';
         link.href = settings.logoUrl || '/vite.svg'; // Fallback para vite.svg se sem logo

@@ -1,3 +1,5 @@
+
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { db } from '../services/mockBackend';
@@ -125,19 +127,55 @@ const PublicBooking: React.FC = () => {
   };
 
   const handleInputChange = (field: string, value: any) => {
+      // Limite de cadeiras
+      if (field === 'tableSeatCount' && typeof value === 'number') {
+          // Regra base: Limite total de 25 cadeiras por reserva
+          let maxAllowed = 25;
+          
+          // Exceção: Se o nº pessoas for maior que 25, o limite é o nº de pessoas (até 36)
+          if (formData.people > 25) {
+             maxAllowed = formData.people;
+          }
+          
+          // Teto absoluto do sistema
+          if (maxAllowed > 36) maxAllowed = 36;
+
+          if (value > maxAllowed) {
+              alert(`O limite máximo permitido para esta configuração é de ${maxAllowed} cadeiras.`);
+              value = maxAllowed;
+          }
+      }
+
       setFormData(prev => ({ ...prev, [field]: value }));
       if (errors[field]) setErrors(prev => ({ ...prev, [field]: false }));
   };
 
   // --- INPUT HANDLERS (PEOPLE & LANES) ---
   const handlePeopleChange = (val: string) => {
-      setPeopleInput(val);
+      setPeopleInput(val); // Atualiza o estado visual imediatamente
       if (val === '') return;
       
       const num = parseInt(val);
       if (!isNaN(num)) {
           const suggestedLanes = Math.ceil(num / 6);
-          setFormData(prev => ({ ...prev, people: num, lanes: suggestedLanes }));
+          setFormData(prev => {
+              let newSeatCount = prev.tableSeatCount;
+              // Se numero de pessoas muda, verificar se as cadeiras excedem a nova regra
+              // Regra: Base 25, ou igual a Num Pessoas se > 25.
+              let maxAllowed = 25;
+              if (num > 25) maxAllowed = num;
+              if (maxAllowed > 36) maxAllowed = 36;
+
+              if (prev.tableSeatCount > maxAllowed) {
+                  newSeatCount = maxAllowed;
+              }
+              return { 
+                  ...prev, 
+                  people: num, 
+                  lanes: suggestedLanes,
+                  tableSeatCount: newSeatCount
+              };
+          });
           setLanesInput(suggestedLanes.toString());
       }
   };
@@ -145,6 +183,8 @@ const PublicBooking: React.FC = () => {
   const handlePeopleBlur = () => {
       let num = parseInt(peopleInput);
       if (isNaN(num) || num < 1) num = 1;
+      
+      // Limite de 36 pessoas por reserva
       if (num > 36) {
           num = 36; 
           alert("Máximo de 36 pessoas por reserva.");
@@ -152,7 +192,22 @@ const PublicBooking: React.FC = () => {
       setPeopleInput(num.toString());
       
       const suggestedLanes = Math.ceil(num / 6);
-      setFormData(prev => ({ ...prev, people: num, lanes: suggestedLanes }));
+      setFormData(prev => {
+          let newSeatCount = prev.tableSeatCount;
+          let maxAllowed = 25;
+          if (num > 25) maxAllowed = num;
+          if (maxAllowed > 36) maxAllowed = 36;
+
+          if (prev.tableSeatCount > maxAllowed) {
+              newSeatCount = maxAllowed;
+          }
+          return { 
+              ...prev, 
+              people: num, 
+              lanes: suggestedLanes,
+              tableSeatCount: newSeatCount
+          };
+      });
       setLanesInput(suggestedLanes.toString());
   };
 
@@ -223,6 +278,19 @@ const PublicBooking: React.FC = () => {
     if (!validateStep()) return;
 
     if (currentStep === 1) {
+        if (formData.wantsTable) {
+            const tablesOnDate = existingReservations.filter(r => 
+                r.date === selectedDate && 
+                r.hasTableReservation && 
+                r.status !== ReservationStatus.CANCELADA
+            ).length;
+
+            if (tablesOnDate >= 25) {
+                alert("Limite de 25 mesas esgotado para esta data. Por favor, desmarque a reserva de mesa ou escolha outra data.");
+                return;
+            }
+        }
+
         if (clientUser) {
             // Logged in client -> Skip Data Step
             setCurrentStep(3); 
@@ -291,6 +359,11 @@ const PublicBooking: React.FC = () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     if (date < today) return false;
+    
+    // Check specific blocked dates
+    const dateStr = [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
+    if (settings.blockedDates && settings.blockedDates.includes(dateStr)) return false;
+
     const dayConfig = settings.businessHours[day];
     if (!dayConfig || !dayConfig.isOpen) return false;
     return true;
@@ -403,6 +476,29 @@ const PublicBooking: React.FC = () => {
           
           for (const block of blocks) {
              const startH = parseInt(block.time.split(':')[0]);
+             
+             // 1. Check Reservation Count Limit (Max 2 per slot)
+             const reservationsAtStart = allRes.filter(r => 
+                 r.date === selectedDate && 
+                 r.time === block.time && 
+                 r.status !== ReservationStatus.CANCELADA
+             );
+             
+             // 2. Check Total People Limit (Max 50 total per slot)
+             const totalPeopleAtStart = reservationsAtStart.reduce((sum, r) => sum + r.peopleCount, 0);
+
+             if (reservationsAtStart.length >= 2) {
+                 alert(`O horário das ${block.time} atingiu o limite de reservas simultâneas.`);
+                 setIsSaving(false);
+                 return;
+             }
+
+             if (totalPeopleAtStart + formData.people > 50) {
+                 alert(`O horário das ${block.time} atingiu a capacidade máxima de pessoas (Máx 50).`);
+                 setIsSaving(false);
+                 return;
+             }
+
              for(let h=0; h<block.duration; h++) {
                  const checkH = startH + h;
                  const { left } = checkHourCapacity(checkH, selectedDate, allRes, settings.activeLanes);
@@ -567,7 +663,9 @@ const PublicBooking: React.FC = () => {
                         {/* INPUTS CORRIGIDOS: AGORA USAM peopleInput E lanesInput COM ONBLUR */}
                         <div>
                             <label className="block text-xs font-medium text-slate-500 mb-1">Nº Pessoas</label>
-                            <input type="number" min="1" max="36" className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 focus:border-neon-orange focus:outline-none text-white" 
+                            <input 
+                                type="number" 
+                                className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 focus:border-neon-orange focus:outline-none text-white" 
                                 value={peopleInput} 
                                 onChange={e => handlePeopleChange(e.target.value)}
                                 onBlur={handlePeopleBlur} 
@@ -609,7 +707,12 @@ const PublicBooking: React.FC = () => {
                                     )}
                                     <div className={formData.type === EventType.ANIVERSARIO ? "" : "md:col-span-2"}>
                                         <label className={`block text-xs font-medium mb-1 ${errors.tableSeatCount ? 'text-red-500' : 'text-slate-400'}`}>{formData.type === EventType.ANIVERSARIO ? 'Qtd. Convidados (Cadeiras) *' : 'Qtd. Pessoas (Cadeiras) *'}</label>
-                                        <input type="number" min={1} className={`w-full bg-slate-800 border rounded-lg p-2 focus:outline-none text-white ${errors.tableSeatCount ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`} value={formData.tableSeatCount} onChange={e => handleInputChange('tableSeatCount', parseInt(e.target.value) || 0)} placeholder="Ex: 10"/>
+                                        <input type="number" min={1} max={36} className={`w-full bg-slate-800 border rounded-lg p-2 focus:outline-none text-white ${errors.tableSeatCount ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`} value={formData.tableSeatCount} onChange={e => handleInputChange('tableSeatCount', parseInt(e.target.value) || 0)} placeholder="Ex: 10 (Max 36)"/>
+                                        <span className="text-[10px] text-slate-500">
+                                            {formData.people > 25 
+                                                ? `Limite de cadeiras aumentado para ${formData.people} (pois pessoas > 25)` 
+                                                : "Limite padrão de 25 cadeiras por reserva."}
+                                        </span>
                                     </div>
                                 </div>
                             )}
@@ -630,12 +733,29 @@ const PublicBooking: React.FC = () => {
                 <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
                   {timeSlots.length === 0 ? <div className="col-span-3 md:col-span-5 text-center text-slate-500 py-4 italic">Fechado nesta data.</div> : (
                     timeSlots.map(({ time, label, available, left, isPast }) => {
+                        // 1. LIMITE DE 2 RESERVAS POR SLOT
+                        const reservationsAtSlot = existingReservations.filter(r => 
+                            r.date === selectedDate && 
+                            r.time === time && 
+                            r.status !== ReservationStatus.CANCELADA
+                        );
+                        const isResCapReached = reservationsAtSlot.length >= 2;
+
+                        // 2. LIMITE DE 50 PESSOAS TOTAIS POR SLOT
+                        const totalPeopleAtSlot = reservationsAtSlot.reduce((sum, r) => sum + r.peopleCount, 0);
+                        const isPeopleCapReached = (totalPeopleAtSlot + formData.people) > 50;
+
                         const isSelected = selectedTimes.includes(time);
-                        const isDisabled = (!available && !isSelected) || (available && left < formData.lanes && !isSelected); 
+                        const isDisabled = (!available && !isSelected) || (available && left < formData.lanes && !isSelected) || (isResCapReached && !isSelected) || (isPeopleCapReached && !isSelected); 
+
                         return (
                             <button key={time} disabled={isDisabled} onClick={() => toggleTimeSelection(time)} className={`p-3 rounded-xl border transition-all flex flex-col items-center justify-center relative overflow-hidden ${isSelected ? 'bg-neon-blue text-white border-neon-blue shadow-[0_0_15px_rgba(59,130,246,0.5)] transform scale-105 z-10' : isDisabled ? 'border-slate-800 bg-slate-900/50 text-slate-600 cursor-not-allowed opacity-60' : 'border-slate-700 bg-slate-800 hover:border-slate-500 text-slate-300 hover:bg-slate-700'}`}>
                             <div className="text-sm md:text-base font-bold">{label}</div>
-                            {isDisabled && !isSelected ? <span className="text-[9px] uppercase mt-1 text-red-500/70 font-bold">{isPast ? 'Encerrado' : 'Esgotado'}</span> : (
+                            {isDisabled && !isSelected ? (
+                                <span className="text-[9px] uppercase mt-1 text-red-500/70 font-bold">
+                                    {isPast ? 'Encerrado' : (isResCapReached ? 'Esgotado' : (isPeopleCapReached ? 'Cap. Max' : 'Indisponível'))}
+                                </span>
+                            ) : (
                                 <div className="flex flex-col items-center">{isSelected ? <span className="text-[10px] mt-1 text-white font-bold">Selecionado</span> : <span className="text-[9px] text-slate-500 mt-1">Restam {left}</span>}</div>
                             )}
                             </button>

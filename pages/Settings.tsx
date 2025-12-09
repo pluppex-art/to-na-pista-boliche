@@ -1,9 +1,11 @@
 
+
+
 import React, { useEffect, useState, useRef } from 'react';
 import { db } from '../services/mockBackend';
 import { AppSettings, UserRole, User, DayConfig } from '../types';
 import { PERMISSION_KEYS } from '../constants';
-import { Save, UserPlus, Clock, LogOut, X, Trash2, CreditCard, Loader2, DollarSign, MapPin, Upload, Camera, CheckCircle, AlertTriangle, Key, Link2, ShieldCheck, ChevronDown, Lock, Pencil, Shield } from 'lucide-react';
+import { Save, UserPlus, Clock, LogOut, X, Trash2, CreditCard, Loader2, DollarSign, MapPin, Upload, Camera, CheckCircle, AlertTriangle, Key, Link2, ShieldCheck, ChevronDown, Lock, Pencil, Shield, CalendarOff, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -20,6 +22,9 @@ const Settings: React.FC = () => {
   const [saveError, setSaveError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  // Blocked Date Input State
+  const [newBlockedDate, setNewBlockedDate] = useState('');
 
   // Current User from localStorage
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -151,6 +156,23 @@ const Settings: React.FC = () => {
   const handleLogout = () => {
     localStorage.removeItem('tonapista_auth');
     navigate('/login', { replace: true });
+  };
+
+  const addBlockedDate = () => {
+      if (!settings || !newBlockedDate) return;
+      if (settings.blockedDates?.includes(newBlockedDate)) {
+          alert("Data já bloqueada.");
+          return;
+      }
+      const updated = [...(settings.blockedDates || []), newBlockedDate];
+      setSettings({ ...settings, blockedDates: updated });
+      setNewBlockedDate('');
+  };
+
+  const removeBlockedDate = (date: string) => {
+      if (!settings) return;
+      const updated = (settings.blockedDates || []).filter(d => d !== date);
+      setSettings({ ...settings, blockedDates: updated });
   };
 
   const openAddUser = () => {
@@ -384,6 +406,45 @@ const Settings: React.FC = () => {
                                 </div>
                             </div>
                         </div>
+                     </div>
+                     
+                     <div className="h-px bg-slate-700"></div>
+
+                     {/* Blocked Dates Config */}
+                     <div className="space-y-4">
+                         <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                            <CalendarOff size={20} className="text-red-400"/> Bloqueio de Datas Específicas
+                         </h3>
+                         <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700">
+                             <div className="flex gap-2 mb-4">
+                                 <input 
+                                    type="date" 
+                                    className="bg-slate-800 border border-slate-600 rounded-lg p-2 text-white focus:border-red-500 outline-none flex-1" 
+                                    value={newBlockedDate} 
+                                    onChange={e => setNewBlockedDate(e.target.value)}
+                                 />
+                                 <button 
+                                    onClick={addBlockedDate}
+                                    disabled={!newBlockedDate}
+                                    className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                 >
+                                     <Plus size={18}/> Bloquear
+                                 </button>
+                             </div>
+                             
+                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-40 overflow-y-auto">
+                                 {settings.blockedDates && settings.blockedDates.length > 0 ? (
+                                     settings.blockedDates.sort().map(date => (
+                                         <div key={date} className="bg-slate-800 border border-slate-700 p-2 rounded flex justify-between items-center text-sm">
+                                             <span className="text-slate-300 font-medium">{date.split('-').reverse().join('/')}</span>
+                                             <button onClick={() => removeBlockedDate(date)} className="text-slate-500 hover:text-red-400"><Trash2 size={14}/></button>
+                                         </div>
+                                     ))
+                                 ) : (
+                                     <p className="text-slate-500 text-sm italic col-span-full">Nenhuma data específica bloqueada.</p>
+                                 )}
+                             </div>
+                         </div>
                      </div>
 
                      <div className="flex justify-end pt-2">

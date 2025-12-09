@@ -1,4 +1,5 @@
 
+
 import { EventType, FunnelStage, ReservationStatus, UserRole, AppSettings, User } from './types';
 
 export const MOCK_DELAY = 500;
@@ -37,7 +38,8 @@ export const INITIAL_SETTINGS: AppSettings = {
   mercadopagoAccessToken: '',
   mercadopagoClientId: '',      
   mercadopagoClientSecret: '',  
-  businessHours: DEFAULT_HOURS
+  businessHours: DEFAULT_HOURS,
+  blockedDates: []
 };
 
 // Definição das chaves de permissão para facilitar a UI

@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
 import { Reservation, ReservationStatus, EventType, UserRole } from '../types';
@@ -154,6 +153,23 @@ const Agenda: React.FC = () => {
              const reqLanes = editForm.laneCount || editingRes.laneCount || 1;
              const reqDate = editForm.date || editingRes.date;
              const allRes = await db.reservations.getAll();
+
+             // Check for table limit if this reservation has a table
+             const hasTable = editForm.hasTableReservation ?? editingRes.hasTableReservation;
+             if (hasTable) {
+                 const tableCount = allRes.filter(r => 
+                    r.date === reqDate && 
+                    r.hasTableReservation && 
+                    r.status !== ReservationStatus.CANCELADA && 
+                    r.id !== editingRes.id
+                 ).length;
+                 
+                 if (tableCount >= 25) {
+                     alert("Limite de 25 mesas atingido para esta data.");
+                     setLoading(false);
+                     return;
+                 }
+             }
 
              for (const timeStr of selectedEditTimes) {
                  const h = parseInt(timeStr.split(':')[0]);

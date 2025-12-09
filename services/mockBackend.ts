@@ -1,3 +1,5 @@
+
+
 import { AppSettings, Client, FunnelCard, Interaction, Reservation, User, ReservationStatus, PaymentStatus, UserRole, FunnelStage, LoyaltyTransaction } from '../types';
 import { supabase } from './supabaseClient';
 import { INITIAL_SETTINGS, FUNNEL_STAGES } from '../constants';
@@ -627,7 +629,8 @@ export const db = {
         mercadopagoAccessToken: data.mercadopago_access_token || INITIAL_SETTINGS.mercadopagoAccessToken,
         mercadopagoClientId: data.mercadopago_client_id || INITIAL_SETTINGS.mercadopagoClientId,
         mercadopagoClientSecret: data.mercadopago_client_secret || INITIAL_SETTINGS.mercadopagoClientSecret,
-        businessHours: businessHours 
+        businessHours: businessHours,
+        blockedDates: data.blocked_dates || [] // Map blocked_dates from DB
       };
     },
     
@@ -646,7 +649,8 @@ export const db = {
         mercadopago_public_key: s.mercadopagoPublicKey,
         mercadopago_access_token: s.mercadopagoAccessToken,
         mercadopago_client_id: s.mercadopagoClientId,
-        mercadopago_client_secret: s.mercadopagoClientSecret
+        mercadopago_client_secret: s.mercadopagoClientSecret,
+        blocked_dates: s.blockedDates // Save blocked dates
       };
       
       const { error: configError } = await supabase.from('configuracoes').upsert(dbSettings);
