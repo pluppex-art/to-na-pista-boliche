@@ -73,12 +73,12 @@ const Checkout: React.FC = () => {
               tags: ['Lead novo'],
               createdAt: new Date().toISOString(),
               lastContactAt: new Date().toISOString()
-          });
+          }, currentUser?.id); // Staff ID se criar no balcão
         } else {
             if (!client.tags.includes('Cliente recorrente') && client.tags.includes('Lead novo')) {
                client.tags.push('Cliente recorrente');
             }
-            await db.clients.update(client);
+            await db.clients.update(client, currentUser?.id);
         }
 
         const isStaffAction = paymentTab === 'IN_PERSON' && !!currentUser;
@@ -109,7 +109,7 @@ const Checkout: React.FC = () => {
                          paymentStatus: paymentStatus,
                          observations: notes
                      };
-                     await db.reservations.update(updatedRes);
+                     await db.reservations.update(updatedRes, currentUser?.id, isStaffAction ? `Processou pagamento presencial (${inPersonType})` : undefined);
                      if (!firstReservationId) firstReservationId = id;
                  }
             }
@@ -136,8 +136,24 @@ const Checkout: React.FC = () => {
                     guests: reservationData.guests || []
                  };
                  
-                 await db.reservations.create(newRes);
+                 // Pass staff ID if available
+                 await db.reservations.create(newRes, currentUser?.id);
                  if(!firstReservationId) firstReservationId = newRes.id;
+            }
+        }
+
+        // --- ATUALIZAÇÃO DE FIDELIDADE ---
+        // Se for ação da equipe (Presencial), já conta como Confirmado/Pago, então adiciona pontos
+        if (isStaffAction) {
+            // Pontos = Valor Total da Reserva (arredondado para baixo)
+            const points = Math.floor(reservationData.totalValue);
+            if (points > 0) {
+                await db.loyalty.addTransaction(
+                    client.id, 
+                    points, 
+                    `Reserva Presencial (${reservationData.date})`, 
+                    currentUser?.id
+                );
             }
         }
 
@@ -193,8 +209,6 @@ const Checkout: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 flex flex-col">
-       {/* ... (Mesmo código visual de antes, apenas lógica atualizada) ... */}
-       {/* Vou simplificar para economizar espaço, mantendo a estrutura original do Checkout visualmente */}
        <header className="bg-slate-900 p-4 shadow-md border-b border-slate-800">
         <div className="max-w-3xl mx-auto flex justify-between items-center">
            {!imgError ? (

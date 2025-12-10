@@ -106,6 +106,9 @@ export interface Reservation {
   hasTableReservation?: boolean;
   birthdayName?: string;
   tableSeatCount?: number;
+
+  // Auditoria
+  createdBy?: string; // User ID of staff who created
 }
 
 export interface FunnelCard {
@@ -148,4 +151,24 @@ export interface AppSettings {
   mercadopagoClientSecret?: string; 
   businessHours: DayConfig[];
   blockedDates: string[]; // Novas datas bloqueadas (YYYY-MM-DD)
+}
+
+// Nova Interface de Log
+export interface AuditLog {
+  id: string;
+  userId: string;
+  userName: string;
+  actionType: string; // 'CREATE_RESERVATION', 'UPDATE_STATUS', 'PAYMENT', 'LOGIN'
+  entityId?: string;
+  details: string;
+  createdAt: string;
+}
+
+export interface StaffPerformance {
+  userId: string;
+  userName: string;
+  reservationsCreated: number;
+  totalSales: number;
+  reservationsConfirmed: number;
+  lastActivity: string;
 }

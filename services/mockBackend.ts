@@ -1,8 +1,18 @@
 
 
-import { AppSettings, Client, FunnelCard, Interaction, Reservation, User, ReservationStatus, PaymentStatus, UserRole, FunnelStage, LoyaltyTransaction } from '../types';
+import { AppSettings, Client, FunnelCard, Interaction, Reservation, User, ReservationStatus, PaymentStatus, UserRole, FunnelStage, LoyaltyTransaction, AuditLog, StaffPerformance } from '../types';
 import { supabase } from './supabaseClient';
 import { INITIAL_SETTINGS, FUNNEL_STAGES } from '../constants';
+import { v4 as uuidv4 } from 'uuid';
+
+// CACHE EM MEMÓRIA PARA OTIMIZAÇÃO
+const CACHE: {
+  clients: Client[] | null;
+  reservations: Reservation[] | null;
+} = {
+  clients: null,
+  reservations: null
+};
 
 export const cleanPhone = (phone: string) => {
   if (!phone) return '';
@@ -18,6 +28,43 @@ const safeTags = (tags: any): string[] => {
 };
 
 export const db = {
+  // --- SERVIÇO DE AUDITORIA ---
+  audit: {
+      log: async (userId: string, userName: string, actionType: string, details: string, entityId?: string) => {
+          // Fire and forget - não bloqueia o fluxo principal
+          supabase.from('audit_logs').insert({
+              user_id: userId,
+              user_name: userName,
+              action_type: actionType,
+              details: details,
+              entity_id: entityId
+          }).then(({ error }) => {
+              if (error && error.code === '42P01') {
+                  console.warn("Tabela 'audit_logs' não existe. Execute o SQL de migração.");
+              }
+          });
+      },
+      getLogs: async (limit = 50): Promise<AuditLog[]> => {
+          const { data, error } = await supabase
+              .from('audit_logs')
+              .select('*')
+              .order('created_at', { ascending: false })
+              .limit(limit);
+          
+          if (error) return [];
+          
+          return data.map((l: any) => ({
+              id: l.id,
+              userId: l.user_id,
+              userName: l.user_name || 'Sistema',
+              actionType: l.action_type,
+              entityId: l.entity_id,
+              details: typeof l.details === 'object' ? JSON.stringify(l.details) : l.details,
+              createdAt: l.created_at
+          }));
+      }
+  },
+
   users: {
     login: async (email: string, password: string): Promise<{ user?: User; isFirstAccess?: boolean; error?: string }> => {
       try {
@@ -42,6 +89,9 @@ export const db = {
           
           // DETECTA PRIMEIRO ACESSO (Senha Padrão)
           const isFirstAccess = password === '123456';
+
+          // Log Login
+          db.audit.log(data.id, data.nome, 'LOGIN', 'Usuário realizou login');
 
           return {
             isFirstAccess, 
@@ -167,6 +217,31 @@ export const db = {
       if (error) {
         throw new Error(error.message || "Erro ao excluir usuário.");
       }
+    },
+
+    // PERFORMANCE REPORT
+    getPerformance: async (startDate: string, endDate: string): Promise<StaffPerformance[]> => {
+        const users = await db.users.getAll();
+        const reservations = await db.reservations.getAll();
+        
+        // Filter reservations by date
+        const filteredRes = reservations.filter(r => r.date >= startDate && r.date <= endDate && r.status !== ReservationStatus.CANCELADA);
+
+        const stats = users.map(u => {
+            const createdByMe = filteredRes.filter(r => r.createdBy === u.id);
+            const sales = createdByMe.reduce((acc, curr) => acc + (curr.paymentStatus === PaymentStatus.PAGO ? curr.totalValue : 0), 0);
+            
+            return {
+                userId: u.id,
+                userName: u.name,
+                reservationsCreated: createdByMe.length,
+                totalSales: sales,
+                reservationsConfirmed: createdByMe.filter(r => r.status === ReservationStatus.CONFIRMADA).length,
+                lastActivity: new Date().toISOString() // Placeholder
+            };
+        });
+
+        return stats.sort((a, b) => b.totalSales - a.totalSales);
     }
   },
   
@@ -223,6 +298,7 @@ export const db = {
                 // If exists but no password, update it
                 if (!existing.password) {
                     await supabase.from('clientes').update({ password: password }).eq('client_id', existing.client_id);
+                    CACHE.clients = null; // INVALIDATE CACHE
                     return { client: { ...client, id: existing.client_id, loyaltyBalance: existing.loyalty_balance } };
                 } else {
                     return { error: 'Cliente já cadastrado com senha. Faça login.' };
@@ -251,16 +327,20 @@ export const db = {
                 return { error: error.message };
             }
 
+            CACHE.clients = null; // INVALIDATE CACHE
             return { client };
         } catch (e: any) {
             return { error: e.message };
         }
     },
     getAll: async (): Promise<Client[]> => {
+      // CHECK CACHE
+      if (CACHE.clients) return CACHE.clients;
+
       const { data, error } = await supabase.from('clientes').select('*');
       if (error) return [];
       
-      return data.map((c: any) => {
+      const mapped = data.map((c: any) => {
         const tags = safeTags(c.tags);
         const stageFromTag = tags.find((t: string) => FUNNEL_STAGES.includes(t as FunnelStage));
         const finalStage = (c.funnel_stage as FunnelStage) || (stageFromTag as FunnelStage) || FunnelStage.NOVO;
@@ -277,6 +357,9 @@ export const db = {
           loyaltyBalance: c.loyalty_balance || 0
         };
       });
+
+      CACHE.clients = mapped; // SET CACHE
+      return mapped;
     },
     getByPhone: async (phone: string): Promise<Client | null> => {
       const cleanedPhone = cleanPhone(phone);
@@ -331,7 +414,7 @@ export const db = {
         loyaltyBalance: data.loyalty_balance || 0
       };
     },
-    create: async (client: Client): Promise<Client> => {
+    create: async (client: Client, createdBy?: string): Promise<Client> => {
       const currentTags = client.tags || [];
       const phoneClean = cleanPhone(client.phone);
       const initialStage = client.funnelStage || FunnelStage.NOVO;
@@ -357,7 +440,8 @@ export const db = {
               .eq('client_id', existingClient.client_id);
 
           if (updateError) console.error("Erro ao atualizar cliente existente no create:", updateError);
-
+          
+          CACHE.clients = null; // INVALIDATE CACHE
           return { 
               ...client, 
               id: existingClient.client_id, 
@@ -390,9 +474,14 @@ export const db = {
       
       if (error) throw error;
       
+      if (createdBy) {
+          db.audit.log(createdBy, 'STAFF', 'CREATE_CLIENT', `Criou cliente ${client.name}`, client.id);
+      }
+
+      CACHE.clients = null; // INVALIDATE CACHE
       return { ...client, phone: phoneClean, tags: currentTags, funnelStage: initialStage, loyaltyBalance: 0 };
     },
-    update: async (client: Client) => {
+    update: async (client: Client, updatedBy?: string) => {
       const dbClient = {
         name: client.name,
         phone: cleanPhone(client.phone),
@@ -404,9 +493,16 @@ export const db = {
       
       const { error } = await supabase.from('clientes').update(dbClient).eq('client_id', client.id);
       if (error) console.error("Erro ao atualizar cliente:", error);
+      
+      if (updatedBy) {
+          db.audit.log(updatedBy, 'STAFF', 'UPDATE_CLIENT', `Atualizou dados de ${client.name}`, client.id);
+      }
+
+      CACHE.clients = null; // INVALIDATE CACHE
     },
     updateLastContact: async (clientId: string) => {
       await supabase.from('clientes').update({ last_contact_at: new Date().toISOString() }).eq('client_id', clientId);
+      CACHE.clients = null; // INVALIDATE CACHE
     },
     updateStage: async (clientId: string, newStage: FunnelStage) => {
         let { data, error } = await supabase.from('clientes').select('tags').eq('client_id', clientId).single();
@@ -421,6 +517,7 @@ export const db = {
         };
 
         await supabase.from('clientes').update(updatePayload).eq('client_id', clientId);
+        CACHE.clients = null; // INVALIDATE CACHE
     }
   },
 
@@ -462,15 +559,24 @@ export const db = {
           await supabase.from('clientes').update({
               loyalty_balance: currentBalance + amount
           }).eq('client_id', clientId);
+
+          if (userId) {
+              db.audit.log(userId, 'STAFF', 'LOYALTY_UPDATE', `Adicionou ${amount} pontos para cliente ${clientId}`, clientId);
+          }
+
+          CACHE.clients = null; // INVALIDATE CACHE
       }
   },
 
   reservations: {
     getAll: async (): Promise<Reservation[]> => {
+      // CHECK CACHE
+      if (CACHE.reservations) return CACHE.reservations;
+
       const { data, error } = await supabase.from('reservas').select('*');
       if (error) return [];
       
-      return data.map((r: any) => ({
+      const mapped = data.map((r: any) => ({
         id: r.id,
         clientId: r.client_id, 
         clientName: r.client_name || 'Cliente',
@@ -491,10 +597,14 @@ export const db = {
         noShowIds: r.no_show_ids || [],
         hasTableReservation: r.has_table_reservation,
         birthdayName: r.birthday_name,
-        tableSeatCount: r.table_seat_count
+        tableSeatCount: r.table_seat_count,
+        createdBy: r.created_by
       }));
+
+      CACHE.reservations = mapped; // SET CACHE
+      return mapped;
     },
-    create: async (res: Reservation) => {
+    create: async (res: Reservation, createdByUserId?: string) => {
       const dbRes = {
         id: res.id,
         client_id: res.clientId, 
@@ -516,14 +626,21 @@ export const db = {
         no_show_ids: res.noShowIds || [],
         has_table_reservation: res.hasTableReservation,
         birthday_name: res.birthdayName,
-        table_seat_count: res.tableSeatCount
+        table_seat_count: res.tableSeatCount,
+        created_by: createdByUserId // Grava ID do criador
       };
       
       const { error } = await supabase.from('reservas').insert(dbRes);
       if (error) throw error;
+      
+      if (createdByUserId) {
+          db.audit.log(createdByUserId, 'STAFF', 'CREATE_RESERVATION', `Criou reserva para ${res.clientName} em ${res.date} às ${res.time}`, res.id);
+      }
+
+      CACHE.reservations = null; // INVALIDATE CACHE
       return res;
     },
-    update: async (res: Reservation) => {
+    update: async (res: Reservation, updatedByUserId?: string, actionDetail?: string) => {
       const dbRes = {
         date: res.date,
         time: res.time,
@@ -545,6 +662,12 @@ export const db = {
       
       const { error } = await supabase.from('reservas').update(dbRes).eq('id', res.id);
       if (error) console.error("Erro ao atualizar reserva:", error);
+      
+      if (updatedByUserId) {
+           db.audit.log(updatedByUserId, 'STAFF', 'UPDATE_RESERVATION', actionDetail || `Atualizou reserva de ${res.clientName}`, res.id);
+      }
+
+      CACHE.reservations = null; // INVALIDATE CACHE
     }
   },
 
@@ -660,7 +783,7 @@ export const db = {
       if (configError) {
         const msg = configError.message || configError.code || 'Erro desconhecido';
         if (msg.includes('column')) {
-             throw new Error(`Erro de Tabela: Colunas ausentes. Execute o SQL de atualização.`);
+             throw new Error(`Erro de Tabela: Coluna ausente. Execute no Supabase: ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS blocked_dates text[] DEFAULT '{}';`);
         }
         throw new Error(`Falha ao salvar dados gerais: ${msg}`);
       }

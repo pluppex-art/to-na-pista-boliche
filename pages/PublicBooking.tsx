@@ -1,20 +1,19 @@
-
-
 import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { db } from '../services/mockBackend';
 import { Integrations } from '../services/integrations';
 import { useApp } from '../contexts/AppContext';
 import { generateDailySlots, checkHourCapacity } from '../utils/availability';
 import { EventType, ReservationStatus, PaymentStatus, Reservation, FunnelStage } from '../types';
 import { EVENT_TYPES, INITIAL_SETTINGS } from '../constants';
-import { CheckCircle, Calendar as CalendarIcon, Clock, Users, ChevronRight, DollarSign, ChevronLeft, Lock, LayoutDashboard, Loader2, UserPlus, Mail, Phone, User as UserIcon, AlertCircle, XCircle, ShieldCheck, CreditCard, ArrowRight, Cake, Utensils } from 'lucide-react';
+import { CheckCircle, Calendar as CalendarIcon, Clock, Users, ChevronRight, DollarSign, ChevronLeft, Lock, LayoutDashboard, Loader2, UserPlus, Mail, Phone, User as UserIcon, AlertCircle, XCircle, ShieldCheck, CreditCard, ArrowRight, Cake, Utensils, MessageCircle } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
 const steps = ['Data', 'Configuração & Horário', 'Seus Dados', 'Resumo', 'Pagamento'];
 
 const PublicBooking: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation(); // Hook para acessar state da navegação
   const { settings, user: staffUser, loading: appLoading } = useApp();
   
   // Client Authentication State
@@ -86,6 +85,21 @@ const PublicBooking: React.FC = () => {
       }
   }, [staffUser]);
 
+  // Check for prefilled client data from CRM
+  useEffect(() => {
+      if (location.state?.prefilledClient) {
+          const c = location.state.prefilledClient;
+          setFormData(prev => ({
+              ...prev,
+              name: c.name,
+              email: c.email || '',
+              whatsapp: c.phone,
+              createAccount: false // Client already exists
+          }));
+          setClientId(c.id);
+      }
+  }, [location.state]);
+
   const getPricePerHour = () => {
       if (!selectedDate || !settings) return INITIAL_SETTINGS.weekdayPrice;
       const [y, m, d] = selectedDate.split('-').map(Number);
@@ -102,15 +116,29 @@ const PublicBooking: React.FC = () => {
   const totalValue = currentPrice * formData.lanes * (totalDuration || 0);
 
   useEffect(() => {
+    let isMounted = true;
     const fetchData = async () => {
         setIsDataLoading(true);
         try {
-            const all = await db.reservations.getAll();
-            setExistingReservations(all);
-        } catch (e) { console.error(e); }
-        setIsDataLoading(false);
+            // Timeout de segurança para evitar loading infinito
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error("Timeout")), 8000)
+            );
+
+            const dataPromise = db.reservations.getAll();
+            
+            // Corrida entre dados e timeout
+            const all = await Promise.race([dataPromise, timeoutPromise]) as any[];
+            
+            if (isMounted) setExistingReservations(all);
+        } catch (e) { 
+            console.error("Erro ao carregar reservas:", e);
+        } finally {
+            if (isMounted) setIsDataLoading(false);
+        }
     };
     fetchData();
+    return () => { isMounted = false; };
   }, []);
 
   const formatPhone = (value: string) => {
@@ -225,7 +253,7 @@ const PublicBooking: React.FC = () => {
   const handleLanesBlur = () => {
       let num = parseInt(lanesInput);
       if (isNaN(num) || num < 1) num = 1;
-      if (num > settings.activeLanes) num = settings.activeLanes;
+      if (settings && num > settings.activeLanes) num = settings.activeLanes;
       
       setLanesInput(num.toString());
       setFormData(prev => ({ ...prev, lanes: num }));
@@ -313,6 +341,13 @@ const PublicBooking: React.FC = () => {
             };
 
             // Logic Split: Create Account vs Guest
+            // If clientId is already set (prefilled from CRM), skip creation
+            if (clientId && staffUser) {
+                 setCurrentStep(c => c + 1);
+                 setIsSaving(false);
+                 return;
+            }
+
             if (formData.createAccount && !staffUser) {
                 // Register with password (Client Mode)
                 const { client, error } = await db.clients.register(newClientData, formData.password);
@@ -329,7 +364,7 @@ const PublicBooking: React.FC = () => {
                 }
             } else {
                 // Just create/update client without password (Guest or Staff entry)
-                const client = await db.clients.create(newClientData);
+                const client = await db.clients.create(newClientData, staffUser?.id); // Pass staff ID if available
                 setClientId(client.id);
                 setCurrentStep(c => c + 1);
             }
@@ -355,6 +390,7 @@ const PublicBooking: React.FC = () => {
   };
 
   const isDateAllowed = (date: Date) => {
+    if (!settings) return false;
     const day = date.getDay();
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -538,7 +574,8 @@ const PublicBooking: React.FC = () => {
                  birthdayName: formData.wantsTable ? formData.birthdayName : undefined,
                  tableSeatCount: formData.wantsTable ? formData.tableSeatCount : undefined
              };
-             await db.reservations.create(res);
+             // Pass staffUser.id if staff is creating the reservation
+             await db.reservations.create(res, staffUser?.id);
              newIds.push(res.id);
           }
 
@@ -594,13 +631,13 @@ const PublicBooking: React.FC = () => {
       <header className="bg-slate-900 p-4 shadow-md border-b border-slate-800 sticky top-0 z-20">
         <div className="max-w-3xl mx-auto flex justify-between items-center">
           {!imgError ? (
-             settings.logoUrl ? (
+             settings && settings.logoUrl ? (
                 <img src={settings.logoUrl} alt={settings.establishmentName} className="h-12 md:h-16 object-contain" onError={() => setImgError(true)} />
              ) : (
                 <img src="/logo.png" alt="Tô Na Pista" className="h-12 md:h-16 object-contain" onError={() => setImgError(true)} />
              )
            ) : (
-             <h1 className="text-2xl font-bold text-neon-orange font-sans tracking-tighter leading-none">{settings.establishmentName}</h1>
+             <h1 className="text-2xl font-bold text-neon-orange font-sans tracking-tighter leading-none">{settings?.establishmentName || 'Boliche'}</h1>
            )}
           
           <div className="flex items-center gap-4">
@@ -620,7 +657,7 @@ const PublicBooking: React.FC = () => {
         </div>
       </header>
 
-      <main className="flex-1 p-4 md:p-8">
+      <main className="flex-1 p-4 md:p-8 relative">
         <div className="max-w-3xl mx-auto">
           {currentStep < 5 && (
             <div className="mb-8">
@@ -743,7 +780,7 @@ const PublicBooking: React.FC = () => {
 
                         // 2. LIMITE DE 50 PESSOAS TOTAIS POR SLOT
                         const totalPeopleAtSlot = reservationsAtSlot.reduce((sum, r) => sum + r.peopleCount, 0);
-                        const isPeopleCapReached = (totalPeopleAtSlot + formData.people) > 50;
+                        const isPeopleCapReached = (totalPeopleAtSlot + formData.people) > 100;
 
                         const isSelected = selectedTimes.includes(time);
                         const isDisabled = (!available && !isSelected) || (available && left < formData.lanes && !isSelected) || (isResCapReached && !isSelected) || (isPeopleCapReached && !isSelected); 
@@ -775,8 +812,8 @@ const PublicBooking: React.FC = () => {
               <div className="animate-fade-in space-y-6">
                 <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><Users className="text-neon-orange" /> Seus Dados</h2>
                 
-                {/* Se não for Staff, mostra opção de criar conta */}
-                {!staffUser && (
+                {/* Se não for Staff e não tiver cliente pré-selecionado, mostra opção de criar conta */}
+                {!staffUser && !clientId && (
                     <div className="bg-slate-800/50 p-4 rounded-xl border border-neon-blue/30 mb-6">
                         <label className="flex items-center gap-3 cursor-pointer">
                             <div className={`w-6 h-6 rounded border flex items-center justify-center transition ${formData.createAccount ? 'bg-neon-blue border-neon-blue' : 'border-slate-600'}`}>
@@ -804,8 +841,8 @@ const PublicBooking: React.FC = () => {
                         <label className={`block text-xs font-medium mb-1 ${errors.email ? 'text-red-500' : 'text-slate-500'}`}>E-mail <span className="text-neon-orange">*</span></label>
                         <input type="email" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.email ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`} value={formData.email} onChange={e => handleInputChange('email', e.target.value)} />
                     </div>
-                    {/* Exibe senha apenas se estiver criando conta e não for Staff */}
-                    {formData.createAccount && !staffUser && (
+                    {/* Exibe senha apenas se estiver criando conta e não for Staff e não for pré-seleção de cliente */}
+                    {formData.createAccount && !staffUser && !clientId && (
                         <div>
                             <label className={`block text-xs font-medium mb-1 ${errors.password ? 'text-red-500' : 'text-slate-500'}`}>Crie uma Senha <span className="text-neon-orange">*</span></label>
                             <input type="password" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.password ? 'border-red-500' : 'border-slate-600 focus:border-neon-orange'}`} value={formData.password} onChange={e => handleInputChange('password', e.target.value)} placeholder="Mínimo 6 caracteres"/>
@@ -858,6 +895,19 @@ const PublicBooking: React.FC = () => {
           </div>
         </div>
       </main>
+
+      {/* Floating WhatsApp Button */}
+      {settings && (
+      <a
+        href={settings.whatsappLink || `https://wa.me/55${settings.phone?.replace(/\D/g, '')}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="fixed bottom-6 right-6 z-50 bg-[#25D366] hover:bg-[#128c7e] text-white p-3 md:p-4 rounded-full shadow-[0_4px_20px_rgba(37,211,102,0.4)] transition-all transform hover:scale-110 flex items-center justify-center border-2 border-white/10"
+        aria-label="Fale conosco no WhatsApp"
+      >
+        <MessageCircle size={28} className="md:w-8 md:h-8" />
+      </a>
+      )}
     </div>
   );
 };

@@ -3,10 +3,12 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Client, Reservation, LoyaltyTransaction } from '../types';
 import { db } from '../services/mockBackend';
-import { LogOut, User, Gift, Clock, Calendar, MapPin, Coins, Loader2 } from 'lucide-react';
+import { useApp } from '../contexts/AppContext';
+import { LogOut, User, Gift, Clock, Calendar, MapPin, Coins, Loader2, MessageCircle } from 'lucide-react';
 
 const ClientDashboard: React.FC = () => {
   const navigate = useNavigate();
+  const { settings } = useApp();
   const [client, setClient] = useState<Client | null>(null);
   const [history, setHistory] = useState<Reservation[]>([]);
   const [loyalty, setLoyalty] = useState<LoyaltyTransaction[]>([]);
@@ -127,6 +129,19 @@ const ClientDashboard: React.FC = () => {
             </div>
 
         </main>
+
+        {/* Floating WhatsApp Button */}
+        {settings && (
+            <a
+                href={settings.whatsappLink || `https://wa.me/55${settings.phone?.replace(/\D/g, '')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="fixed bottom-6 right-6 z-50 bg-[#25D366] hover:bg-[#128c7e] text-white p-3 md:p-4 rounded-full shadow-[0_4px_20px_rgba(37,211,102,0.4)] transition-all transform hover:scale-110 flex items-center justify-center border-2 border-white/10"
+                aria-label="Fale conosco no WhatsApp"
+            >
+                <MessageCircle size={28} className="md:w-8 md:h-8" />
+            </a>
+        )}
     </div>
   );
 };

@@ -90,7 +90,9 @@ const Agenda: React.FC = () => {
 
       const updatedRes = { ...res, checkedInIds: newCheckedInIds, noShowIds: newNoShowIds };
       setReservations(prev => prev.map(r => r.id === res.id ? updatedRes : r));
-      await db.reservations.update(updatedRes);
+      
+      // Update with audit trail
+      await db.reservations.update(updatedRes, currentUser?.id, `${type} em ${res.clientName}`);
       loadData();
   };
 
@@ -197,13 +199,15 @@ const Agenda: React.FC = () => {
                  birthdayName: editForm.hasTableReservation ? editForm.birthdayName : undefined,
                  tableSeatCount: editForm.hasTableReservation ? editForm.tableSeatCount : undefined
              };
-             await db.reservations.update(updated);
+             
+             // Update main block with audit
+             await db.reservations.update(updated, currentUser?.id, `Editou detalhes da reserva`);
              
              if (blocks.length > 1) {
                   for (let i = 1; i < blocks.length; i++) {
                       const newResId = uuidv4();
                       const newRes: Reservation = { ...updated, id: newResId, time: blocks[i].time, duration: blocks[i].duration, createdAt: new Date().toISOString() };
-                      await db.reservations.create(newRes);
+                      await db.reservations.create(newRes, currentUser?.id);
                   }
              }
              setIsEditMode(false); setEditingRes(updated); loadData();
@@ -215,8 +219,27 @@ const Agenda: React.FC = () => {
     if (editingRes) {
       if (status === ReservationStatus.CANCELADA && !canDelete) { alert("Sem permissão."); return; }
       if (status !== ReservationStatus.CANCELADA && !canEdit) { alert("Sem permissão."); return; }
+      
+      // Lógica de Fidelidade: Se o status mudar para CONFIRMADA e antes NÃO ERA confirmada, adiciona pontos
+      if (status === ReservationStatus.CONFIRMADA && editingRes.status !== ReservationStatus.CONFIRMADA) {
+          try {
+              const points = Math.floor(editingRes.totalValue);
+              if (points > 0) {
+                  await db.loyalty.addTransaction(
+                      editingRes.clientId,
+                      points,
+                      `Confirmação Manual (${editingRes.date})`,
+                      currentUser?.id
+                  );
+              }
+          } catch (error) {
+              console.error("Erro ao adicionar pontos de fidelidade", error);
+          }
+      }
+
       const updated = { ...editingRes, status };
-      await db.reservations.update(updated);
+      // Update with audit
+      await db.reservations.update(updated, currentUser?.id, `Alterou status para ${status}`);
       setEditingRes(null); loadData();
     }
   };

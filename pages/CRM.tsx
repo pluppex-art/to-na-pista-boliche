@@ -1,18 +1,15 @@
-
-
-
-
-
 import React, { useEffect, useState, useMemo } from 'react';
 import { db, cleanPhone } from '../services/mockBackend';
 import { Client, Reservation, FunnelStage, User, UserRole, ReservationStatus, LoyaltyTransaction } from '../types';
 import { FUNNEL_STAGES } from '../constants';
-import { Search, MessageCircle, Calendar, Tag, Plus, Users, Loader2, LayoutList, Kanban as KanbanIcon, GripVertical, Pencil, Save, X, Crown, Star, Sparkles, Clock, LayoutGrid, Gift, Coins, History, ArrowDown, ArrowUp } from 'lucide-react';
+import { Search, MessageCircle, Calendar, Tag, Plus, Users, Loader2, LayoutList, Kanban as KanbanIcon, GripVertical, Pencil, Save, X, Crown, Star, Sparkles, Clock, LayoutGrid, Gift, Coins, History, ArrowDown, ArrowUp, CalendarPlus } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 // Tipos de Classificação
 type ClientTier = 'VIP' | 'FIEL' | 'NOVO';
 
 const CRM: React.FC = () => {
+  const navigate = useNavigate();
   const [viewMode, setViewMode] = useState<'LIST' | 'KANBAN'>('LIST');
   const [clients, setClients] = useState<Client[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -42,6 +39,7 @@ const CRM: React.FC = () => {
 
   // Permission Check
   const canEditClient = currentUser?.role === UserRole.ADMIN || currentUser?.perm_edit_client;
+  const canCreateReservation = currentUser?.role === UserRole.ADMIN || currentUser?.perm_create_reservation;
 
   const fetchData = async () => {
     setLoading(true);
@@ -227,6 +225,11 @@ const CRM: React.FC = () => {
       }
   };
 
+  const handleNewReservationForClient = () => {
+      if (!selectedClient) return;
+      navigate('/agendamento', { state: { prefilledClient: selectedClient } });
+  };
+
   const renderTierBadge = (clientId: string) => {
       const metric = clientMetrics[clientId] || { count: 0, tier: 'NOVO' };
       
@@ -357,12 +360,22 @@ const CRM: React.FC = () => {
                             </div>
                             
                             {!isEditing ? (
-                                <button 
-                                    onClick={() => openWhatsApp(selectedClient.phone)}
-                                    className="w-full sm:w-auto flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-medium transition shadow-[0_0_10px_rgba(34,197,94,0.3)]"
-                                >
-                                    <MessageCircle size={18} /> <span>WhatsApp</span>
-                                </button>
+                                <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+                                    <button 
+                                        onClick={() => openWhatsApp(selectedClient.phone)}
+                                        className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-medium transition shadow-[0_0_10px_rgba(34,197,94,0.3)]"
+                                    >
+                                        <MessageCircle size={18} /> <span className="hidden xl:inline">WhatsApp</span>
+                                    </button>
+                                    {canCreateReservation && (
+                                        <button 
+                                            onClick={handleNewReservationForClient}
+                                            className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-neon-orange hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-medium transition shadow-lg"
+                                        >
+                                            <CalendarPlus size={18} /> <span>Nova Reserva</span>
+                                        </button>
+                                    )}
+                                </div>
                             ) : (
                                 <div className="flex gap-2 w-full sm:w-auto">
                                     <button 
@@ -446,7 +459,7 @@ const CRM: React.FC = () => {
                                                     {h.clientId !== selectedClient.id && <span className="text-[10px] uppercase text-neon-blue font-bold bg-neon-blue/10 px-1 rounded mt-1 inline-block">Segundo Responsável</span>}
                                                 </div>
                                                 <div className="flex flex-wrap items-center gap-2 md:gap-4 md:justify-end">
-                                                     <div className="flex items-center gap-2 text-[10px] md:text-xs text-slate-400 bg-slate-800/50 px-2 py-1 rounded border border-slate-600"><span className="flex items-center gap-1"><LayoutGrid size={12}/> {h.laneCount}</span><span>x</span><span className="flex items-center gap-1"><Clock size={12}/> {h.duration}h</span><span>=</span><span className="text-white font-bold">{(h.laneCount * h.duration)} Slots</span></div>
+                                                     <div className="flex items-center gap-2 text-[10px] md:text-xs text-slate-400 bg-slate-800/50 px-2 py-1 rounded border border-slate-600"><span className="flex items-center gap-1"><LayoutGrid size={12}/> {h.laneCount}</span><span>x</span><span className="flex items-center gap-1"><Clock size={12}/> {h.duration}h</span><span>=</span><span className="text-white font-bold">{(h.laneCount * h.duration)} reserva(s)</span></div>
                                                     <div className="text-right"><span className={`text-[10px] md:text-xs px-2 py-1 rounded block ${h.status === 'Confirmada' ? 'bg-green-500/20 text-green-400' : 'bg-slate-600 text-slate-300'}`}>{h.status}</span></div>
                                                 </div>
                                             </div>
