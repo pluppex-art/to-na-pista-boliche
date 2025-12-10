@@ -60,6 +60,7 @@ export interface Client {
   phone: string;
   email?: string;
   password?: string; // Campo para login do cliente
+  photoUrl?: string; // URL da foto de perfil
   tags: string[];
   createdAt: string;
   lastContactAt: string;

@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { db } from '../services/mockBackend';
+import { supabase } from '../services/supabaseClient';
 import { Integrations } from '../services/integrations';
 import { useApp } from '../contexts/AppContext';
 import { generateDailySlots, checkHourCapacity } from '../utils/availability';
 import { EventType, ReservationStatus, PaymentStatus, Reservation, FunnelStage } from '../types';
 import { EVENT_TYPES, INITIAL_SETTINGS } from '../constants';
-import { CheckCircle, Calendar as CalendarIcon, Clock, Users, ChevronRight, DollarSign, ChevronLeft, Lock, LayoutDashboard, Loader2, UserPlus, Mail, Phone, User as UserIcon, AlertCircle, XCircle, ShieldCheck, CreditCard, ArrowRight, Cake, Utensils, MessageCircle } from 'lucide-react';
+import { CheckCircle, Calendar as CalendarIcon, Clock, Users, ChevronRight, DollarSign, ChevronLeft, Lock, LayoutDashboard, Loader2, UserPlus, Mail, Phone, User as UserIcon, AlertCircle, XCircle, ShieldCheck, CreditCard, ArrowRight, Cake, Utensils, MessageCircle, LogIn, AlertTriangle } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
 const steps = ['Data', 'Configuração & Horário', 'Seus Dados', 'Resumo', 'Pagamento'];
@@ -18,6 +19,12 @@ const PublicBooking: React.FC = () => {
   
   // Client Authentication State
   const [clientUser, setClientUser] = useState<any>(null);
+  
+  // Inline Auth State (Login inside Booking)
+  const [authMode, setAuthMode] = useState<'REGISTER' | 'LOGIN'>('REGISTER');
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPass, setLoginPass] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   
   const [currentStep, setCurrentStep] = useState(0);
   const [imgError, setImgError] = useState(false);
@@ -148,7 +155,22 @@ const PublicBooking: React.FC = () => {
         }
     };
     fetchData();
-    return () => { isMounted = false; };
+
+    // --- REALTIME UPDATE FOR BOOKING ---
+    // Update availability in real-time to avoid conflicts
+    const channel = supabase.channel('public_booking_updates')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, async () => {
+             // Re-fetch since local cache in mockBackend is cleared by global listener
+             console.log('Realtime update detected in Booking, refreshing data...');
+             const data = await db.reservations.getAll();
+             if (isMounted) setExistingReservations(data);
+        })
+        .subscribe();
+
+    return () => { 
+        isMounted = false; 
+        supabase.removeChannel(channel);
+    };
   }, []);
 
   const formatPhone = (value: string) => {
@@ -297,6 +319,37 @@ const PublicBooking: React.FC = () => {
       return clean.length >= 10 && clean.length <= 11;
   };
 
+  // --- AUTH HANDLERS ---
+  const handleInlineLogin = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setIsLoggingIn(true);
+      try {
+          const { client, error } = await db.clients.login(loginEmail, loginPass);
+          if (error || !client) {
+              alert(error || "Erro ao entrar.");
+          } else {
+              // Sucesso
+              localStorage.setItem('tonapista_client_auth', JSON.stringify(client));
+              setClientUser(client);
+              setFormData(prev => ({
+                  ...prev,
+                  name: client.name,
+                  email: client.email || '',
+                  whatsapp: client.phone,
+                  createAccount: false
+              }));
+              setClientId(client.id);
+              // Avança automaticamente para o resumo
+              setCurrentStep(3);
+          }
+      } catch (err) {
+          console.error(err);
+          alert("Erro técnico ao realizar login.");
+      } finally {
+          setIsLoggingIn(false);
+      }
+  };
+
   const validateStep = () => {
       const newErrors: Record<string, boolean> = {};
       let isValid = true;
@@ -317,13 +370,15 @@ const PublicBooking: React.FC = () => {
       }
 
       if (currentStep === 2) { 
-          if (!formData.name.trim()) newErrors.name = true;
-          if (!formData.email.trim() || !isValidEmail(formData.email)) newErrors.email = true;
-          if (!formData.whatsapp.trim() || !isValidPhone(formData.whatsapp)) newErrors.whatsapp = true;
-          
-          // Validate password ONLY if creating account and NOT logged in and NOT Staff
-          if (!clientUser && !staffUser && formData.createAccount && !formData.password.trim()) {
-              newErrors.password = true;
+          if (authMode === 'REGISTER') {
+            if (!formData.name.trim()) newErrors.name = true;
+            if (!formData.email.trim() || !isValidEmail(formData.email)) newErrors.email = true;
+            if (!formData.whatsapp.trim() || !isValidPhone(formData.whatsapp)) newErrors.whatsapp = true;
+            
+            // Validate password ONLY if creating account AND NOT Staff
+            if (!clientUser && !staffUser && formData.createAccount && !formData.password.trim()) {
+                newErrors.password = true;
+            }
           }
       }
 
@@ -379,10 +434,11 @@ const PublicBooking: React.FC = () => {
             }
 
             if (formData.createAccount && !staffUser) {
-                // Register with password (Client Mode)
+                // Register with password (Client Mode - Public)
                 const { client, error } = await db.clients.register(newClientData, formData.password);
                 if (error) {
-                    alert(error);
+                    const errorMsg = typeof error === 'string' ? error : 'Erro desconhecido ao criar conta.';
+                    alert(errorMsg);
                     setIsSaving(false);
                     return;
                 }
@@ -393,8 +449,10 @@ const PublicBooking: React.FC = () => {
                     setCurrentStep(c => c + 1);
                 }
             } else {
-                // Just create/update client without password (Guest or Staff entry)
-                const client = await db.clients.create(newClientData, staffUser?.id); // Pass staff ID if available
+                // Guest OR Staff Mode
+                // Staff mode ensures we create/update the client in DB based on phone/email
+                // Logic in mockBackend.ts: create() updates existing client by phone if found.
+                const client = await db.clients.create(newClientData, staffUser?.id); 
                 setClientId(client.id);
                 setCurrentStep(c => c + 1);
             }
@@ -538,6 +596,7 @@ const PublicBooking: React.FC = () => {
       setIsSaving(true);
       try {
           const blocks = getReservationBlocks();
+          // Force fresh fetch for validation just in case
           const allRes = await db.reservations.getAll();
           
           for (const block of blocks) {
@@ -610,6 +669,7 @@ const PublicBooking: React.FC = () => {
           }
 
           setCreatedReservationIds(newIds);
+          // Update local state with fresh data including the new one
           setExistingReservations(await db.reservations.getAll());
           setCurrentStep(4);
 
@@ -821,44 +881,88 @@ const PublicBooking: React.FC = () => {
                 <div className="animate-fade-in">
                     <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><UserIcon className="text-neon-orange" /> Seus Dados</h2>
                     
-                    <div className="space-y-4">
-                        <div>
-                            <label className="block text-xs font-medium text-slate-500 mb-1">Nome Completo</label>
-                            <input type="text" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.name ? 'border-red-500' : 'border-slate-600'}`} value={formData.name} onChange={e => handleInputChange('name', e.target.value)} />
+                    {/* Public Login vs Register Tabs */}
+                    {!staffUser && !clientUser && (
+                        <div className="flex border-b border-slate-700 mb-6">
+                            <button 
+                                onClick={() => setAuthMode('REGISTER')}
+                                className={`flex-1 py-3 text-sm font-bold transition border-b-2 ${authMode === 'REGISTER' ? 'border-neon-blue text-white' : 'border-transparent text-slate-500 hover:text-white'}`}
+                            >
+                                Novo / Sem cadastro
+                            </button>
+                            <button 
+                                onClick={() => setAuthMode('LOGIN')}
+                                className={`flex-1 py-3 text-sm font-bold transition border-b-2 ${authMode === 'LOGIN' ? 'border-neon-orange text-white' : 'border-transparent text-slate-500 hover:text-white'}`}
+                            >
+                                Já tenho conta
+                            </button>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    )}
+
+                    {authMode === 'LOGIN' && !staffUser && !clientUser ? (
+                        <form onSubmit={handleInlineLogin} className="space-y-4 max-w-md mx-auto">
                             <div>
-                                <label className="block text-xs font-medium text-slate-500 mb-1">WhatsApp</label>
-                                <input type="tel" placeholder="(00) 00000-0000" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.whatsapp ? 'border-red-500' : 'border-slate-600'}`} value={formData.whatsapp} onChange={e => handlePhoneChange(e, 'whatsapp')} />
+                                <label className="block text-xs font-medium text-slate-500 mb-1">E-mail Cadastrado</label>
+                                <input type="email" required className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white focus:border-neon-orange outline-none" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} />
                             </div>
                             <div>
-                                <label className="block text-xs font-medium text-slate-500 mb-1">E-mail</label>
-                                <input type="email" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.email ? 'border-red-500' : 'border-slate-600'}`} value={formData.email} onChange={e => handleInputChange('email', e.target.value)} />
+                                <label className="block text-xs font-medium text-slate-500 mb-1">Senha</label>
+                                <input type="password" required className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white focus:border-neon-orange outline-none" value={loginPass} onChange={e => setLoginPass(e.target.value)} />
+                            </div>
+                            <button type="submit" disabled={isLoggingIn} className="w-full bg-neon-orange hover:bg-orange-600 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
+                                {isLoggingIn ? <Loader2 className="animate-spin"/> : <><LogIn size={18} /> Entrar e Continuar</>}
+                            </button>
+                            <p className="text-center text-xs text-slate-500 cursor-pointer hover:text-white" onClick={() => setAuthMode('REGISTER')}>Não tem senha? Preencha seus dados na outra aba.</p>
+                        </form>
+                    ) : (
+                        <div className="space-y-4">
+                            {/* Staff Mode Banner */}
+                            {staffUser && (
+                                <div className="bg-slate-800/50 p-3 rounded border border-slate-700 flex items-center gap-2 text-sm text-slate-300 mb-4">
+                                    <ShieldCheck size={16} className="text-neon-blue"/>
+                                    <span>Modo Equipe: Cadastre os dados do cliente (Senha não necessária).</span>
+                                </div>
+                            )}
+
+                            <div>
+                                <label className="block text-xs font-medium text-slate-500 mb-1">Nome Completo {staffUser && <span className="text-red-500">*</span>}</label>
+                                <input type="text" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.name ? 'border-red-500' : 'border-slate-600'}`} value={formData.name} onChange={e => handleInputChange('name', e.target.value)} />
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">WhatsApp {staffUser && <span className="text-red-500">*</span>}</label>
+                                    <input type="tel" placeholder="(00) 00000-0000" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.whatsapp ? 'border-red-500' : 'border-slate-600'}`} value={formData.whatsapp} onChange={e => handlePhoneChange(e, 'whatsapp')} />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">E-mail {staffUser && <span className="text-red-500">*</span>}</label>
+                                    <input type="email" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.email ? 'border-red-500' : 'border-slate-600'}`} value={formData.email} onChange={e => handleInputChange('email', e.target.value)} />
+                                </div>
+                            </div>
+
+                            {/* Password Field - Only for Public Users creating account */}
+                            {!clientUser && !staffUser && (
+                                <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 mt-4">
+                                    <label className="flex items-center gap-2 cursor-pointer mb-3">
+                                        <input type="checkbox" className="w-4 h-4 accent-neon-green" checked={formData.createAccount} onChange={e => setFormData(prev => ({ ...prev, createAccount: e.target.checked }))} />
+                                        <span className="text-sm font-bold text-white">Criar conta para agilizar próximos agendamentos?</span>
+                                    </label>
+                                    {formData.createAccount && (
+                                        <div className="animate-fade-in">
+                                            <label className="block text-xs font-medium text-slate-500 mb-1">Crie uma senha</label>
+                                            <input type="password" className={`w-full bg-slate-900 border rounded-lg p-3 text-white ${errors.password ? 'border-red-500' : 'border-slate-600'}`} value={formData.password} onChange={e => handleInputChange('password', e.target.value)} />
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                            
+                            <div className="flex justify-between mt-8">
+                                <button onClick={handleBack} className="px-6 py-3 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800">Voltar</button>
+                                <button onClick={handleNext} disabled={isSaving} className="px-6 py-3 bg-neon-blue text-white font-bold rounded-lg hover:bg-blue-500 shadow-lg flex items-center gap-2">
+                                    {isSaving ? <Loader2 className="animate-spin" /> : 'Continuar'}
+                                </button>
                             </div>
                         </div>
-
-                        {!clientUser && !staffUser && (
-                            <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 mt-4">
-                                <label className="flex items-center gap-2 cursor-pointer mb-3">
-                                    <input type="checkbox" className="w-4 h-4 accent-neon-green" checked={formData.createAccount} onChange={e => setFormData(prev => ({ ...prev, createAccount: e.target.checked }))} />
-                                    <span className="text-sm font-bold text-white">Criar conta para agilizar próximos agendamentos?</span>
-                                </label>
-                                {formData.createAccount && (
-                                    <div className="animate-fade-in">
-                                        <label className="block text-xs font-medium text-slate-500 mb-1">Crie uma senha</label>
-                                        <input type="password" className={`w-full bg-slate-900 border rounded-lg p-3 text-white ${errors.password ? 'border-red-500' : 'border-slate-600'}`} value={formData.password} onChange={e => handleInputChange('password', e.target.value)} />
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="flex justify-between mt-8">
-                        <button onClick={handleBack} className="px-6 py-3 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800">Voltar</button>
-                        <button onClick={handleNext} disabled={isSaving} className="px-6 py-3 bg-neon-blue text-white font-bold rounded-lg hover:bg-blue-500 shadow-lg flex items-center gap-2">
-                            {isSaving ? <Loader2 className="animate-spin" /> : 'Continuar'}
-                        </button>
-                    </div>
+                    )}
                 </div>
             )}
 
@@ -866,6 +970,15 @@ const PublicBooking: React.FC = () => {
             {currentStep === 3 && (
                 <div className="animate-fade-in">
                     <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><CheckCircle className="text-neon-orange" /> Resumo do Agendamento</h2>
+                    
+                    {/* ALERT: 30 MIN RULE */}
+                    <div className="mb-6 p-4 bg-yellow-900/20 border border-yellow-500/50 rounded-lg flex items-start gap-3">
+                         <Clock className="text-yellow-500 flex-shrink-0" size={20} />
+                         <div>
+                             <h4 className="text-yellow-500 font-bold text-sm">Atenção: Regra de Expiração</h4>
+                             <p className="text-xs text-yellow-100/80 mt-1">Após confirmar, você terá <span className="font-bold underline">30 minutos</span> para efetuar o pagamento. Caso contrário, a reserva será cancelada automaticamente e o horário liberado.</p>
+                         </div>
+                    </div>
                     
                     <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 space-y-4">
                         <div className="flex justify-between border-b border-slate-700 pb-2">
@@ -912,8 +1025,15 @@ const PublicBooking: React.FC = () => {
                         <CheckCircle size={40} />
                     </div>
                     <h2 className="text-3xl font-bold text-white mb-2">Reserva Criada!</h2>
-                    <p className="text-slate-400 mb-8">Para garantir sua reserva, prossiga para o pagamento.</p>
                     
+                    <div className="max-w-md mx-auto my-6 p-4 bg-yellow-900/20 border border-yellow-500/50 rounded-lg flex items-center gap-3 text-left">
+                         <AlertTriangle className="text-yellow-500 flex-shrink-0" size={24} />
+                         <div>
+                             <h4 className="text-yellow-500 font-bold text-sm">Não perca sua vaga!</h4>
+                             <p className="text-xs text-yellow-100/80 mt-1">Sua pré-reserva expira em 30 minutos. Realize o pagamento agora para garantir o horário.</p>
+                         </div>
+                    </div>
+
                     <button onClick={() => handlePaymentProcess(false)} disabled={isSaving} className="w-full max-w-sm mx-auto py-4 bg-gradient-to-r from-neon-orange to-orange-600 text-white font-bold rounded-xl shadow-lg hover:shadow-orange-500/20 transition transform hover:scale-105 flex items-center justify-center gap-2">
                          {isSaving ? <Loader2 className="animate-spin" /> : <><CreditCard /> Ir para Pagamento</>}
                     </button>
@@ -927,6 +1047,19 @@ const PublicBooking: React.FC = () => {
             )}
           </div>
         </div>
+        
+        {/* Floating WhatsApp Button */}
+        {settings && (
+            <a
+                href={settings.whatsappLink || `https://wa.me/55${settings.phone?.replace(/\D/g, '')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="fixed bottom-6 right-6 z-50 bg-[#25D366] hover:bg-[#128c7e] text-white p-3 md:p-4 rounded-full shadow-[0_4px_20px_rgba(37,211,102,0.4)] transition-all transform hover:scale-110 flex items-center justify-center border-2 border-white/10"
+                aria-label="Fale conosco no WhatsApp"
+            >
+                <MessageCircle size={28} className="md:w-8 md:h-8" />
+            </a>
+        )}
       </main>
     </div>
   );

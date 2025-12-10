@@ -1,11 +1,10 @@
-
-
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
+import { supabase } from '../services/supabaseClient';
 import { Reservation, ReservationStatus, EventType, UserRole, PaymentStatus } from '../types';
 import { useApp } from '../contexts/AppContext'; // Context
 import { generateDailySlots, checkHourCapacity } from '../utils/availability'; // Utils
-import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, CheckCircle2, X, AlertTriangle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, CheckCircle2, X, AlertTriangle, MessageCircle, Clock } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -37,7 +36,10 @@ const Agenda: React.FC = () => {
   
   const [selectedEditTimes, setSelectedEditTimes] = useState<string[]>([]);
   const [availableSlots, setAvailableSlots] = useState<any[]>([]);
-  const [calculatingSlots, setCalculatingSlots] = useState(false);
+  const [calculatingSlots, setCalculatingSlots] = useState<boolean>(false);
+
+  // Expiring Reservations State
+  const [expiringReservations, setExpiringReservations] = useState<Reservation[]>([]);
 
   // Permissions Helpers
   const canCreate = currentUser?.role === UserRole.ADMIN || currentUser?.perm_create_reservation;
@@ -69,12 +71,48 @@ const Agenda: React.FC = () => {
       });
 
       setMetrics({ totalSlots: total, pendingSlots: pending, confirmedSlots: confirmed, checkInSlots: checkIn, noShowSlots: noShow });
+
+      // --- CHECK EXPIRING SOON ---
+      // Find pending reservations created between 20 and 30 minutes ago
+      const now = new Date();
+      const expiring = allReservations.filter(r => {
+          if (r.status !== ReservationStatus.PENDENTE) return false;
+          if (!r.createdAt) return false;
+          const created = new Date(r.createdAt);
+          const diffMins = (now.getTime() - created.getTime()) / 60000;
+          return diffMins >= 20 && diffMins < 30; // Between 20 and 30 mins old
+      });
+      setExpiringReservations(expiring);
+
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { loadData(); }, [selectedDate]);
+  useEffect(() => { 
+    loadData();
+
+    // --- SUPABASE REALTIME SUBSCRIPTION ---
+    const channel = supabase
+      .channel('agenda-updates')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'reservas' },
+        (payload) => {
+          console.log('Realtime change detected, refreshing Agenda UI...');
+          loadData();
+        }
+      )
+      .subscribe();
+    
+    // Refresh expiring alerts every minute
+    const interval = setInterval(loadData, 60000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(interval);
+    };
+  }, [selectedDate]);
 
   // --- ACTIONS GRANULARES ---
   const handleGranularStatus = async (e: React.MouseEvent, res: Reservation, uniqueId: string, type: 'CHECK_IN' | 'NO_SHOW') => {
@@ -325,6 +363,14 @@ const Agenda: React.FC = () => {
 
   const formatDateDisplay = (dateStr: string) => dateStr.split('-').reverse().join('/');
 
+  const sendReminder = (res: Reservation) => {
+      const phone = clientPhones[res.clientId];
+      if (!phone) return;
+      const message = `Olá ${res.clientName}, sua reserva de hoje (${new Date(res.date).toLocaleDateString('pt-BR')} às ${res.time}) está pendente e expira em breve. Podemos confirmar o pagamento?`;
+      const url = `https://wa.me/55${phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+      window.open(url, '_blank');
+  };
+
   // KPI Component
   const KPI = ({ label, value, color, icon: Icon }: any) => (
       <div className={`p-3 rounded-xl border flex items-center justify-between shadow-sm bg-slate-800 border-${color}-500/30`}>
@@ -335,6 +381,27 @@ const Agenda: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full space-y-6 pb-20 md:pb-0">
+      
+      {/* EXPIRING ALERT WIDGET */}
+      {expiringReservations.length > 0 && (
+          <div className="bg-orange-500/10 border border-orange-500/50 rounded-xl p-4 animate-pulse">
+              <h3 className="text-orange-500 font-bold flex items-center gap-2 mb-2">
+                  <Clock size={20} /> Atenção: Reservas Expirando (30min)
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                  {expiringReservations.map(r => (
+                      <div key={r.id} className="bg-slate-900/80 p-2 rounded border border-orange-500/30 flex items-center gap-3">
+                          <span className="text-sm font-bold text-white">{r.clientName}</span>
+                          <span className="text-xs text-slate-400">{r.time}</span>
+                          <button onClick={() => sendReminder(r)} className="text-green-500 hover:text-green-400" title="Cobrar no WhatsApp">
+                              <MessageCircle size={16} />
+                          </button>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      )}
+
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-4">
         <div><h1 className="text-3xl font-bold text-white tracking-tight">Dashboard</h1><p className="text-slate-400 text-sm">Gestão de {formatDateDisplay(selectedDate)}</p></div>
         <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">

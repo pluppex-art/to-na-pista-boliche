@@ -1,5 +1,3 @@
-
-
 import { AppSettings, Client, FunnelCard, Interaction, Reservation, User, ReservationStatus, PaymentStatus, UserRole, FunnelStage, LoyaltyTransaction, AuditLog, StaffPerformance } from '../types';
 import { supabase } from './supabaseClient';
 import { INITIAL_SETTINGS, FUNNEL_STAGES } from '../constants';
@@ -13,6 +11,19 @@ const CACHE: {
   clients: null,
   reservations: null
 };
+
+// --- REALTIME CACHE INVALIDATION ---
+supabase
+  .channel('db-cache-invalidation')
+  .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => {
+      console.log('[Cache] Invalidando cache de reservas via Realtime');
+      CACHE.reservations = null;
+  })
+  .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => {
+      console.log('[Cache] Invalidando cache de clientes via Realtime');
+      CACHE.clients = null;
+  })
+  .subscribe();
 
 export const cleanPhone = (phone: string) => {
   if (!phone) return '';
@@ -31,18 +42,23 @@ export const db = {
   // --- SERVIÇO DE AUDITORIA ---
   audit: {
       log: async (userId: string, userName: string, actionType: string, details: string, entityId?: string) => {
-          // Fire and forget - não bloqueia o fluxo principal
-          supabase.from('audit_logs').insert({
-              user_id: userId,
-              user_name: userName,
-              action_type: actionType,
-              details: details,
-              entity_id: entityId
-          }).then(({ error }) => {
-              if (error && error.code === '42P01') {
-                  console.warn("Tabela 'audit_logs' não existe. Execute o SQL de migração.");
+          // Fire and forget robusto - não bloqueia o fluxo principal mesmo se der erro de RLS
+          try {
+              const { error } = await supabase.from('audit_logs').insert({
+                  user_id: userId,
+                  user_name: userName,
+                  action_type: actionType,
+                  details: details,
+                  entity_id: entityId
+              });
+              
+              if (error) {
+                  // Apenas loga no console, não joga erro para o usuário
+                  console.warn("[AUDIT LOG ERROR] Falha ao gravar auditoria (Possível bloqueio RLS):", error.message);
               }
-          });
+          } catch (e) {
+              console.warn("[AUDIT LOG EXCEPTION]", e);
+          }
       },
       getLogs: async (filters?: { userId?: string, actionType?: string, startDate?: string, endDate?: string, limit?: number }): Promise<AuditLog[]> => {
           let query = supabase
@@ -65,7 +81,10 @@ export const db = {
 
           const { data, error } = await query.limit(filters?.limit || 100);
           
-          if (error) return [];
+          if (error) {
+              console.error("Erro ao buscar logs:", error);
+              return [];
+          }
           
           return data.map((l: any) => ({
               id: l.id,
@@ -89,8 +108,8 @@ export const db = {
           .maybeSingle();
 
         if (error) {
-          console.error("Erro Supabase:", error);
-          return { error: `Erro técnico.` };
+          console.error("Erro Supabase Login:", error);
+          return { error: `Erro técnico: ${error.message}` };
         }
 
         if (!data) return { error: 'E-mail não encontrado.' };
@@ -101,7 +120,6 @@ export const db = {
           const roleNormalized = (data.role || '').toUpperCase() as UserRole;
           const isAdmin = roleNormalized === UserRole.ADMIN;
           
-          // DETECTA PRIMEIRO ACESSO (Senha Padrão)
           const isFirstAccess = password === '123456';
 
           // Log Login
@@ -233,29 +251,32 @@ export const db = {
       }
     },
 
-    // PERFORMANCE REPORT
     getPerformance: async (startDate: string, endDate: string): Promise<StaffPerformance[]> => {
-        const users = await db.users.getAll();
-        const reservations = await db.reservations.getAll();
-        
-        // Filter reservations by date
-        const filteredRes = reservations.filter(r => r.date >= startDate && r.date <= endDate && r.status !== ReservationStatus.CANCELADA);
-
-        const stats = users.map(u => {
-            const createdByMe = filteredRes.filter(r => r.createdBy === u.id);
-            const sales = createdByMe.reduce((acc, curr) => acc + (curr.paymentStatus === PaymentStatus.PAGO ? curr.totalValue : 0), 0);
+        try {
+            const users = await db.users.getAll();
+            const reservations = await db.reservations.getAll();
             
-            return {
-                userId: u.id,
-                userName: u.name,
-                reservationsCreated: createdByMe.length,
-                totalSales: sales,
-                reservationsConfirmed: createdByMe.filter(r => r.status === ReservationStatus.CONFIRMADA).length,
-                lastActivity: new Date().toISOString() // Placeholder
-            };
-        });
+            const filteredRes = reservations.filter(r => r.date >= startDate && r.date <= endDate && r.status !== ReservationStatus.CANCELADA);
 
-        return stats.sort((a, b) => b.totalSales - a.totalSales);
+            const stats = users.map(u => {
+                const createdByMe = filteredRes.filter(r => r.createdBy === u.id);
+                const sales = createdByMe.reduce((acc, curr) => acc + (curr.paymentStatus === PaymentStatus.PAGO ? curr.totalValue : 0), 0);
+                
+                return {
+                    userId: u.id,
+                    userName: u.name,
+                    reservationsCreated: createdByMe.length,
+                    totalSales: sales,
+                    reservationsConfirmed: createdByMe.filter(r => r.status === ReservationStatus.CONFIRMADA).length,
+                    lastActivity: new Date().toISOString()
+                };
+            });
+
+            return stats.sort((a, b) => b.totalSales - a.totalSales);
+        } catch (e) {
+            console.error("Erro ao calcular performance:", e);
+            return [];
+        }
     }
   },
   
@@ -274,7 +295,6 @@ export const db = {
 
         if (!data) return { error: 'E-mail não encontrado.' };
 
-        // Verifica senha (texto simples por enquanto, ideal migrar para Auth depois)
         if (data.password === password) {
            const tags = safeTags(data.tags);
            return {
@@ -283,6 +303,7 @@ export const db = {
                name: data.name,
                phone: data.phone,
                email: data.email,
+               photoUrl: data.photo_url,
                tags: tags,
                createdAt: data.created_at,
                lastContactAt: data.last_contact_at,
@@ -309,11 +330,12 @@ export const db = {
                 .maybeSingle();
 
             if (existing) {
-                // If exists but no password, update it
                 if (!existing.password) {
-                    await supabase.from('clientes').update({ password: password }).eq('client_id', existing.client_id);
-                    CACHE.clients = null; // INVALIDATE CACHE
-                    return { client: { ...client, id: existing.client_id, loyaltyBalance: existing.loyalty_balance } };
+                    const { error: updateError } = await supabase.from('clientes').update({ password: password }).eq('client_id', existing.client_id);
+                    if (updateError) throw updateError;
+                    
+                    CACHE.clients = null;
+                    return { client: { ...client, id: existing.client_id, loyaltyBalance: existing.loyalty_balance, photoUrl: existing.photo_url } };
                 } else {
                     return { error: 'Cliente já cadastrado com senha. Faça login.' };
                 }
@@ -325,6 +347,7 @@ export const db = {
                 phone: phoneClean,
                 email: client.email,
                 password: password,
+                photo_url: client.photoUrl,
                 tags: ['Novo Cadastro'],
                 last_contact_at: new Date().toISOString(),
                 created_at: new Date().toISOString(),
@@ -335,20 +358,18 @@ export const db = {
             const { error } = await supabase.from('clientes').insert(dbClient);
             
             if (error) {
-                if (error.message?.includes('column "password"')) {
-                    return { error: "Erro de Configuração: Coluna 'password' não existe no banco. O Admin precisa rodar o SQL de atualização." };
-                }
+                if (error.code === '42501') return { error: 'Permissão negada (RLS). Execute o SQL de correção no Supabase.' };
+                if (error.message?.includes('column "password"')) return { error: "Erro de Configuração do Banco: Coluna 'password' ausente." };
                 return { error: error.message };
             }
 
-            CACHE.clients = null; // INVALIDATE CACHE
+            CACHE.clients = null;
             return { client };
         } catch (e: any) {
-            return { error: e.message };
+            return { error: e instanceof Error ? e.message : String(e || 'Erro desconhecido ao registrar.') };
         }
     },
     getAll: async (): Promise<Client[]> => {
-      // CHECK CACHE
       if (CACHE.clients) return CACHE.clients;
 
       const { data, error } = await supabase.from('clientes').select('*');
@@ -364,6 +385,7 @@ export const db = {
           name: c.name || 'Sem Nome', 
           phone: c.phone || '',
           email: c.email,
+          photoUrl: c.photo_url,
           tags: tags,
           createdAt: c.created_at || new Date().toISOString(),
           lastContactAt: c.last_contact_at || new Date().toISOString(),
@@ -372,7 +394,7 @@ export const db = {
         };
       });
 
-      CACHE.clients = mapped; // SET CACHE
+      CACHE.clients = mapped;
       return mapped;
     },
     getByPhone: async (phone: string): Promise<Client | null> => {
@@ -396,6 +418,7 @@ export const db = {
         name: data.name,
         phone: data.phone,
         email: data.email,
+        photoUrl: data.photo_url,
         tags: tags,
         createdAt: data.created_at,
         lastContactAt: data.last_contact_at,
@@ -421,6 +444,7 @@ export const db = {
         name: data.name,
         phone: data.phone,
         email: data.email,
+        photoUrl: data.photo_url,
         tags: tags,
         createdAt: data.created_at,
         lastContactAt: data.last_contact_at,
@@ -445,24 +469,14 @@ export const db = {
               email: client.email,
               tags: currentTags, 
               last_contact_at: client.lastContactAt,
-              funnel_stage: initialStage
+              funnel_stage: initialStage,
+              photo_url: client.photoUrl
           };
           
-          const { error: updateError } = await supabase
-              .from('clientes')
-              .update(updatePayload)
-              .eq('client_id', existingClient.client_id);
-
-          if (updateError) console.error("Erro ao atualizar cliente existente no create:", updateError);
+          await supabase.from('clientes').update(updatePayload).eq('client_id', existingClient.client_id);
           
-          CACHE.clients = null; // INVALIDATE CACHE
-          return { 
-              ...client, 
-              id: existingClient.client_id, 
-              phone: phoneClean, 
-              tags: currentTags,
-              loyaltyBalance: existingClient.loyalty_balance || 0
-          };
+          CACHE.clients = null;
+          return { ...client, id: existingClient.client_id, phone: phoneClean, tags: currentTags, loyaltyBalance: existingClient.loyalty_balance || 0, photoUrl: existingClient.photo_url };
       }
 
       const dbClient = {
@@ -470,6 +484,7 @@ export const db = {
         name: client.name,
         phone: phoneClean,
         email: client.email,
+        photo_url: client.photoUrl,
         tags: currentTags,
         last_contact_at: client.lastContactAt,
         created_at: client.createdAt,
@@ -479,32 +494,37 @@ export const db = {
       
       const { error } = await supabase.from('clientes').insert(dbClient);
       
-      if (error && error.code === '23505') { 
-          const { data: retryClient } = await supabase.from('clientes').select('*').eq('phone', phoneClean).maybeSingle();
-          if (retryClient) {
-             return { ...client, id: retryClient.client_id, phone: phoneClean, loyaltyBalance: retryClient.loyalty_balance || 0 };
+      if (error) {
+          if (error.code === '23505') { 
+             const { data: retryClient } = await supabase.from('clientes').select('*').eq('phone', phoneClean).maybeSingle();
+             if (retryClient) return { ...client, id: retryClient.client_id, phone: phoneClean, loyaltyBalance: retryClient.loyalty_balance || 0, photoUrl: retryClient.photo_url };
           }
+          if (error.code === '42501') throw new Error("Erro de Permissão (RLS) ao criar cliente. Atualize o banco.");
+          throw error;
       }
-      
-      if (error) throw error;
       
       if (createdBy) {
           db.audit.log(createdBy, 'STAFF', 'CREATE_CLIENT', `Criou cliente ${client.name}`, client.id);
       }
 
-      CACHE.clients = null; // INVALIDATE CACHE
+      CACHE.clients = null;
       return { ...client, phone: phoneClean, tags: currentTags, funnelStage: initialStage, loyaltyBalance: 0 };
     },
     update: async (client: Client, updatedBy?: string) => {
-      const dbClient = {
+      const dbClient: any = {
         name: client.name,
         phone: cleanPhone(client.phone),
         email: client.email,
         tags: client.tags,
         last_contact_at: client.lastContactAt,
-        ...(client.funnelStage ? { funnel_stage: client.funnelStage } : {})
+        photo_url: client.photoUrl
       };
       
+      if (client.funnelStage) dbClient.funnel_stage = client.funnelStage;
+      
+      // Update Password if present in object but normally handled by dedicated methods
+      if (client.password) dbClient.password = client.password;
+
       const { error } = await supabase.from('clientes').update(dbClient).eq('client_id', client.id);
       if (error) console.error("Erro ao atualizar cliente:", error);
       
@@ -512,11 +532,11 @@ export const db = {
           db.audit.log(updatedBy, 'STAFF', 'UPDATE_CLIENT', `Atualizou dados de ${client.name}`, client.id);
       }
 
-      CACHE.clients = null; // INVALIDATE CACHE
+      CACHE.clients = null;
     },
     updateLastContact: async (clientId: string) => {
       await supabase.from('clientes').update({ last_contact_at: new Date().toISOString() }).eq('client_id', clientId);
-      CACHE.clients = null; // INVALIDATE CACHE
+      CACHE.clients = null;
     },
     updateStage: async (clientId: string, newStage: FunnelStage) => {
         let { data, error } = await supabase.from('clientes').select('tags').eq('client_id', clientId).single();
@@ -531,11 +551,10 @@ export const db = {
         };
 
         await supabase.from('clientes').update(updatePayload).eq('client_id', clientId);
-        CACHE.clients = null; // INVALIDATE CACHE
+        CACHE.clients = null;
     }
   },
 
-  // Serviço de Fidelidade
   loyalty: {
       getHistory: async (clientId: string): Promise<LoyaltyTransaction[]> => {
           const { data, error } = await supabase
@@ -556,7 +575,6 @@ export const db = {
           }));
       },
       addTransaction: async (clientId: string, amount: number, description: string, userId?: string) => {
-          // Insere transação
           const { error } = await supabase.from('loyalty_transactions').insert({
               client_id: clientId,
               amount: amount,
@@ -564,9 +582,11 @@ export const db = {
               created_by: userId
           });
           
-          if (error) throw error;
+          if (error) {
+              if (error.code === '42501') throw new Error("Erro RLS: Não foi possível gravar fidelidade.");
+              throw error;
+          }
 
-          // Atualiza saldo do cliente
           const { data: client } = await supabase.from('clientes').select('loyalty_balance').eq('client_id', clientId).single();
           const currentBalance = client?.loyalty_balance || 0;
           
@@ -576,16 +596,15 @@ export const db = {
 
           if (userId) {
               const action = amount > 0 ? 'LOYALTY_ADD' : 'LOYALTY_REMOVE';
-              db.audit.log(userId, 'STAFF', action, `Ajuste de ${amount} pontos para cliente ${clientId}. Motivo: ${description}`, clientId);
+              db.audit.log(userId, 'STAFF', action, `Ajuste de ${amount} pontos para cliente ${clientId}.`, clientId);
           }
 
-          CACHE.clients = null; // INVALIDATE CACHE
+          CACHE.clients = null;
       }
   },
 
   reservations: {
     getAll: async (): Promise<Reservation[]> => {
-      // CHECK CACHE
       if (CACHE.reservations) return CACHE.reservations;
 
       const { data, error } = await supabase.from('reservas').select('*');
@@ -616,7 +635,50 @@ export const db = {
         createdBy: r.created_by
       }));
 
-      CACHE.reservations = mapped; // SET CACHE
+      // --- AUTOMATIC EXPIRATION CHECK (30 MIN RULE) ---
+      // Verificação "Preguiçosa": Quando os dados são lidos, verificamos se há algo expirado
+      // Se houver, atualizamos o banco silenciosamente
+      const now = new Date();
+      const expiredIds: string[] = [];
+
+      mapped.forEach((r: Reservation) => {
+          if (r.status === ReservationStatus.PENDENTE && r.createdAt) {
+              const created = new Date(r.createdAt);
+              const diffMinutes = (now.getTime() - created.getTime()) / (1000 * 60);
+              
+              if (diffMinutes > 30) {
+                  expiredIds.push(r.id);
+                  // Atualiza localmente para refletir na UI instantaneamente
+                  r.status = ReservationStatus.CANCELADA;
+                  r.observations = (r.observations || '') + ' [Cancelado: Tempo de confirmação excedido]';
+              }
+          }
+      });
+
+      if (expiredIds.length > 0) {
+          // Dispara atualização em background (sem await para não travar a UI)
+          (async () => {
+              try {
+                console.log(`[Auto-Expire] Cancelando ${expiredIds.length} reservas expiradas...`);
+                await supabase
+                    .from('reservas')
+                    .update({ 
+                        status: ReservationStatus.CANCELADA,
+                        observations: 'Cancelado: Tempo de confirmação excedido'
+                    })
+                    .in('id', expiredIds);
+                
+                // Grava log de auditoria
+                for (const id of expiredIds) {
+                     await db.audit.log('SYSTEM', 'SISTEMA', 'AUTO_CANCEL', 'Reserva expirou (30min sem pagamento)', id);
+                }
+              } catch (err) {
+                  console.error("Erro ao auto-cancelar reservas:", err);
+              }
+          })();
+      }
+
+      CACHE.reservations = mapped;
       return mapped;
     },
     create: async (res: Reservation, createdByUserId?: string) => {
@@ -642,17 +704,20 @@ export const db = {
         has_table_reservation: res.hasTableReservation,
         birthday_name: res.birthdayName,
         table_seat_count: res.tableSeatCount,
-        created_by: createdByUserId // Grava ID do criador
+        created_by: createdByUserId
       };
       
       const { error } = await supabase.from('reservas').insert(dbRes);
-      if (error) throw error;
+      if (error) {
+          if (error.code === '42501') throw new Error("Erro de Permissão (RLS): O sistema não pôde criar a reserva. Execute o SQL de correção.");
+          throw error;
+      }
       
       if (createdByUserId) {
-          db.audit.log(createdByUserId, 'STAFF', 'CREATE_RESERVATION', `Criou reserva para ${res.clientName} em ${res.date} às ${res.time}`, res.id);
+          db.audit.log(createdByUserId, 'STAFF', 'CREATE_RESERVATION', `Criou reserva para ${res.clientName} em ${res.date}`, res.id);
       }
 
-      CACHE.reservations = null; // INVALIDATE CACHE
+      CACHE.reservations = null;
       return res;
     },
     update: async (res: Reservation, updatedByUserId?: string, actionDetail?: string) => {
@@ -682,7 +747,7 @@ export const db = {
            db.audit.log(updatedByUserId, 'STAFF', 'UPDATE_RESERVATION', actionDetail || `Atualizou reserva de ${res.clientName}`, res.id);
       }
 
-      CACHE.reservations = null; // INVALIDATE CACHE
+      CACHE.reservations = null;
     }
   },
 
@@ -768,7 +833,7 @@ export const db = {
         mercadopagoClientId: data.mercadopago_client_id || INITIAL_SETTINGS.mercadopagoClientId,
         mercadopagoClientSecret: data.mercadopago_client_secret || INITIAL_SETTINGS.mercadopagoClientSecret,
         businessHours: businessHours,
-        blockedDates: data.blocked_dates || [] // Map blocked_dates from DB
+        blockedDates: data.blocked_dates || []
       };
     },
     
@@ -788,7 +853,7 @@ export const db = {
         mercadopago_access_token: s.mercadopagoAccessToken,
         mercadopago_client_id: s.mercadopagoClientId,
         mercadopago_client_secret: s.mercadopagoClientSecret,
-        blocked_dates: s.blockedDates // Save blocked dates
+        blocked_dates: s.blockedDates
       };
       
       const { error: configError } = await supabase.from('configuracoes').upsert(dbSettings);
@@ -796,10 +861,9 @@ export const db = {
       window.dispatchEvent(new Event('settings_updated'));
 
       if (configError) {
+        if (configError.code === '42501') throw new Error("Erro RLS: Execute o SQL de correção no Supabase.");
         const msg = configError.message || configError.code || 'Erro desconhecido';
-        if (msg.includes('column')) {
-             throw new Error(`Erro de Tabela: Coluna ausente. Execute no Supabase: ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS blocked_dates text[] DEFAULT '{}';`);
-        }
+        if (msg.includes('column')) throw new Error(`Erro de Tabela: Coluna ausente. Verifique o banco.`);
         throw new Error(`Falha ao salvar dados gerais: ${msg}`);
       }
     },
@@ -818,6 +882,7 @@ export const db = {
           .upsert(hoursPayload, { onConflict: 'config_id,day_of_week' });
 
       if (hoursError) {
+          if (hoursError.code === '42501') throw new Error("Erro RLS: Não foi possível salvar horários.");
           throw new Error("Falha ao salvar horários de funcionamento.");
       }
     },

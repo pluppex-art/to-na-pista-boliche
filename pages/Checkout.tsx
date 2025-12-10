@@ -45,10 +45,18 @@ const Checkout: React.FC = () => {
   useEffect(() => {
       if (isSuccess) {
           const timer = setTimeout(() => {
+              // Verifica se é membro da equipe (Staff) ou Cliente
+              const staffAuth = localStorage.getItem('tonapista_auth');
               const clientAuth = localStorage.getItem('tonapista_client_auth');
-              if (clientAuth) {
+              
+              if (staffAuth) {
+                  // Equipe vai para Agenda
+                  navigate('/agenda');
+              } else if (clientAuth) {
+                  // Cliente vai para Minha Conta
                   navigate('/minha-conta');
               } else {
+                  // Fallback para login se não tiver sessão
                   navigate('/login');
               }
           }, 3000); // 3 segundos para ver a mensagem de sucesso

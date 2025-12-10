@@ -1,18 +1,36 @@
-
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Client, Reservation, LoyaltyTransaction } from '../types';
+import { Client, Reservation, LoyaltyTransaction, ReservationStatus, PaymentStatus } from '../types';
 import { db } from '../services/mockBackend';
 import { useApp } from '../contexts/AppContext';
-import { LogOut, User, Gift, Clock, Calendar, MapPin, Coins, Loader2, MessageCircle } from 'lucide-react';
+import { LogOut, User, Gift, Clock, Calendar, MapPin, Coins, Loader2, MessageCircle, Edit, Save, X, Camera, CreditCard, AlertCircle, Trash2, HelpCircle } from 'lucide-react';
 
 const ClientDashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { settings } = useApp();
+  const { settings, refreshUser } = useApp();
   const [client, setClient] = useState<Client | null>(null);
   const [history, setHistory] = useState<Reservation[]>([]);
   const [loyalty, setLoyalty] = useState<LoyaltyTransaction[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Edit Profile State
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', photoUrl: '' });
+  const [isSaving, setIsSaving] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Cancel State
+  const [reservationToCancel, setReservationToCancel] = useState<Reservation | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+
+  // Clock for countdowns
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    // Update "now" every minute for countdowns
+    const interval = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const stored = localStorage.getItem('tonapista_client_auth');
@@ -26,26 +44,163 @@ const ClientDashboard: React.FC = () => {
         setLoading(true);
         // Refresh client data
         const freshClient = await db.clients.getById(clientData.id);
-        if (freshClient) setClient(freshClient);
-        else setClient(clientData); // Fallback
+        const activeClient = freshClient || clientData;
+        
+        setClient(activeClient);
+        setEditForm({
+            name: activeClient.name,
+            email: activeClient.email || '',
+            phone: activeClient.phone,
+            photoUrl: activeClient.photoUrl || ''
+        });
 
         // Load History
         const allRes = await db.reservations.getAll();
-        const myRes = allRes.filter(r => r.clientId === clientData.id).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        // Ordena pela DATA DE CRIAÇÃO (createdAt) decrescente - Último agendamento realizado aparece primeiro
+        const myRes = allRes
+            .filter(r => r.clientId === activeClient.id)
+            .sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            
         setHistory(myRes);
 
         // Load Loyalty
-        const pts = await db.loyalty.getHistory(clientData.id);
+        const pts = await db.loyalty.getHistory(activeClient.id);
         setLoyalty(pts);
         
         setLoading(false);
     };
     loadData();
-  }, [navigate]);
+  }, [navigate, now]); // Added 'now' to re-fetch? No, actually re-fetch isn't needed on 'now' change, but ensures we check status
 
   const handleLogout = () => {
       localStorage.removeItem('tonapista_client_auth');
       navigate('/login');
+  };
+
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 1024 * 1024 * 2) {
+          alert("Imagem muito grande. Máximo 2MB.");
+          return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setEditForm(prev => ({ ...prev, photoUrl: reader.result as string }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSaveProfile = async () => {
+      if (!client) return;
+      setIsSaving(true);
+      try {
+          const updatedClient = {
+              ...client,
+              name: editForm.name,
+              email: editForm.email,
+              phone: editForm.phone,
+              photoUrl: editForm.photoUrl
+          };
+          
+          await db.clients.update(updatedClient);
+          
+          // Update Local Storage and State
+          localStorage.setItem('tonapista_client_auth', JSON.stringify(updatedClient));
+          setClient(updatedClient);
+          setIsEditing(false);
+          alert("Perfil atualizado com sucesso!");
+      } catch (e) {
+          console.error(e);
+          alert("Erro ao atualizar perfil.");
+      } finally {
+          setIsSaving(false);
+      }
+  };
+
+  const handlePayNow = (res: Reservation) => {
+      navigate('/checkout', { 
+          state: {
+              name: client?.name,
+              whatsapp: client?.phone,
+              email: client?.email,
+              date: res.date,
+              time: res.time,
+              people: res.peopleCount,
+              lanes: res.laneCount,
+              duration: res.duration,
+              type: res.eventType,
+              totalValue: res.totalValue,
+              obs: res.observations,
+              reservationIds: [res.id] // Pass ID to update instead of create
+          } 
+      });
+  };
+
+  const handleEditRequest = (res: Reservation) => {
+      const message = `Olá, gostaria de alterar minha reserva (ID: ${res.id.slice(0,5)}) para o dia ${new Date(res.date).toLocaleDateString('pt-BR')}.`;
+      const whatsappUrl = `https://wa.me/55${settings.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+      window.open(whatsappUrl, '_blank');
+  };
+
+  const handleCancelRequest = async () => {
+      if (!reservationToCancel) return;
+      if (!cancelReason.trim()) { alert("Por favor, informe um motivo."); return; }
+
+      try {
+          // Re-use logic similar to Agenda but customized for self-service
+          const res = reservationToCancel;
+          
+          // Estorno de pontos se já pago
+          const shouldRevertPoints = res.status === ReservationStatus.CONFIRMADA || res.paymentStatus === PaymentStatus.PAGO;
+          if (shouldRevertPoints && client) {
+               const points = Math.floor(res.totalValue);
+               if (points > 0) {
+                   await db.loyalty.addTransaction(client.id, -points, "Estorno: Cancelamento pelo Cliente");
+               }
+          }
+
+          const updatedRes = { 
+              ...res, 
+              status: ReservationStatus.CANCELADA, 
+              observations: (res.observations || '') + ` [Cancelado pelo cliente: ${cancelReason}]` 
+          };
+          
+          await db.reservations.update(updatedRes, 'CLIENT', `Cliente cancelou: ${cancelReason}`);
+          
+          setHistory(prev => prev.map(r => r.id === res.id ? updatedRes : r));
+          setReservationToCancel(null);
+          setCancelReason('');
+          alert("Reserva cancelada.");
+      } catch (e) {
+          console.error(e);
+          alert("Erro ao cancelar.");
+      }
+  };
+
+  // Helper: Check if reservation is more than 2 hours away
+  const canCancel = (res: Reservation) => {
+      if (res.status === ReservationStatus.CANCELADA) return false;
+      const gameDate = new Date(`${res.date}T${res.time}`);
+      const diffMs = gameDate.getTime() - now.getTime();
+      const diffHours = diffMs / (1000 * 60 * 60);
+      return diffHours >= 2;
+  };
+
+  // Helper: Get remaining time for pending reservations
+  const getExpiresIn = (res: Reservation) => {
+      if (res.status !== ReservationStatus.PENDENTE) return null;
+      if (!res.createdAt) return null;
+      
+      const created = new Date(res.createdAt);
+      const expiresAt = new Date(created.getTime() + 30 * 60000); // 30 mins later
+      const diffMs = expiresAt.getTime() - now.getTime();
+      
+      if (diffMs <= 0) return "Expirado";
+      
+      const mins = Math.ceil(diffMs / 60000);
+      return `${mins} min`;
   };
 
   if (loading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="animate-spin text-neon-blue" size={48}/></div>;
@@ -63,15 +218,66 @@ const ClientDashboard: React.FC = () => {
 
         <main className="max-w-md mx-auto p-4 space-y-6">
             
-            {/* User Welcome */}
-            <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-slate-800 rounded-full flex items-center justify-center border border-slate-700 text-neon-blue">
-                    <User size={24}/>
-                </div>
-                <div>
-                    <h2 className="text-lg font-bold text-white">Olá, {client.name.split(' ')[0]}!</h2>
-                    <p className="text-sm text-slate-400">Bom te ver por aqui.</p>
-                </div>
+            {/* User Profile Section */}
+            <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 relative">
+                {!isEditing ? (
+                    <div className="flex items-center gap-4">
+                        <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center border-2 border-slate-700 text-neon-blue overflow-hidden relative">
+                            {client.photoUrl ? (
+                                <img src={client.photoUrl} alt="Perfil" className="w-full h-full object-cover" />
+                            ) : (
+                                <User size={32}/>
+                            )}
+                        </div>
+                        <div className="flex-1">
+                            <h2 className="text-lg font-bold text-white">{client.name}</h2>
+                            <p className="text-sm text-slate-400">{client.email || client.phone}</p>
+                        </div>
+                        <button onClick={() => setIsEditing(true)} className="p-2 bg-slate-800 rounded-full text-slate-400 hover:text-white border border-slate-700">
+                            <Edit size={18}/>
+                        </button>
+                    </div>
+                ) : (
+                    <div className="space-y-4 animate-fade-in">
+                        <div className="flex justify-between items-center mb-2">
+                            <h3 className="font-bold text-white">Editar Perfil</h3>
+                            <button onClick={() => setIsEditing(false)} className="text-slate-400 hover:text-white"><X size={20}/></button>
+                        </div>
+                        
+                        <div className="flex justify-center mb-4">
+                            <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                                <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center border-2 border-slate-600 overflow-hidden">
+                                    {editForm.photoUrl ? (
+                                        <img src={editForm.photoUrl} className="w-full h-full object-cover" />
+                                    ) : (
+                                        <User size={32} className="text-slate-500"/>
+                                    )}
+                                </div>
+                                <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                                    <Camera size={20} className="text-white"/>
+                                </div>
+                                <input type="file" ref={fileInputRef} onChange={handlePhotoUpload} className="hidden" accept="image/*"/>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="text-xs text-slate-500 block mb-1">Nome Completo</label>
+                            <input className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white text-sm focus:border-neon-blue outline-none" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} />
+                        </div>
+                        <div>
+                            <label className="text-xs text-slate-500 block mb-1">E-mail</label>
+                            <input className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white text-sm focus:border-neon-blue outline-none" value={editForm.email} onChange={e => setEditForm({...editForm, email: e.target.value})} />
+                        </div>
+                        <div>
+                            <label className="text-xs text-slate-500 block mb-1">Telefone</label>
+                            <input className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white text-sm focus:border-neon-blue outline-none" value={editForm.phone} onChange={e => setEditForm({...editForm, phone: e.target.value})} />
+                        </div>
+
+                        <button onClick={handleSaveProfile} disabled={isSaving} className="w-full bg-neon-blue hover:bg-blue-600 text-white font-bold py-2 rounded-lg flex items-center justify-center gap-2">
+                            {isSaving ? <Loader2 className="animate-spin" size={18}/> : <><Save size={18}/> Salvar Alterações</>}
+                        </button>
+                    </div>
+                )}
             </div>
 
             {/* Loyalty Card */}
@@ -105,7 +311,7 @@ const ClientDashboard: React.FC = () => {
 
             {/* History Tabs (Recent vs Loyalty) */}
             <div>
-                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Clock size={18} className="text-slate-400"/> Atividades Recentes</h3>
+                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Clock size={18} className="text-slate-400"/> Meus Agendamentos</h3>
                 
                 {history.length === 0 ? (
                     <div className="text-center p-8 bg-slate-900 rounded-xl border border-slate-800 border-dashed text-slate-500">
@@ -113,22 +319,94 @@ const ClientDashboard: React.FC = () => {
                     </div>
                 ) : (
                     <div className="space-y-3">
-                        {history.slice(0, 5).map(res => (
-                            <div key={res.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex justify-between items-center">
-                                <div>
-                                    <p className="text-white font-medium">{new Date(res.date).toLocaleDateString('pt-BR')} às {res.time}</p>
-                                    <p className="text-xs text-slate-500">{res.eventType} • {res.laneCount} Pista(s)</p>
+                        {history.map(res => {
+                            const expiresIn = getExpiresIn(res);
+                            const allowCancel = canCancel(res);
+
+                            return (
+                                <div key={res.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-col gap-3">
+                                    <div className="flex justify-between items-start">
+                                        <div>
+                                            <p className="text-white font-medium">{new Date(res.date).toLocaleDateString('pt-BR')} às {res.time}</p>
+                                            <p className="text-xs text-slate-500">{res.eventType} • {res.laneCount} Pista(s)</p>
+                                        </div>
+                                        <div className={`text-xs font-bold px-2 py-1 rounded uppercase ${res.status === ReservationStatus.CONFIRMADA ? 'bg-green-900/30 text-green-400' : res.status === ReservationStatus.PENDENTE ? 'bg-yellow-900/30 text-yellow-500' : 'bg-slate-800 text-slate-400'}`}>
+                                            {res.status}
+                                        </div>
+                                    </div>
+                                    
+                                    {/* Expiration Warning for Pending */}
+                                    {res.status === ReservationStatus.PENDENTE && res.paymentStatus !== PaymentStatus.PAGO && expiresIn && (
+                                        <div className="text-xs text-yellow-500 flex items-center gap-1 font-bold animate-pulse">
+                                            <Clock size={12}/> Expira em: {expiresIn}
+                                        </div>
+                                    )}
+                                    
+                                    {/* Cancellation Reason Display if Cancelled */}
+                                    {res.status === ReservationStatus.CANCELADA && res.observations && res.observations.includes('Cancelado:') && (
+                                        <div className="text-xs text-red-400 italic border-l-2 border-red-500/30 pl-2">
+                                            {res.observations.split('Cancelado:')[1].replace(']', '')}
+                                        </div>
+                                    )}
+
+                                    {/* Action Buttons */}
+                                    {res.status !== ReservationStatus.CANCELADA && (
+                                        <div className="pt-3 border-t border-slate-800 flex flex-col gap-2">
+                                            {res.status === ReservationStatus.PENDENTE && res.paymentStatus !== PaymentStatus.PAGO && (
+                                                <button 
+                                                    onClick={() => handlePayNow(res)}
+                                                    className="w-full bg-green-600 hover:bg-green-500 text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center justify-center gap-2 shadow-lg mb-2"
+                                                >
+                                                    <CreditCard size={14}/> Pagar Agora
+                                                </button>
+                                            )}
+
+                                            <div className="flex justify-between items-center px-1">
+                                                <button onClick={() => handleEditRequest(res)} className="text-xs text-slate-500 hover:text-white hover:underline transition flex items-center gap-1">
+                                                    <Edit size={12}/> Alterar Reserva
+                                                </button>
+                                                
+                                                {allowCancel && (
+                                                    <button onClick={() => setReservationToCancel(res)} className="text-xs text-red-500/70 hover:text-red-400 hover:underline transition flex items-center gap-1">
+                                                        <Trash2 size={12}/> Cancelar
+                                                    </button>
+                                                )}
+                                            </div>
+                                            {!allowCancel && res.status !== ReservationStatus.CANCELADA && (
+                                                <p className="text-[10px] text-slate-600 text-center italic mt-1">Cancelamento disponível até 2h antes.</p>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
-                                <div className={`text-xs font-bold px-2 py-1 rounded uppercase ${res.status === 'Confirmada' ? 'bg-green-900/30 text-green-400' : 'bg-slate-800 text-slate-400'}`}>
-                                    {res.status}
-                                </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </div>
 
         </main>
+
+        {/* Cancel Confirmation Modal */}
+        {reservationToCancel && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                <div className="bg-slate-800 border border-slate-700 w-full max-w-sm rounded-xl shadow-2xl p-6 animate-scale-in">
+                     <h3 className="text-lg font-bold text-white mb-2">Cancelar Reserva?</h3>
+                     <p className="text-sm text-slate-400 mb-4">Tem certeza que deseja cancelar? O valor pago poderá ser convertido em crédito.</p>
+                     
+                     <textarea 
+                        className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white text-sm mb-4"
+                        placeholder="Motivo do cancelamento..."
+                        value={cancelReason}
+                        onChange={e => setCancelReason(e.target.value)}
+                     />
+
+                     <div className="flex gap-2">
+                         <button onClick={() => { setReservationToCancel(null); setCancelReason(''); }} className="flex-1 py-2 rounded bg-slate-700 text-white text-sm">Voltar</button>
+                         <button onClick={handleCancelRequest} className="flex-1 py-2 rounded bg-red-600 text-white font-bold text-sm">Confirmar</button>
+                     </div>
+                </div>
+            </div>
+        )}
 
         {/* Floating WhatsApp Button */}
         {settings && (
