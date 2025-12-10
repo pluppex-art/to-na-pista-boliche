@@ -1,9 +1,11 @@
+
+
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
-import { Reservation, ReservationStatus, EventType, UserRole } from '../types';
+import { Reservation, ReservationStatus, EventType, UserRole, PaymentStatus } from '../types';
 import { useApp } from '../contexts/AppContext'; // Context
 import { generateDailySlots, checkHourCapacity } from '../utils/availability'; // Utils
-import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, CheckCircle2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, CheckCircle2, X, AlertTriangle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -28,6 +30,10 @@ const Agenda: React.FC = () => {
   const [editingRes, setEditingRes] = useState<Reservation | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Reservation>>({});
+  
+  // Cancel Logic State
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
   
   const [selectedEditTimes, setSelectedEditTimes] = useState<string[]>([]);
   const [availableSlots, setAvailableSlots] = useState<any[]>([]);
@@ -132,11 +138,19 @@ const Agenda: React.FC = () => {
       });
   };
 
-  const closeResModal = () => { setEditingRes(null); setIsEditMode(false); setEditForm({}); };
+  const closeResModal = () => { 
+      setEditingRes(null); 
+      setIsEditMode(false); 
+      setEditForm({}); 
+      setIsCancelling(false);
+      setCancelReason('');
+  };
 
   const openResModal = (res: Reservation) => {
     setEditingRes(res);
     setIsEditMode(false);
+    setIsCancelling(false);
+    setCancelReason('');
     const times = [];
     const startHour = parseInt(res.time.split(':')[0]);
     for(let i=0; i<res.duration; i++) times.push(`${startHour + i}:00`);
@@ -217,8 +231,13 @@ const Agenda: React.FC = () => {
 
   const handleStatusChange = async (status: ReservationStatus) => {
     if (editingRes) {
-      if (status === ReservationStatus.CANCELADA && !canDelete) { alert("Sem permissão."); return; }
-      if (status !== ReservationStatus.CANCELADA && !canEdit) { alert("Sem permissão."); return; }
+      if (status === ReservationStatus.CANCELADA) {
+          // Agora o cancelamento é tratado por handleConfirmCancellation
+          setIsCancelling(true);
+          return;
+      }
+      
+      if (!canEdit) { alert("Sem permissão."); return; }
       
       // Lógica de Fidelidade: Se o status mudar para CONFIRMADA e antes NÃO ERA confirmada, adiciona pontos
       if (status === ReservationStatus.CONFIRMADA && editingRes.status !== ReservationStatus.CONFIRMADA) {
@@ -242,6 +261,44 @@ const Agenda: React.FC = () => {
       await db.reservations.update(updated, currentUser?.id, `Alterou status para ${status}`);
       setEditingRes(null); loadData();
     }
+  };
+
+  const handleConfirmCancellation = async () => {
+      if (!editingRes) return;
+      if (!canDelete) { alert("Sem permissão para cancelar."); return; }
+      if (!cancelReason.trim()) { alert("A justificativa é obrigatória."); return; }
+
+      setLoading(true);
+      try {
+          // ESTORNO DE PONTOS DE FIDELIDADE
+          // Se a reserva já estava CONFIRMADA ou PAGA, subtrai os pontos
+          const shouldRevertPoints = editingRes.status === ReservationStatus.CONFIRMADA || editingRes.paymentStatus === PaymentStatus.PAGO;
+
+          if (shouldRevertPoints) {
+              const points = Math.floor(editingRes.totalValue);
+              if (points > 0) {
+                  await db.loyalty.addTransaction(
+                      editingRes.clientId,
+                      -points, // Valor negativo para subtrair
+                      `Estorno: Cancelamento de Reserva`,
+                      currentUser?.id
+                  );
+              }
+          }
+
+          const updated = { ...editingRes, status: ReservationStatus.CANCELADA };
+          // Atualiza com o motivo no log de auditoria
+          await db.reservations.update(updated, currentUser?.id, `CANCELADO. Motivo: ${cancelReason}`);
+          setEditingRes(null);
+          setIsCancelling(false);
+          setCancelReason('');
+          loadData();
+      } catch (e) {
+          console.error(e);
+          alert("Erro ao cancelar reserva.");
+      } finally {
+          setLoading(false);
+      }
   };
 
   const changeDate = (days: number) => {
@@ -363,13 +420,13 @@ const Agenda: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
           <div className="bg-slate-800 border border-slate-600 w-full max-w-2xl rounded-2xl shadow-2xl animate-scale-in flex flex-col max-h-[90vh]">
             <div className="p-6 border-b border-slate-700 flex justify-between items-center">
-              <div className="flex items-center gap-3"><h3 className="text-xl font-bold text-white">Detalhes da Reserva</h3>{!isEditMode && canEdit && (<button onClick={() => setIsEditMode(true)} className="p-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition"><Pencil size={14} /></button>)}</div>
+              <div className="flex items-center gap-3"><h3 className="text-xl font-bold text-white">Detalhes da Reserva</h3>{!isEditMode && canEdit && !isCancelling && (<button onClick={() => setIsEditMode(true)} className="p-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition"><Pencil size={14} /></button>)}</div>
               <button onClick={closeResModal} className="text-slate-400 hover:text-white"><X /></button>
             </div>
             
             {!isEditMode ? (
                 <div className="p-6 space-y-4 overflow-y-auto">
-                    {/* View Mode UI (same as before but compact) */}
+                    {/* View Mode UI */}
                     <div className="grid grid-cols-2 gap-4 text-sm">
                         <div><p className="text-slate-400">Cliente</p><p className="text-white font-medium text-lg">{editingRes.clientName}</p></div>
                         <div><p className="text-slate-400">Tipo</p><p className="text-neon-orange font-medium">{editingRes.eventType}</p></div>
@@ -377,11 +434,37 @@ const Agenda: React.FC = () => {
                         <div><p className="text-slate-400">Pistas</p><p className="text-white font-medium">{editingRes.laneCount} Pista(s) / {editingRes.peopleCount} Pessoas</p></div>
                         {editingRes.hasTableReservation && <div className="col-span-2 bg-slate-900/50 p-3 rounded border border-slate-700/50 flex gap-4 items-center"><div className="flex items-center gap-2"><Utensils size={16} className="text-neon-orange"/> <span className="text-white font-bold">{editingRes.tableSeatCount} Cadeiras</span></div>{editingRes.birthdayName && <div className="flex items-center gap-2 pl-4 border-l border-slate-700"><Cake size={16} className="text-neon-blue"/><span className="text-white font-bold">{editingRes.birthdayName}</span></div>}</div>}
                     </div>
-                    <div className="pt-4 border-t border-slate-700 flex gap-2">
-                        <button disabled={!canEdit} onClick={() => handleStatusChange(ReservationStatus.CONFIRMADA)} className={`px-4 py-2 rounded-lg text-sm font-medium flex-1 ${!canEdit ? 'opacity-50' : 'bg-green-600 hover:bg-green-500 text-white'}`}>Confirmar</button>
-                        <button disabled={!canEdit} onClick={() => handleStatusChange(ReservationStatus.PENDENTE)} className={`px-4 py-2 rounded-lg text-sm font-medium flex-1 ${!canEdit ? 'opacity-50' : 'bg-yellow-600 hover:bg-yellow-500 text-white'}`}>Pendente</button>
-                        <button disabled={!canDelete} onClick={() => handleStatusChange(ReservationStatus.CANCELADA)} className={`px-4 py-2 rounded-lg text-sm font-medium flex-1 ${!canDelete ? 'opacity-50' : 'bg-red-600 hover:bg-red-500 text-white'}`}>Cancelar</button>
-                    </div>
+                    
+                    {/* Botões de Ação ou Fluxo de Cancelamento */}
+                    {!isCancelling ? (
+                        <div className="pt-4 border-t border-slate-700 flex gap-2">
+                            <button disabled={!canEdit} onClick={() => handleStatusChange(ReservationStatus.CONFIRMADA)} className={`px-4 py-2 rounded-lg text-sm font-medium flex-1 ${!canEdit ? 'opacity-50' : 'bg-green-600 hover:bg-green-500 text-white'}`}>Confirmar</button>
+                            <button disabled={!canEdit} onClick={() => handleStatusChange(ReservationStatus.PENDENTE)} className={`px-4 py-2 rounded-lg text-sm font-medium flex-1 ${!canEdit ? 'opacity-50' : 'bg-yellow-600 hover:bg-yellow-500 text-white'}`}>Pendente</button>
+                            <button disabled={!canDelete} onClick={() => setIsCancelling(true)} className={`px-4 py-2 rounded-lg text-sm font-medium flex-1 ${!canDelete ? 'opacity-50' : 'bg-red-600 hover:bg-red-500 text-white'}`}>Cancelar</button>
+                        </div>
+                    ) : (
+                        <div className="pt-4 border-t border-slate-700 animate-fade-in space-y-4 bg-red-900/10 p-4 rounded-lg border border-red-500/20">
+                            <div className="flex items-start gap-3">
+                                <AlertTriangle className="text-red-500 flex-shrink-0" />
+                                <div className="w-full">
+                                    <h4 className="font-bold text-red-500 mb-2">Cancelar Reserva</h4>
+                                    <p className="text-xs text-slate-300 mb-2">Por favor, informe o motivo do cancelamento para confirmar. (Se a reserva já estiver confirmada, os pontos de fidelidade serão estornados).</p>
+                                    <textarea 
+                                        autoFocus
+                                        className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white text-sm focus:border-red-500 outline-none" 
+                                        placeholder="Justificativa (obrigatório)..."
+                                        rows={2}
+                                        value={cancelReason}
+                                        onChange={e => setCancelReason(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex gap-2 justify-end">
+                                <button onClick={() => { setIsCancelling(false); setCancelReason(''); }} className="px-3 py-2 rounded text-sm bg-slate-700 text-slate-300 hover:text-white">Voltar</button>
+                                <button onClick={handleConfirmCancellation} disabled={!cancelReason.trim()} className="px-3 py-2 rounded text-sm bg-red-600 hover:bg-red-500 text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed">Confirmar Cancelamento</button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             ) : (
                 <form onSubmit={handleSaveEdit} className="p-6 space-y-4 animate-fade-in overflow-y-auto">

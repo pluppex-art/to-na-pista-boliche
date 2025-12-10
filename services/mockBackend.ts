@@ -44,12 +44,26 @@ export const db = {
               }
           });
       },
-      getLogs: async (limit = 50): Promise<AuditLog[]> => {
-          const { data, error } = await supabase
+      getLogs: async (filters?: { userId?: string, actionType?: string, startDate?: string, endDate?: string, limit?: number }): Promise<AuditLog[]> => {
+          let query = supabase
               .from('audit_logs')
               .select('*')
-              .order('created_at', { ascending: false })
-              .limit(limit);
+              .order('created_at', { ascending: false });
+          
+          if (filters?.userId && filters.userId !== 'ALL') {
+              query = query.eq('user_id', filters.userId);
+          }
+          if (filters?.actionType && filters.actionType !== 'ALL') {
+              query = query.eq('action_type', filters.actionType);
+          }
+          if (filters?.startDate) {
+              query = query.gte('created_at', `${filters.startDate}T00:00:00`);
+          }
+          if (filters?.endDate) {
+              query = query.lte('created_at', `${filters.endDate}T23:59:59`);
+          }
+
+          const { data, error } = await query.limit(filters?.limit || 100);
           
           if (error) return [];
           
@@ -561,7 +575,8 @@ export const db = {
           }).eq('client_id', clientId);
 
           if (userId) {
-              db.audit.log(userId, 'STAFF', 'LOYALTY_UPDATE', `Adicionou ${amount} pontos para cliente ${clientId}`, clientId);
+              const action = amount > 0 ? 'LOYALTY_ADD' : 'LOYALTY_REMOVE';
+              db.audit.log(userId, 'STAFF', action, `Ajuste de ${amount} pontos para cliente ${clientId}. Motivo: ${description}`, clientId);
           }
 
           CACHE.clients = null; // INVALIDATE CACHE

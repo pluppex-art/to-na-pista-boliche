@@ -1,3 +1,5 @@
+
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { db } from '../services/mockBackend';
@@ -39,7 +41,11 @@ const Login: React.FC = () => {
     const fetchSettings = async () => {
         try {
             const s = await db.settings.get();
-            if (s.logoUrl) setLogoUrl(s.logoUrl);
+            if (s.logoUrl) {
+                setLogoUrl(s.logoUrl);
+                // Important: Reset error if we have a valid URL to force img render
+                setImgError(false); 
+            }
             if (s.establishmentName) setEstablishmentName(s.establishmentName);
         } catch (e) {
             console.error("Erro ao carregar configurações:", e);
@@ -206,11 +212,11 @@ const Login: React.FC = () => {
       <div className="absolute bottom-[-20%] right-[-10%] w-96 h-96 bg-neon-blue/20 rounded-full blur-3xl"></div>
 
       <div className="w-full max-w-md bg-slate-900/80 backdrop-blur-md border border-slate-700 rounded-2xl shadow-2xl z-10 overflow-hidden">
-        <div className="text-center p-8 pb-4 flex flex-col items-center">
+        <div className="text-center p-8 pb-4 flex flex-col items-center min-h-[120px] justify-center">
           {!imgError ? (
-             <img src={logoUrl || "/logo.png"} alt={establishmentName} className="h-20 w-auto mb-2 object-contain drop-shadow-[0_0_15px_rgba(249,115,22,0.5)]" onError={() => setImgError(true)} />
+             <img src={logoUrl || "/logo.png"} alt={establishmentName} className="h-20 w-auto mb-2 object-contain drop-shadow-[0_0_15px_rgba(249,115,22,0.5)] animate-fade-in" onError={() => { if (!logoUrl) setImgError(true) }} />
            ) : (
-             <h1 className="text-2xl font-bold text-neon-orange font-sans tracking-tighter uppercase mb-2">{establishmentName}</h1>
+             <h1 className="text-2xl font-bold text-neon-orange font-sans tracking-tighter uppercase mb-2 animate-fade-in">{establishmentName}</h1>
            )}
         </div>
 

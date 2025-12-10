@@ -1,7 +1,9 @@
+
+
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
-import { Reservation, ReservationStatus, PaymentStatus, AuditLog, StaffPerformance } from '../types';
-import { Loader2, DollarSign, TrendingUp, Users, Calendar, Filter, AlertCircle, Clock, Award, Shield, History, ArrowRight } from 'lucide-react';
+import { Reservation, ReservationStatus, PaymentStatus, AuditLog, StaffPerformance, User } from '../types';
+import { Loader2, DollarSign, TrendingUp, Users, Calendar, Filter, AlertCircle, Clock, Award, Shield, History, ArrowRight, X } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 const Financeiro: React.FC = () => {
@@ -13,6 +15,15 @@ const Financeiro: React.FC = () => {
   // Team Metrics State
   const [teamStats, setTeamStats] = useState<StaffPerformance[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+
+  // Audit Filters
+  const [auditFilters, setAuditFilters] = useState({
+      userId: 'ALL',
+      actionType: 'ALL',
+      startDate: '',
+      endDate: ''
+  });
 
   // Initialize date range to current month (Local Time)
   useEffect(() => {
@@ -27,10 +38,12 @@ const Financeiro: React.FC = () => {
     const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
     const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-    setDateRange({ 
-        start: toLocalISO(firstDay), 
-        end: toLocalISO(lastDay) 
-    });
+    const startStr = toLocalISO(firstDay);
+    const endStr = toLocalISO(lastDay);
+
+    setDateRange({ start: startStr, end: endStr });
+    // Init audit filters with same range
+    setAuditFilters(prev => ({ ...prev, startDate: startStr, endDate: endStr }));
   }, []);
 
   const refreshData = async () => {
@@ -42,15 +55,34 @@ const Financeiro: React.FC = () => {
     const stats = await db.users.getPerformance(dateRange.start, dateRange.end);
     setTeamStats(stats);
     
-    const logs = await db.audit.getLogs(50);
-    setAuditLogs(logs);
+    // Users for filter dropdown
+    const usersList = await db.users.getAll();
+    setAllUsers(usersList);
+    
+    await refreshAuditLogs();
 
     setLoading(false);
+  };
+
+  const refreshAuditLogs = async () => {
+      const logs = await db.audit.getLogs({
+          userId: auditFilters.userId,
+          actionType: auditFilters.actionType,
+          startDate: auditFilters.startDate,
+          endDate: auditFilters.endDate,
+          limit: 100 
+      });
+      setAuditLogs(logs);
   };
 
   useEffect(() => {
     refreshData();
   }, [dateRange]);
+
+  // Trigger only audit refresh when filters change (except date range which triggers full refresh)
+  useEffect(() => {
+      refreshAuditLogs();
+  }, [auditFilters.userId, auditFilters.actionType]); // Date changes already handled by refreshData effect
 
   // Filters
   const filtered = reservations.filter(r => {
@@ -122,14 +154,20 @@ const Financeiro: React.FC = () => {
                     type="date" 
                     className="bg-transparent text-white text-sm focus:outline-none border-r border-slate-700 pr-2"
                     value={dateRange.start}
-                    onChange={e => setDateRange({...dateRange, start: e.target.value})}
+                    onChange={e => {
+                        setDateRange({...dateRange, start: e.target.value});
+                        setAuditFilters(prev => ({ ...prev, startDate: e.target.value }));
+                    }}
                 />
                 <span className="text-slate-500 flex-shrink-0">até</span>
                 <input 
                     type="date" 
                     className="bg-transparent text-white text-sm focus:outline-none pl-2"
                     value={dateRange.end}
-                    onChange={e => setDateRange({...dateRange, end: e.target.value})}
+                    onChange={e => {
+                        setDateRange({...dateRange, end: e.target.value});
+                        setAuditFilters(prev => ({ ...prev, endDate: e.target.value }));
+                    }}
                 />
             </div>
         </div>
@@ -311,12 +349,40 @@ const Financeiro: React.FC = () => {
 
                 {/* Audit Log / Timeline */}
                 <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg flex flex-col h-[600px]">
-                    <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                        <Shield className="text-neon-blue"/> Auditoria (Logs)
-                    </h3>
+                    <div className="mb-4">
+                        <h3 className="text-xl font-bold text-white flex items-center gap-2 mb-4">
+                            <Shield className="text-neon-blue"/> Auditoria (Logs)
+                        </h3>
+                        {/* Audit Filters */}
+                        <div className="flex flex-col gap-2 bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+                            <div className="flex gap-2">
+                                <select 
+                                    className="bg-slate-800 border border-slate-600 rounded text-xs text-white p-2 flex-1 outline-none"
+                                    value={auditFilters.userId}
+                                    onChange={e => setAuditFilters({...auditFilters, userId: e.target.value})}
+                                >
+                                    <option value="ALL">Todos Usuários</option>
+                                    {allUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                                </select>
+                                <select 
+                                    className="bg-slate-800 border border-slate-600 rounded text-xs text-white p-2 flex-1 outline-none"
+                                    value={auditFilters.actionType}
+                                    onChange={e => setAuditFilters({...auditFilters, actionType: e.target.value})}
+                                >
+                                    <option value="ALL">Todas Ações</option>
+                                    <option value="LOGIN">Login</option>
+                                    <option value="CREATE_RESERVATION">Criar Reserva</option>
+                                    <option value="UPDATE_RESERVATION">Atualizar Reserva</option>
+                                    <option value="CREATE_CLIENT">Criar Cliente</option>
+                                    <option value="LOYALTY_UPDATE">Fidelidade</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <div className="flex-1 overflow-y-auto space-y-4 pr-2">
                         {auditLogs.length === 0 ? (
-                            <div className="text-center text-slate-500 py-10">Nenhuma atividade recente.</div>
+                            <div className="text-center text-slate-500 py-10">Nenhuma atividade com os filtros atuais.</div>
                         ) : (
                             auditLogs.map(log => (
                                 <div key={log.id} className="relative pl-6 pb-4 border-l border-slate-700 last:border-0 last:pb-0">
@@ -334,7 +400,7 @@ const Financeiro: React.FC = () => {
                         )}
                     </div>
                     <div className="pt-4 mt-4 border-t border-slate-700 text-center">
-                         <button onClick={refreshData} className="text-xs text-neon-blue hover:text-white flex items-center justify-center gap-1 mx-auto"><History size={12}/> Atualizar Logs</button>
+                         <button onClick={refreshAuditLogs} className="text-xs text-neon-blue hover:text-white flex items-center justify-center gap-1 mx-auto"><History size={12}/> Atualizar Logs</button>
                     </div>
                 </div>
             </div>
