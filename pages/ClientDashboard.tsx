@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Client, Reservation, LoyaltyTransaction, ReservationStatus, PaymentStatus } from '../types';
 import { db } from '../services/mockBackend';
 import { useApp } from '../contexts/AppContext';
-import { LogOut, User, Gift, Clock, Calendar, MapPin, Coins, Loader2, MessageCircle, Edit, Save, X, Camera, CreditCard, AlertCircle, Trash2, HelpCircle } from 'lucide-react';
+import { LogOut, User, Gift, Clock, Calendar, MapPin, Coins, Loader2, MessageCircle, Edit, Save, X, Camera, CreditCard, AlertCircle, Trash2, HelpCircle, Store } from 'lucide-react';
 
 const ClientDashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -335,24 +335,31 @@ const ClientDashboard: React.FC = () => {
                                         </div>
                                     </div>
                                     
-                                    {/* Expiration Warning for Pending */}
-                                    {res.status === ReservationStatus.PENDENTE && res.paymentStatus !== PaymentStatus.PAGO && expiresIn && (
+                                    {/* Expiration Warning for Pending (Exclude Pay On Site) */}
+                                    {res.status === ReservationStatus.PENDENTE && res.paymentStatus !== PaymentStatus.PAGO && !res.payOnSite && expiresIn && (
                                         <div className="text-xs text-yellow-500 flex items-center gap-1 font-bold animate-pulse">
                                             <Clock size={12}/> Expira em: {expiresIn}
                                         </div>
                                     )}
+
+                                    {/* Pay On Site Badge */}
+                                    {res.status === ReservationStatus.PENDENTE && res.payOnSite && (
+                                        <div className="text-xs text-blue-400 flex items-center gap-1 font-bold bg-blue-900/20 px-2 py-1 rounded w-fit border border-blue-500/20">
+                                            <Store size={12}/> Pagamento no Local (Confirmado)
+                                        </div>
+                                    )}
                                     
                                     {/* Cancellation Reason Display if Cancelled */}
-                                    {(res.status as ReservationStatus) === ReservationStatus.CANCELADA && res.observations && res.observations.includes('Cancelado:') && (
+                                    {res.status === ReservationStatus.CANCELADA && res.observations && res.observations.includes('Cancelado:') && (
                                         <div className="text-xs text-red-400 italic border-l-2 border-red-500/30 pl-2">
-                                            {res.observations.split('Cancelado:')[1].replace(']', '')}
+                                            {res.observations.split('Cancelado:')[1]?.replace(']', '')}
                                         </div>
                                     )}
 
                                     {/* Action Buttons */}
-                                    {res.status !== ReservationStatus.CANCELADA && (
+                                    {(res.status as ReservationStatus) !== ReservationStatus.CANCELADA && (
                                         <div className="pt-3 border-t border-slate-800 flex flex-col gap-2">
-                                            {res.status === ReservationStatus.PENDENTE && res.paymentStatus !== PaymentStatus.PAGO && (
+                                            {res.status === ReservationStatus.PENDENTE && res.paymentStatus !== PaymentStatus.PAGO && !res.payOnSite && (
                                                 <button 
                                                     onClick={() => handlePayNow(res)}
                                                     className="w-full bg-green-600 hover:bg-green-500 text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center justify-center gap-2 shadow-lg mb-2"

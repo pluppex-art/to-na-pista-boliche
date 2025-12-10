@@ -109,6 +109,9 @@ export interface Reservation {
   birthdayName?: string;
   tableSeatCount?: number;
 
+  // Controle de Pagamento no Local
+  payOnSite?: boolean;
+
   // Auditoria
   createdBy?: string; // User ID of staff who created
 }

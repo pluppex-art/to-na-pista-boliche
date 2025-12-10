@@ -1,10 +1,11 @@
+
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
 import { supabase } from '../services/supabaseClient';
 import { Reservation, ReservationStatus, EventType, UserRole, PaymentStatus } from '../types';
 import { useApp } from '../contexts/AppContext'; // Context
 import { generateDailySlots, checkHourCapacity } from '../utils/availability'; // Utils
-import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, CheckCircle2, X, AlertTriangle, MessageCircle, Clock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, CheckCircle2, X, AlertTriangle, MessageCircle, Clock, Store } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -73,9 +74,10 @@ const Agenda: React.FC = () => {
       setMetrics({ totalSlots: total, pendingSlots: pending, confirmedSlots: confirmed, checkInSlots: checkIn, noShowSlots: noShow });
 
       // --- CHECK EXPIRING SOON ---
-      // Find pending reservations created between 20 and 30 minutes ago
+      // Find pending reservations created between 20 and 30 minutes ago, EXCLUDING payOnSite
       const now = new Date();
       const expiring = allReservations.filter(r => {
+          if (r.payOnSite) return false; // Ignore reservations marked to pay on site
           if (r.status !== ReservationStatus.PENDENTE) return false;
           if (!r.createdAt) return false;
           const created = new Date(r.createdAt);
@@ -462,6 +464,12 @@ const Agenda: React.FC = () => {
                                         <div className="flex items-center gap-1 text-[11px] text-slate-400 mt-0.5"><Phone size={10} /> {clientPhones[res.clientId] || 'Sem telefone'}</div>
                                         <div className="flex items-center gap-2 mt-2">
                                             {isCheckedIn ? <span className="text-[10px] font-bold text-green-400 bg-green-500/20 px-1 rounded uppercase">CHECK-IN</span> : isNoShow ? <span className="text-[10px] font-bold text-red-400 bg-red-500/20 px-1 rounded uppercase">NO-SHOW</span> : <span className={`text-[10px] font-bold px-1 rounded uppercase ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border border-neon-blue/30' : res.status === ReservationStatus.PENDENTE ? 'text-yellow-400 bg-yellow-900/40 border border-yellow-500/30' : 'text-slate-400 bg-slate-800'}`}>{res.status}</span>}
+                                            {/* Indicador de Pagamento no Local */}
+                                            {res.payOnSite && res.status === ReservationStatus.PENDENTE && (
+                                                <span className="text-[10px] font-bold text-white bg-slate-600 px-1 rounded flex items-center gap-0.5" title="Pagamento no Local">
+                                                    <Store size={10}/> Local
+                                                </span>
+                                            )}
                                         </div>
                                     </div>
                                     <div className="flex gap-1">
@@ -500,6 +508,11 @@ const Agenda: React.FC = () => {
                         <div><p className="text-slate-400">Horário</p><p className="text-white font-medium">{editingRes.time} ({editingRes.date.split('-').reverse().join('/')})</p></div>
                         <div><p className="text-slate-400">Pistas</p><p className="text-white font-medium">{editingRes.laneCount} Pista(s) / {editingRes.peopleCount} Pessoas</p></div>
                         {editingRes.hasTableReservation && <div className="col-span-2 bg-slate-900/50 p-3 rounded border border-slate-700/50 flex gap-4 items-center"><div className="flex items-center gap-2"><Utensils size={16} className="text-neon-orange"/> <span className="text-white font-bold">{editingRes.tableSeatCount} Cadeiras</span></div>{editingRes.birthdayName && <div className="flex items-center gap-2 pl-4 border-l border-slate-700"><Cake size={16} className="text-neon-blue"/><span className="text-white font-bold">{editingRes.birthdayName}</span></div>}</div>}
+                        {editingRes.payOnSite && editingRes.status === ReservationStatus.PENDENTE && (
+                            <div className="col-span-2 bg-blue-900/20 p-2 rounded border border-blue-500/30 flex items-center gap-2 text-blue-300 text-xs">
+                                <Store size={14}/> <strong>Pagamento no Local:</strong> Reserva segura contra cancelamento automático.
+                            </div>
+                        )}
                     </div>
                     
                     {/* Botões de Ação ou Fluxo de Cancelamento */}

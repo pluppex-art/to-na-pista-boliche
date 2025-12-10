@@ -461,6 +461,14 @@ export const db = {
       const currentTags = client.tags || [];
       const phoneClean = cleanPhone(client.phone);
       const initialStage = client.funnelStage || FunnelStage.NOVO;
+      const hasEmail = client.email && client.email.trim().length > 0;
+
+      // SEGURANÇA CONTRA SUJEIRA NO BANCO:
+      // Se não tiver nem telefone nem email, NÃO cria cliente no banco.
+      if (!phoneClean && !hasEmail) {
+          console.log("[Client Create] Bloqueado: Sem telefone e sem email. Retornando cliente sem persistir.");
+          return client; 
+      }
 
       // Se tiver telefone, tenta buscar. Se não (caso de gestor sem contato), ignora busca
       let existingClient = null;
@@ -471,7 +479,7 @@ export const db = {
               .eq('phone', phoneClean)
               .maybeSingle();
           existingClient = data;
-      } else if (client.email) {
+      } else if (hasEmail) {
           const { data } = await supabase
               .from('clientes')
               .select('*')
@@ -629,7 +637,7 @@ export const db = {
       
       const mapped = data.map((r: any) => ({
         id: r.id,
-        clientId: r.client_id, 
+        clientId: r.client_id || '', // Tratamento para null
         clientName: r.client_name || 'Cliente',
         date: r.date, 
         time: r.time, 
@@ -649,6 +657,7 @@ export const db = {
         hasTableReservation: r.has_table_reservation,
         birthdayName: r.birthday_name,
         tableSeatCount: r.table_seat_count,
+        payOnSite: r.pay_on_site, // Mapeado do banco
         createdBy: r.created_by
       }));
 
@@ -659,6 +668,9 @@ export const db = {
       const expiredIds: string[] = [];
 
       mapped.forEach((r: Reservation) => {
+          // Ignora se estiver marcado para pagar no local
+          if (r.payOnSite) return;
+
           if (r.status === ReservationStatus.PENDENTE && r.createdAt) {
               const created = new Date(r.createdAt);
               const diffMinutes = (now.getTime() - created.getTime()) / (1000 * 60);
@@ -701,7 +713,8 @@ export const db = {
     create: async (res: Reservation, createdByUserId?: string) => {
       const dbRes = {
         id: res.id,
-        client_id: res.clientId, 
+        // Envia NULL se o clientId for string vazia ou undefined (Reserva sem cadastro)
+        client_id: res.clientId || null, 
         client_name: res.clientName,
         date: res.date,
         time: res.time,
@@ -721,12 +734,14 @@ export const db = {
         has_table_reservation: res.hasTableReservation,
         birthday_name: res.birthdayName,
         table_seat_count: res.tableSeatCount,
+        pay_on_site: res.payOnSite, // Grava no banco
         created_by: createdByUserId
       };
       
       const { error } = await supabase.from('reservas').insert(dbRes);
       if (error) {
           if (error.code === '42501') throw new Error("Erro de Permissão (RLS): O sistema não pôde criar a reserva. Execute o SQL de correção.");
+          if (error.code === '23503') throw new Error("Erro de Relacionamento: O sistema tentou criar uma reserva para um cliente inválido. Execute o SQL para tornar client_id opcional.");
           throw new Error(error.message);
       }
       
@@ -754,7 +769,8 @@ export const db = {
         no_show_ids: res.noShowIds || [],
         has_table_reservation: res.hasTableReservation,
         birthday_name: res.birthdayName,
-        table_seat_count: res.tableSeatCount
+        table_seat_count: res.tableSeatCount,
+        pay_on_site: res.payOnSite
       };
       
       const { error } = await supabase.from('reservas').update(dbRes).eq('id', res.id);

@@ -7,7 +7,7 @@ import { useApp } from '../contexts/AppContext';
 import { generateDailySlots, checkHourCapacity } from '../utils/availability';
 import { EventType, ReservationStatus, PaymentStatus, Reservation, FunnelStage, UserRole } from '../types';
 import { EVENT_TYPES, INITIAL_SETTINGS } from '../constants';
-import { CheckCircle, Calendar as CalendarIcon, Clock, Users, ChevronRight, DollarSign, ChevronLeft, Lock, LayoutDashboard, Loader2, UserPlus, Mail, Phone, User as UserIcon, AlertCircle, XCircle, ShieldCheck, CreditCard, ArrowRight, Cake, Utensils, MessageCircle, LogIn, AlertTriangle } from 'lucide-react';
+import { CheckCircle, Calendar as CalendarIcon, Clock, Users, ChevronRight, DollarSign, ChevronLeft, Lock, LayoutDashboard, Loader2, UserPlus, Mail, Phone, User as UserIcon, AlertCircle, XCircle, ShieldCheck, CreditCard, ArrowRight, Cake, Utensils, MessageCircle, LogIn, AlertTriangle, Store } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
 const steps = ['Data', 'Configuração & Horário', 'Seus Dados', 'Resumo', 'Pagamento'];
@@ -466,11 +466,25 @@ const PublicBooking: React.FC = () => {
                 }
             } else {
                 // Guest OR Staff Mode
-                // Staff mode ensures we create/update the client in DB based on phone/email
-                // Logic in mockBackend.ts: create() updates existing client by phone if found.
-                const client = await db.clients.create(newClientData, staffUser?.id); 
-                setClientId(client.id);
-                setCurrentStep(c => c + 1);
+                // Verifica se tem contato preenchido (Telefone ou Email)
+                const phoneClean = formData.whatsapp.replace(/\D/g, '');
+                const hasContact = phoneClean.length > 0 || formData.email.trim().length > 0;
+
+                if (staffUser && !hasContact) {
+                    // CASO: Staff criando reserva sem nenhum contato (Cliente Balcão/Rápido)
+                    // NÃO cria registro na tabela de clientes para não sujar o banco
+                    console.log("Criando reserva sem cadastro de cliente (Sem contato)");
+                    // IMPORTANTE: Define ID como VAZIO para que o backend envie NULL para o banco
+                    setClientId(''); 
+                    setCurrentStep(c => c + 1);
+                } else {
+                    // CASO NORMAL: Tem contato, cria ou atualiza cliente no banco
+                    // Staff mode ensures we create/update the client in DB based on phone/email
+                    // Logic in mockBackend.ts: create() updates existing client by phone if found.
+                    const client = await db.clients.create(newClientData, staffUser?.id); 
+                    setClientId(client.id);
+                    setCurrentStep(c => c + 1);
+                }
             }
         } catch (error) {
             console.error(error);
@@ -651,14 +665,16 @@ const PublicBooking: React.FC = () => {
              }
           }
 
-          if (!clientId) throw new Error("ID do cliente não encontrado");
+          // Nota: clientId pode ser VAZIO se for reserva de balcão sem cadastro (Staff Mode)
+          // Isso é intencional. O banco aceita null agora.
+          // if (!clientId) throw new Error("ID do cliente não encontrado");
 
           const newIds: string[] = [];
           for (const block of blocks) {
              const blockTotalValue = (totalValue / (blocks.reduce((acc, b) => acc + b.duration, 0))) * block.duration;
              const res: Reservation = {
                  id: uuidv4(),
-                 clientId: clientId,
+                 clientId: clientId || '', // Envia string vazia se null, o backend trata
                  clientName: formData.name,
                  date: selectedDate,
                  time: block.time,
@@ -697,13 +713,37 @@ const PublicBooking: React.FC = () => {
       }
   };
 
-  const handlePaymentProcess = async (staffOverride: boolean = false) => {
+  const handlePaymentProcess = async (type: 'ONLINE' | 'CONFIRM_NOW' | 'PAY_ON_SITE') => {
       setIsSaving(true);
       try {
-          if (settings.onlinePaymentEnabled && !staffOverride) {
+          if (type === 'CONFIRM_NOW') {
+              // Staff confirmou pagamento total agora
+              navigate('/checkout', { state: { ...formData, date: selectedDate, time: selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
+          } else if (type === 'PAY_ON_SITE') {
+              // Staff marcou para pagar no local (Mantém Pendente, adiciona obs, flag payOnSite)
+              
+              // 1. Atualizar as reservas criadas para ter a flag payOnSite = true
+              const allRes = await db.reservations.getAll();
+              for (const id of createdReservationIds) {
+                  const res = allRes.find(r => r.id === id);
+                  if (res) {
+                      const updatedRes = { 
+                          ...res, 
+                          payOnSite: true,
+                          observations: (res.observations || '') + ' [Pagamento no Local]'
+                      };
+                      await db.reservations.update(updatedRes, staffUser?.id, 'Marcou para pagar no local');
+                  }
+              }
+              // Redireciona para Agenda com sucesso
+              alert("Reserva marcada para pagamento no local. O horário não será cancelado automaticamente.");
+              navigate('/agenda');
+
+          } else if (settings.onlinePaymentEnabled) {
+              // Fluxo Online Padrão
               const compositeRes = { 
                   id: createdReservationIds[0], 
-                  totalValue: totalValue,
+                  totalValue: totalValue, 
                   clientName: formData.name,
                   clientEmail: formData.email
               } as any;
@@ -717,6 +757,7 @@ const PublicBooking: React.FC = () => {
                   navigate('/checkout', { state: { ...formData, date: selectedDate, time: selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
               }
           } else {
+             // Fluxo Manual (Cliente)
              navigate('/checkout', { state: { ...formData, date: selectedDate, time: selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
           }
       } catch (e) {
@@ -1052,22 +1093,32 @@ const PublicBooking: React.FC = () => {
                     </div>
                     <h2 className="text-3xl font-bold text-white mb-2">Reserva Criada!</h2>
                     
-                    <div className="max-w-md mx-auto my-6 p-4 bg-yellow-900/20 border border-yellow-500/50 rounded-lg flex items-center gap-3 text-left">
-                         <AlertTriangle className="text-yellow-500 flex-shrink-0" size={24} />
-                         <div>
-                             <h4 className="text-yellow-500 font-bold text-sm">Não perca sua vaga!</h4>
-                             <p className="text-xs text-yellow-100/80 mt-1">Sua pré-reserva expira em 30 minutos. Realize o pagamento agora para garantir o horário.</p>
-                         </div>
-                    </div>
+                    {!staffUser && (
+                        <div className="max-w-md mx-auto my-6 p-4 bg-yellow-900/20 border border-yellow-500/50 rounded-lg flex items-center gap-3 text-left">
+                            <AlertTriangle className="text-yellow-500 flex-shrink-0" size={24} />
+                            <div>
+                                <h4 className="text-yellow-500 font-bold text-sm">Não perca sua vaga!</h4>
+                                <p className="text-xs text-yellow-100/80 mt-1">Sua pré-reserva expira em 30 minutos. Realize o pagamento agora para garantir o horário.</p>
+                            </div>
+                        </div>
+                    )}
 
-                    <button onClick={() => handlePaymentProcess(false)} disabled={isSaving} className="w-full max-w-sm mx-auto py-4 bg-gradient-to-r from-neon-orange to-orange-600 text-white font-bold rounded-xl shadow-lg hover:shadow-orange-500/20 transition transform hover:scale-105 flex items-center justify-center gap-2">
-                         {isSaving ? <Loader2 className="animate-spin" /> : <><CreditCard /> Ir para Pagamento</>}
-                    </button>
-                    
-                    {staffUser && (
-                        <button onClick={() => handlePaymentProcess(true)} className="mt-4 text-sm text-slate-500 hover:text-white underline">
-                            Pular pagamento (Ação de Staff)
+                    {!staffUser ? (
+                         <button onClick={() => handlePaymentProcess('ONLINE')} disabled={isSaving} className="w-full max-w-sm mx-auto py-4 bg-gradient-to-r from-neon-orange to-orange-600 text-white font-bold rounded-xl shadow-lg hover:shadow-orange-500/20 transition transform hover:scale-105 flex items-center justify-center gap-2">
+                             {isSaving ? <Loader2 className="animate-spin" /> : <><CreditCard /> Ir para Pagamento</>}
                         </button>
+                    ) : (
+                        <div className="max-w-md mx-auto space-y-3">
+                            <button onClick={() => handlePaymentProcess('CONFIRM_NOW')} disabled={isSaving} className="w-full py-4 bg-green-600 hover:bg-green-500 text-white font-bold rounded-xl shadow-lg transition flex items-center justify-center gap-2">
+                                {isSaving ? <Loader2 className="animate-spin" /> : <><CreditCard size={18}/> Confirmar Pagamento Agora</>}
+                            </button>
+                            <button onClick={() => handlePaymentProcess('PAY_ON_SITE')} disabled={isSaving} className="w-full py-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl border border-slate-700 shadow-lg transition flex items-center justify-center gap-2">
+                                {isSaving ? <Loader2 className="animate-spin" /> : <><Store size={18}/> Pagar no Local (Manter Pendente)</>}
+                            </button>
+                            <p className="text-xs text-slate-500">
+                                "Pagar no Local" mantém a reserva pendente, mas <span className="text-neon-orange">não cancela automaticamente</span> após 30 minutos.
+                            </p>
+                        </div>
                     )}
                 </div>
             )}
