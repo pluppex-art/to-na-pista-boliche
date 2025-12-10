@@ -5,7 +5,7 @@ import { supabase } from '../services/supabaseClient';
 import { Integrations } from '../services/integrations';
 import { useApp } from '../contexts/AppContext';
 import { generateDailySlots, checkHourCapacity } from '../utils/availability';
-import { EventType, ReservationStatus, PaymentStatus, Reservation, FunnelStage } from '../types';
+import { EventType, ReservationStatus, PaymentStatus, Reservation, FunnelStage, UserRole } from '../types';
 import { EVENT_TYPES, INITIAL_SETTINGS } from '../constants';
 import { CheckCircle, Calendar as CalendarIcon, Clock, Users, ChevronRight, DollarSign, ChevronLeft, Lock, LayoutDashboard, Loader2, UserPlus, Mail, Phone, User as UserIcon, AlertCircle, XCircle, ShieldCheck, CreditCard, ArrowRight, Cake, Utensils, MessageCircle, LogIn, AlertTriangle } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
@@ -350,6 +350,13 @@ const PublicBooking: React.FC = () => {
       }
   };
 
+  // CHECK PERMISSIONS FOR OPTIONAL CONTACT
+  const isContactOptional = staffUser && (
+      staffUser.role === UserRole.ADMIN || 
+      staffUser.role === UserRole.GESTOR || 
+      staffUser.perm_create_reservation_no_contact
+  );
+
   const validateStep = () => {
       const newErrors: Record<string, boolean> = {};
       let isValid = true;
@@ -372,8 +379,17 @@ const PublicBooking: React.FC = () => {
       if (currentStep === 2) { 
           if (authMode === 'REGISTER') {
             if (!formData.name.trim()) newErrors.name = true;
-            if (!formData.email.trim() || !isValidEmail(formData.email)) newErrors.email = true;
-            if (!formData.whatsapp.trim() || !isValidPhone(formData.whatsapp)) newErrors.whatsapp = true;
+            
+            // EMAIL & PHONE VALIDATION LOGIC
+            // If contact is optional (Admin/Gestor/Permitted), only validate format IF they typed something
+            if (isContactOptional) {
+                if (formData.email.trim() && !isValidEmail(formData.email)) newErrors.email = true;
+                if (formData.whatsapp.trim() && !isValidPhone(formData.whatsapp)) newErrors.whatsapp = true;
+            } else {
+                // Mandatory for public and restricted staff
+                if (!formData.email.trim() || !isValidEmail(formData.email)) newErrors.email = true;
+                if (!formData.whatsapp.trim() || !isValidPhone(formData.whatsapp)) newErrors.whatsapp = true;
+            }
             
             // Validate password ONLY if creating account AND NOT Staff
             if (!clientUser && !staffUser && formData.createAccount && !formData.password.trim()) {
@@ -925,16 +941,26 @@ const PublicBooking: React.FC = () => {
                             )}
 
                             <div>
-                                <label className="block text-xs font-medium text-slate-500 mb-1">Nome Completo {staffUser && <span className="text-red-500">*</span>}</label>
+                                <label className="block text-xs font-medium text-slate-500 mb-1">Nome Completo <span className="text-red-500">*</span></label>
                                 <input type="text" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.name ? 'border-red-500' : 'border-slate-600'}`} value={formData.name} onChange={e => handleInputChange('name', e.target.value)} />
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-xs font-medium text-slate-500 mb-1">WhatsApp {staffUser && <span className="text-red-500">*</span>}</label>
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">
+                                        WhatsApp 
+                                        {/* Asterisco Vermelho se for Obrigatório */}
+                                        {!isContactOptional && <span className="text-red-500"> *</span>}
+                                        {/* Aviso Opcional se for permitido */}
+                                        {isContactOptional && <span className="text-xs text-slate-500 font-normal italic ml-1">(Opcional para Equipe)</span>}
+                                    </label>
                                     <input type="tel" placeholder="(00) 00000-0000" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.whatsapp ? 'border-red-500' : 'border-slate-600'}`} value={formData.whatsapp} onChange={e => handlePhoneChange(e, 'whatsapp')} />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-medium text-slate-500 mb-1">E-mail {staffUser && <span className="text-red-500">*</span>}</label>
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">
+                                        E-mail
+                                        {!isContactOptional && <span className="text-red-500"> *</span>}
+                                        {isContactOptional && <span className="text-xs text-slate-500 font-normal italic ml-1">(Opcional para Equipe)</span>}
+                                    </label>
                                     <input type="email" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.email ? 'border-red-500' : 'border-slate-600'}`} value={formData.email} onChange={e => handleInputChange('email', e.target.value)} />
                                 </div>
                             </div>

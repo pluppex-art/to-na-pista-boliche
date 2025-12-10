@@ -48,6 +48,7 @@ export const PERMISSION_KEYS: { key: keyof User; label: string }[] = [
   { key: 'perm_view_financial', label: 'Acesso Financeiro' },
   { key: 'perm_view_crm', label: 'Acesso Clientes (CRM)' },
   { key: 'perm_create_reservation', label: 'Criar Reservas' },
+  { key: 'perm_create_reservation_no_contact', label: 'Criar s/ Contato Obrigatório' },
   { key: 'perm_edit_reservation', label: 'Editar Reservas' },
   { key: 'perm_delete_reservation', label: 'Excluir/Cancelar Reservas' },
   { key: 'perm_edit_client', label: 'Editar Clientes' },

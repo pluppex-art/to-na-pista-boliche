@@ -52,6 +52,7 @@ export interface User {
   perm_delete_reservation: boolean;
   perm_edit_client: boolean;
   perm_receive_payment: boolean;
+  perm_create_reservation_no_contact: boolean; // Nova permissão
 }
 
 export interface Client {

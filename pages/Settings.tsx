@@ -1,6 +1,8 @@
 
 
 
+
+
 import React, { useEffect, useState, useRef } from 'react';
 import { db } from '../services/mockBackend';
 import { AppSettings, UserRole, User, DayConfig } from '../types';
@@ -51,7 +53,8 @@ const Settings: React.FC = () => {
     perm_edit_reservation: false,
     perm_delete_reservation: false,
     perm_edit_client: false,
-    perm_receive_payment: false
+    perm_receive_payment: false,
+    perm_create_reservation_no_contact: false
   });
 
   const daysOfWeek = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
@@ -86,7 +89,26 @@ const Settings: React.FC = () => {
               perm_edit_reservation: true,
               perm_delete_reservation: true,
               perm_edit_client: true,
-              perm_receive_payment: true
+              perm_receive_payment: true,
+              perm_create_reservation_no_contact: true
+          }));
+      }
+      
+      // Se for Gestor, também habilita tudo por padrão (incluindo sem contato, se desejar)
+      // Ajuste: Apenas Admin Master tem acesso restrito a configurações, Gestor tem acesso a operacional.
+      if (userForm.role === UserRole.GESTOR) {
+           setUserForm(prev => ({
+              ...prev,
+              perm_view_agenda: true,
+              perm_view_financial: true,
+              perm_view_crm: true,
+              perm_create_reservation: true,
+              perm_edit_reservation: true,
+              perm_delete_reservation: true,
+              perm_edit_client: true,
+              perm_receive_payment: true,
+              // Nota: Deixar opcional para gestor ajustar manualmente ou auto-setar true se quiser
+              perm_create_reservation_no_contact: true 
           }));
       }
   }, [userForm.role]);
@@ -189,7 +211,8 @@ const Settings: React.FC = () => {
         perm_edit_reservation: false,
         perm_delete_reservation: false,
         perm_edit_client: false,
-        perm_receive_payment: false
+        perm_receive_payment: false,
+        perm_create_reservation_no_contact: false
       });
       setIsEditingUser(false);
       setShowUserModal(true);
@@ -226,7 +249,8 @@ const Settings: React.FC = () => {
       perm_edit_reservation: !!userForm.perm_edit_reservation,
       perm_delete_reservation: !!userForm.perm_delete_reservation,
       perm_edit_client: !!userForm.perm_edit_client,
-      perm_receive_payment: !!userForm.perm_receive_payment
+      perm_receive_payment: !!userForm.perm_receive_payment,
+      perm_create_reservation_no_contact: !!userForm.perm_create_reservation_no_contact
     };
 
     try {

@@ -343,7 +343,7 @@ const ClientDashboard: React.FC = () => {
                                     )}
                                     
                                     {/* Cancellation Reason Display if Cancelled */}
-                                    {res.status === ReservationStatus.CANCELADA && res.observations && res.observations.includes('Cancelado:') && (
+                                    {(res.status as ReservationStatus) === ReservationStatus.CANCELADA && res.observations && res.observations.includes('Cancelado:') && (
                                         <div className="text-xs text-red-400 italic border-l-2 border-red-500/30 pl-2">
                                             {res.observations.split('Cancelado:')[1].replace(']', '')}
                                         </div>

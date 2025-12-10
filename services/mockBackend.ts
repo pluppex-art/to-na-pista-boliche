@@ -140,7 +140,8 @@ export const db = {
               perm_edit_reservation: isAdmin ? true : (data.perm_edit_reservation ?? false),
               perm_delete_reservation: isAdmin ? true : (data.perm_delete_reservation ?? false),
               perm_edit_client: isAdmin ? true : (data.perm_edit_client ?? false),
-              perm_receive_payment: isAdmin ? true : (data.perm_receive_payment ?? false)
+              perm_receive_payment: isAdmin ? true : (data.perm_receive_payment ?? false),
+              perm_create_reservation_no_contact: isAdmin ? true : (data.perm_create_reservation_no_contact ?? false)
             }
           };
         } else {
@@ -171,7 +172,8 @@ export const db = {
           perm_edit_reservation: isAdmin ? true : (u.perm_edit_reservation ?? false),
           perm_delete_reservation: isAdmin ? true : (u.perm_delete_reservation ?? false),
           perm_edit_client: isAdmin ? true : (u.perm_edit_client ?? false),
-          perm_receive_payment: isAdmin ? true : (u.perm_receive_payment ?? false)
+          perm_receive_payment: isAdmin ? true : (u.perm_receive_payment ?? false),
+          perm_create_reservation_no_contact: isAdmin ? true : (u.perm_create_reservation_no_contact ?? false)
         };
       });
     },
@@ -200,7 +202,8 @@ export const db = {
         perm_edit_reservation: isAdmin ? true : (data.perm_edit_reservation ?? false),
         perm_delete_reservation: isAdmin ? true : (data.perm_delete_reservation ?? false),
         perm_edit_client: isAdmin ? true : (data.perm_edit_client ?? false),
-        perm_receive_payment: isAdmin ? true : (data.perm_receive_payment ?? false)
+        perm_receive_payment: isAdmin ? true : (data.perm_receive_payment ?? false),
+        perm_create_reservation_no_contact: isAdmin ? true : (data.perm_create_reservation_no_contact ?? false)
       };
     },
     create: async (user: User) => {
@@ -218,9 +221,10 @@ export const db = {
         perm_edit_reservation: user.perm_edit_reservation,
         perm_delete_reservation: user.perm_delete_reservation,
         perm_edit_client: user.perm_edit_client,
-        perm_receive_payment: user.perm_receive_payment
+        perm_receive_payment: user.perm_receive_payment,
+        perm_create_reservation_no_contact: user.perm_create_reservation_no_contact
       });
-      if (error) throw error;
+      if (error) throw new Error(error.message);
     },
     update: async (user: User) => {
       const payload: any = {
@@ -234,7 +238,8 @@ export const db = {
         perm_edit_reservation: user.perm_edit_reservation,
         perm_delete_reservation: user.perm_delete_reservation,
         perm_edit_client: user.perm_edit_client,
-        perm_receive_payment: user.perm_receive_payment
+        perm_receive_payment: user.perm_receive_payment,
+        perm_create_reservation_no_contact: user.perm_create_reservation_no_contact
       };
       
       if (user.passwordHash && user.passwordHash.length > 0) {
@@ -242,7 +247,7 @@ export const db = {
       }
 
       const { error } = await supabase.from('usuarios').update(payload).eq('id', user.id);
-      if (error) throw error;
+      if (error) throw new Error(error.message);
     },
     delete: async (id: string) => {
       const { error } = await supabase.from('usuarios').delete().eq('id', id);
@@ -457,11 +462,23 @@ export const db = {
       const phoneClean = cleanPhone(client.phone);
       const initialStage = client.funnelStage || FunnelStage.NOVO;
 
-      const { data: existingClient } = await supabase
-          .from('clientes')
-          .select('*')
-          .eq('phone', phoneClean)
-          .maybeSingle();
+      // Se tiver telefone, tenta buscar. Se não (caso de gestor sem contato), ignora busca
+      let existingClient = null;
+      if (phoneClean) {
+          const { data } = await supabase
+              .from('clientes')
+              .select('*')
+              .eq('phone', phoneClean)
+              .maybeSingle();
+          existingClient = data;
+      } else if (client.email) {
+          const { data } = await supabase
+              .from('clientes')
+              .select('*')
+              .eq('email', client.email)
+              .maybeSingle();
+          existingClient = data;
+      }
 
       if (existingClient) {
           const updatePayload = {
@@ -584,7 +601,7 @@ export const db = {
           
           if (error) {
               if (error.code === '42501') throw new Error("Erro RLS: Não foi possível gravar fidelidade.");
-              throw error;
+              throw new Error(error.message);
           }
 
           const { data: client } = await supabase.from('clientes').select('loyalty_balance').eq('client_id', clientId).single();
@@ -710,7 +727,7 @@ export const db = {
       const { error } = await supabase.from('reservas').insert(dbRes);
       if (error) {
           if (error.code === '42501') throw new Error("Erro de Permissão (RLS): O sistema não pôde criar a reserva. Execute o SQL de correção.");
-          throw error;
+          throw new Error(error.message);
       }
       
       if (createdByUserId) {
@@ -741,7 +758,7 @@ export const db = {
       };
       
       const { error } = await supabase.from('reservas').update(dbRes).eq('id', res.id);
-      if (error) console.error("Erro ao atualizar reserva:", error);
+      if (error) throw new Error(error.message);
       
       if (updatedByUserId) {
            db.audit.log(updatedByUserId, 'STAFF', 'UPDATE_RESERVATION', actionDetail || `Atualizou reserva de ${res.clientName}`, res.id);
