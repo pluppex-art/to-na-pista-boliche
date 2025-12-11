@@ -350,7 +350,8 @@ export const db = {
                 client_id: client.id, 
                 name: client.name,
                 phone: phoneClean,
-                email: client.email,
+                // CORREÇÃO: Garante que email vazio seja NULL
+                email: (client.email && client.email.trim() !== '') ? client.email : null,
                 password: password,
                 photo_url: client.photoUrl,
                 tags: ['Novo Cadastro'],
@@ -470,45 +471,70 @@ export const db = {
           return client; 
       }
 
-      // Se tiver telefone, tenta buscar. Se não (caso de gestor sem contato), ignora busca
+      // LÓGICA DE BUSCA APRIMORADA: Verifica Telefone OU Email
+      let query = supabase.from('clientes').select('*');
+      const conditions = [];
+      if (phoneClean) conditions.push(`phone.eq.${phoneClean}`);
+      if (hasEmail) conditions.push(`email.eq.${client.email}`);
+      
       let existingClient = null;
-      if (phoneClean) {
-          const { data } = await supabase
-              .from('clientes')
-              .select('*')
-              .eq('phone', phoneClean)
-              .maybeSingle();
-          existingClient = data;
-      } else if (hasEmail) {
-          const { data } = await supabase
-              .from('clientes')
-              .select('*')
-              .eq('email', client.email)
-              .maybeSingle();
+      if (conditions.length > 0) {
+          // Busca por qualquer um dos dois (OR)
+          const { data } = await query.or(conditions.join(',')).maybeSingle();
           existingClient = data;
       }
 
       if (existingClient) {
-          const updatePayload = {
-              name: client.name,
-              email: client.email,
+          // SE EXISTE, ATUALIZA (UPDATE/MERGE)
+          // Regra: Atualizar se o campo no banco for nulo/vazio, ou sobrescrever se tiver valor novo (Latest Wins)
+          const newEmail = (client.email && client.email.trim() !== '') ? client.email : existingClient.email;
+          const newPhone = phoneClean || existingClient.phone;
+
+          const updatePayload: any = {
+              name: client.name || existingClient.name, // Atualiza nome caso tenha corrigido
+              email: newEmail,
+              phone: newPhone,
               tags: currentTags, 
               last_contact_at: client.lastContactAt,
               funnel_stage: initialStage,
-              photo_url: client.photoUrl
+              photo_url: client.photoUrl || existingClient.photo_url
           };
           
-          await supabase.from('clientes').update(updatePayload).eq('client_id', existingClient.client_id);
+          try {
+              const { error } = await supabase.from('clientes').update(updatePayload).eq('client_id', existingClient.client_id);
+              if (error) throw error;
+          } catch (err: any) {
+              // ERRO 23505: Unique Violation
+              // Isso acontece se tentamos atualizar um e-mail ou telefone para um valor que JÁ PERTENCE a outro cliente (ID diferente).
+              // Neste caso, falhamos a atualização do campo conflitante, mas mantemos o resto para não quebrar o fluxo.
+              if (err.code === '23505') {
+                  console.warn("Merge Conflict (Unique Constraint): E-mail ou Telefone já em uso por outro registro. Ignorando atualização de campos únicos.");
+                  // Fallback: Atualiza apenas dados seguros
+                  const safePayload = {
+                      name: updatePayload.name,
+                      tags: updatePayload.tags,
+                      last_contact_at: updatePayload.last_contact_at,
+                      funnel_stage: updatePayload.funnel_stage
+                  };
+                  await supabase.from('clientes').update(safePayload).eq('client_id', existingClient.client_id);
+                  // Retorna o cliente com os dados originais do banco para os campos conflitantes
+                  return { ...client, id: existingClient.client_id, phone: existingClient.phone, email: existingClient.email, loyaltyBalance: existingClient.loyalty_balance || 0 };
+              } else {
+                  throw err;
+              }
+          }
           
           CACHE.clients = null;
-          return { ...client, id: existingClient.client_id, phone: phoneClean, tags: currentTags, loyaltyBalance: existingClient.loyalty_balance || 0, photoUrl: existingClient.photo_url };
+          return { ...client, id: existingClient.client_id, phone: updatePayload.phone, email: updatePayload.email, tags: currentTags, loyaltyBalance: existingClient.loyalty_balance || 0, photoUrl: existingClient.photo_url };
       }
 
+      // SE NÃO EXISTE, CRIA (INSERT)
       const dbClient = {
         client_id: client.id, 
         name: client.name,
         phone: phoneClean,
-        email: client.email,
+        // CORREÇÃO: Garante que email vazio seja NULL para evitar erro UNIQUE
+        email: (client.email && client.email.trim() !== '') ? client.email : null,
         photo_url: client.photoUrl,
         tags: currentTags,
         last_contact_at: client.lastContactAt,
@@ -521,8 +547,9 @@ export const db = {
       
       if (error) {
           if (error.code === '23505') { 
-             const { data: retryClient } = await supabase.from('clientes').select('*').eq('phone', phoneClean).maybeSingle();
-             if (retryClient) return { ...client, id: retryClient.client_id, phone: phoneClean, loyaltyBalance: retryClient.loyalty_balance || 0, photoUrl: retryClient.photo_url };
+             // Fallback em caso de race condition
+             const { data: retryClient } = await supabase.from('clientes').select('*').or(`phone.eq.${phoneClean},email.eq.${client.email}`).maybeSingle();
+             if (retryClient) return { ...client, id: retryClient.client_id, phone: retryClient.phone, email: retryClient.email, loyaltyBalance: retryClient.loyalty_balance || 0, photoUrl: retryClient.photo_url };
           }
           if (error.code === '42501') throw new Error("Erro de Permissão (RLS) ao criar cliente. Atualize o banco.");
           throw error;
@@ -533,13 +560,14 @@ export const db = {
       }
 
       CACHE.clients = null;
-      return { ...client, phone: phoneClean, tags: currentTags, funnelStage: initialStage, loyaltyBalance: 0 };
+      return { ...client, phone: phoneClean, email: dbClient.email || '', tags: currentTags, funnelStage: initialStage, loyaltyBalance: 0 };
     },
     update: async (client: Client, updatedBy?: string) => {
       const dbClient: any = {
         name: client.name,
         phone: cleanPhone(client.phone),
-        email: client.email,
+        // CORREÇÃO: Garante que email vazio seja NULL
+        email: (client.email && client.email.trim() !== '') ? client.email : null,
         tags: client.tags,
         last_contact_at: client.lastContactAt,
         photo_url: client.photoUrl
@@ -714,7 +742,8 @@ export const db = {
       const dbRes = {
         id: res.id,
         // Envia NULL se o clientId for string vazia ou undefined (Reserva sem cadastro)
-        client_id: res.clientId || null, 
+        // Isso evita "Violates Foreign Key Constraint" quando o ID é falso
+        client_id: (res.clientId && res.clientId.trim() !== '') ? res.clientId : null, 
         client_name: res.clientName,
         date: res.date,
         time: res.time,

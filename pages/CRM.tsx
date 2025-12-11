@@ -1,9 +1,11 @@
+
 import React, { useEffect, useState, useMemo } from 'react';
 import { db, cleanPhone } from '../services/mockBackend';
 import { Client, Reservation, FunnelStage, User, UserRole, ReservationStatus, LoyaltyTransaction } from '../types';
 import { FUNNEL_STAGES } from '../constants';
 import { Search, MessageCircle, Calendar, Tag, Plus, Users, Loader2, LayoutList, Kanban as KanbanIcon, GripVertical, Pencil, Save, X, Crown, Star, Sparkles, Clock, LayoutGrid, Gift, Coins, History, ArrowDown, ArrowUp, CalendarPlus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../services/supabaseClient';
 
 // Tipos de Classificação
 type ClientTier = 'VIP' | 'FIEL' | 'NOVO';
@@ -41,8 +43,8 @@ const CRM: React.FC = () => {
   const canEditClient = currentUser?.role === UserRole.ADMIN || currentUser?.perm_edit_client;
   const canCreateReservation = currentUser?.role === UserRole.ADMIN || currentUser?.perm_create_reservation;
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchData = async (isBackground = false) => {
+    if (!isBackground) setLoading(true);
     try {
         const [clientsData, reservationsData] = await Promise.all([
             db.clients.getAll(),
@@ -82,12 +84,26 @@ const CRM: React.FC = () => {
     } catch (e) {
         console.error(e);
     } finally {
-        setLoading(false);
+        if (!isBackground) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchData();
+
+    const channel = supabase
+      .channel('crm-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => {
+          console.log('[CRM] Cliente atualizado via Realtime');
+          fetchData(true);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => {
+          console.log('[CRM] Reserva atualizada via Realtime (Recalcular métricas)');
+          fetchData(true);
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
   // Load Client Details (History & Loyalty)
@@ -156,6 +172,7 @@ const CRM: React.FC = () => {
     setClients(updatedClients);
 
     await db.clients.updateStage(clientId, newStage);
+    fetchData(true);
   };
 
   const handleDragOver = (e: React.DragEvent) => e.preventDefault();
@@ -188,7 +205,7 @@ const CRM: React.FC = () => {
       await db.clients.update(updatedClient);
       
       setSelectedClient(updatedClient);
-      fetchData();
+      fetchData(true);
       setIsEditing(false);
   };
 

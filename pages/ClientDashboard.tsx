@@ -1,9 +1,11 @@
+
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Client, Reservation, LoyaltyTransaction, ReservationStatus, PaymentStatus } from '../types';
 import { db } from '../services/mockBackend';
 import { useApp } from '../contexts/AppContext';
-import { LogOut, User, Gift, Clock, Calendar, MapPin, Coins, Loader2, MessageCircle, Edit, Save, X, Camera, CreditCard, AlertCircle, Trash2, HelpCircle, Store } from 'lucide-react';
+import { LogOut, User, Gift, Clock, Calendar, MapPin, Coins, Loader2, MessageCircle, Edit, Save, X, Camera, CreditCard, AlertCircle, Trash2, HelpCircle, Store, CheckCircle2 } from 'lucide-react';
+import { supabase } from '../services/supabaseClient';
 
 const ClientDashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -32,45 +34,64 @@ const ClientDashboard: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
+  const loadData = async (isBackground = false) => {
+      const stored = localStorage.getItem('tonapista_client_auth');
+      if (!stored) {
+        navigate('/login');
+        return;
+      }
+      const clientData = JSON.parse(stored);
+
+      if (!isBackground) setLoading(true);
+      try {
+          // Refresh client data
+          const freshClient = await db.clients.getById(clientData.id);
+          const activeClient = freshClient || clientData;
+          
+          setClient(activeClient);
+          setEditForm({
+              name: activeClient.name,
+              email: activeClient.email || '',
+              phone: activeClient.phone,
+              photoUrl: activeClient.photoUrl || ''
+          });
+
+          // Load History
+          const allRes = await db.reservations.getAll();
+          // Ordena pela DATA DE CRIAÇÃO (createdAt) decrescente - Último agendamento realizado aparece primeiro
+          const myRes = allRes
+              .filter(r => r.clientId === activeClient.id)
+              .sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+              
+          setHistory(myRes);
+
+          // Load Loyalty
+          const pts = await db.loyalty.getHistory(activeClient.id);
+          setLoyalty(pts);
+      } finally {
+          if (!isBackground) setLoading(false);
+      }
+  };
+
   useEffect(() => {
-    const stored = localStorage.getItem('tonapista_client_auth');
-    if (!stored) {
-      navigate('/login');
-      return;
-    }
-    const clientData = JSON.parse(stored);
-    
-    const loadData = async () => {
-        setLoading(true);
-        // Refresh client data
-        const freshClient = await db.clients.getById(clientData.id);
-        const activeClient = freshClient || clientData;
-        
-        setClient(activeClient);
-        setEditForm({
-            name: activeClient.name,
-            email: activeClient.email || '',
-            phone: activeClient.phone,
-            photoUrl: activeClient.photoUrl || ''
-        });
-
-        // Load History
-        const allRes = await db.reservations.getAll();
-        // Ordena pela DATA DE CRIAÇÃO (createdAt) decrescente - Último agendamento realizado aparece primeiro
-        const myRes = allRes
-            .filter(r => r.clientId === activeClient.id)
-            .sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-            
-        setHistory(myRes);
-
-        // Load Loyalty
-        const pts = await db.loyalty.getHistory(activeClient.id);
-        setLoyalty(pts);
-        
-        setLoading(false);
-    };
     loadData();
-  }, [navigate, now]); // Added 'now' to re-fetch? No, actually re-fetch isn't needed on 'now' change, but ensures we check status
+
+    // Subscribe to updates relevant to this client
+    const channel = supabase
+      .channel('client-dashboard-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => {
+          loadData(true);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, (payload) => {
+          // Check if update is for this client
+          if (client && payload.new && (payload.new as any).client_id === client.id) {
+              loadData(true);
+          }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [navigate]); 
 
   const handleLogout = () => {
       localStorage.removeItem('tonapista_client_auth');
@@ -173,6 +194,7 @@ const ClientDashboard: React.FC = () => {
           setReservationToCancel(null);
           setCancelReason('');
           alert("Reserva cancelada.");
+          loadData(true);
       } catch (e) {
           console.error(e);
           alert("Erro ao cancelar.");
@@ -322,7 +344,12 @@ const ClientDashboard: React.FC = () => {
                         {history.map(res => {
                             const expiresIn = getExpiresIn(res);
                             const allowCancel = canCancel(res);
-
+                            
+                            // Visual State Logic
+                            const isConfirmed = res.status === ReservationStatus.CONFIRMADA;
+                            const isPayOnSite = res.payOnSite;
+                            const isPending = res.status === ReservationStatus.PENDENTE;
+                            
                             return (
                                 <div key={res.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-col gap-3">
                                     <div className="flex justify-between items-start">
@@ -330,22 +357,29 @@ const ClientDashboard: React.FC = () => {
                                             <p className="text-white font-medium">{new Date(res.date).toLocaleDateString('pt-BR')} às {res.time}</p>
                                             <p className="text-xs text-slate-500">{res.eventType} • {res.laneCount} Pista(s)</p>
                                         </div>
-                                        <div className={`text-xs font-bold px-2 py-1 rounded uppercase ${res.status === ReservationStatus.CONFIRMADA ? 'bg-green-900/30 text-green-400' : res.status === ReservationStatus.PENDENTE ? 'bg-yellow-900/30 text-yellow-500' : 'bg-slate-800 text-slate-400'}`}>
-                                            {res.status}
+                                        
+                                        {/* Status Badge */}
+                                        <div className={`text-xs font-bold px-2 py-1 rounded uppercase ${
+                                            isConfirmed ? 'bg-green-900/30 text-green-400' : 
+                                            (isPending && isPayOnSite) ? 'bg-blue-900/30 text-blue-400 border border-blue-500/20' :
+                                            isPending ? 'bg-yellow-900/30 text-yellow-500' : 'bg-slate-800 text-slate-400'
+                                        }`}>
+                                            {isPending && isPayOnSite ? 'Confirmado (Local)' : res.status}
                                         </div>
                                     </div>
                                     
                                     {/* Expiration Warning for Pending (Exclude Pay On Site) */}
-                                    {res.status === ReservationStatus.PENDENTE && res.paymentStatus !== PaymentStatus.PAGO && !res.payOnSite && expiresIn && (
+                                    {isPending && res.paymentStatus !== PaymentStatus.PAGO && !isPayOnSite && expiresIn && (
                                         <div className="text-xs text-yellow-500 flex items-center gap-1 font-bold animate-pulse">
                                             <Clock size={12}/> Expira em: {expiresIn}
                                         </div>
                                     )}
 
-                                    {/* Pay On Site Badge */}
-                                    {res.status === ReservationStatus.PENDENTE && res.payOnSite && (
-                                        <div className="text-xs text-blue-400 flex items-center gap-1 font-bold bg-blue-900/20 px-2 py-1 rounded w-fit border border-blue-500/20">
-                                            <Store size={12}/> Pagamento no Local (Confirmado)
+                                    {/* Pay On Site Secure Message */}
+                                    {isPending && isPayOnSite && (
+                                        <div className="text-xs text-blue-300 flex items-start gap-2 bg-blue-900/10 p-2 rounded border border-blue-500/10">
+                                            <CheckCircle2 size={14} className="mt-0.5 flex-shrink-0"/>
+                                            <span>Sua reserva está garantida. Realize o pagamento no balcão ao chegar.</span>
                                         </div>
                                     )}
                                     
@@ -357,9 +391,9 @@ const ClientDashboard: React.FC = () => {
                                     )}
 
                                     {/* Action Buttons */}
-                                    {(res.status as ReservationStatus) !== ReservationStatus.CANCELADA && (
+                                    {res.status !== ReservationStatus.CANCELADA && (
                                         <div className="pt-3 border-t border-slate-800 flex flex-col gap-2">
-                                            {res.status === ReservationStatus.PENDENTE && res.paymentStatus !== PaymentStatus.PAGO && !res.payOnSite && (
+                                            {isPending && res.paymentStatus !== PaymentStatus.PAGO && !isPayOnSite && (
                                                 <button 
                                                     onClick={() => handlePayNow(res)}
                                                     className="w-full bg-green-600 hover:bg-green-500 text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center justify-center gap-2 shadow-lg mb-2"

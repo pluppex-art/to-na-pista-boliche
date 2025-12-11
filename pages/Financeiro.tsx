@@ -1,10 +1,10 @@
 
-
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
 import { Reservation, ReservationStatus, PaymentStatus, AuditLog, StaffPerformance, User } from '../types';
 import { Loader2, DollarSign, TrendingUp, Users, Calendar, Filter, AlertCircle, Clock, Award, Shield, History, ArrowRight, X } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { supabase } from '../services/supabaseClient';
 
 const Financeiro: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'TEAM'>('OVERVIEW');
@@ -46,22 +46,24 @@ const Financeiro: React.FC = () => {
     setAuditFilters(prev => ({ ...prev, startDate: startStr, endDate: endStr }));
   }, []);
 
-  const refreshData = async () => {
-    setLoading(true);
-    const all = await db.reservations.getAll();
-    setReservations(all);
-    
-    // Fetch Team Data
-    const stats = await db.users.getPerformance(dateRange.start, dateRange.end);
-    setTeamStats(stats);
-    
-    // Users for filter dropdown
-    const usersList = await db.users.getAll();
-    setAllUsers(usersList);
-    
-    await refreshAuditLogs();
-
-    setLoading(false);
+  const refreshData = async (isBackground = false) => {
+    if (!isBackground) setLoading(true);
+    try {
+        const all = await db.reservations.getAll();
+        setReservations(all);
+        
+        // Fetch Team Data
+        const stats = await db.users.getPerformance(dateRange.start, dateRange.end);
+        setTeamStats(stats);
+        
+        // Users for filter dropdown
+        const usersList = await db.users.getAll();
+        setAllUsers(usersList);
+        
+        await refreshAuditLogs();
+    } finally {
+        if (!isBackground) setLoading(false);
+    }
   };
 
   const refreshAuditLogs = async () => {
@@ -77,6 +79,21 @@ const Financeiro: React.FC = () => {
 
   useEffect(() => {
     refreshData();
+
+    // Subscribe to realtime updates
+    const channel = supabase
+        .channel('financeiro-updates')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => {
+            console.log('[Financeiro] Realtime refresh');
+            refreshData(true);
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_logs' }, () => {
+            console.log('[Financeiro] Audit Log update');
+            refreshData(true);
+        })
+        .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [dateRange]);
 
   // Trigger only audit refresh when filters change (except date range which triggers full refresh)

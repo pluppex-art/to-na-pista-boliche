@@ -47,8 +47,9 @@ const Agenda: React.FC = () => {
   const canEdit = currentUser?.role === UserRole.ADMIN || currentUser?.perm_edit_reservation;
   const canDelete = currentUser?.role === UserRole.ADMIN || currentUser?.perm_delete_reservation;
 
-  const loadData = async () => {
-    setLoading(true);
+  // CORREÇÃO: Adicionado parâmetro isBackground para evitar o 'piscar' da tela
+  const loadData = async (isBackground = false) => {
+    if (!isBackground) setLoading(true);
     try {
       const [allReservations, allClients] = await Promise.all([
           db.reservations.getAll(),
@@ -87,7 +88,7 @@ const Agenda: React.FC = () => {
       setExpiringReservations(expiring);
 
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   };
 
@@ -101,14 +102,15 @@ const Agenda: React.FC = () => {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'reservas' },
         (payload) => {
-          console.log('Realtime change detected, refreshing Agenda UI...');
-          loadData();
+          console.log('Realtime change detected, silent refresh...');
+          // Chama loadData com true para ser silencioso (sem spinner)
+          loadData(true);
         }
       )
       .subscribe();
     
-    // Refresh expiring alerts every minute
-    const interval = setInterval(loadData, 60000);
+    // Refresh expiring alerts every minute (silently)
+    const interval = setInterval(() => loadData(true), 60000);
 
     return () => {
       supabase.removeChannel(channel);
@@ -139,7 +141,7 @@ const Agenda: React.FC = () => {
       
       // Update with audit trail
       await db.reservations.update(updatedRes, currentUser?.id, `${type} em ${res.clientName}`);
-      loadData();
+      loadData(true);
   };
 
   // --- SLOT CALCULATION FOR EDIT (USING UTILS) ---
@@ -264,7 +266,8 @@ const Agenda: React.FC = () => {
                       await db.reservations.create(newRes, currentUser?.id);
                   }
              }
-             setIsEditMode(false); setEditingRes(updated); loadData();
+             setIsEditMode(false); setEditingRes(updated); 
+             loadData(true); // Silent refresh
           } catch (error) { console.error(error); alert("Erro ao salvar."); } finally { setLoading(false); }
       }
   };
@@ -299,7 +302,8 @@ const Agenda: React.FC = () => {
       const updated = { ...editingRes, status };
       // Update with audit
       await db.reservations.update(updated, currentUser?.id, `Alterou status para ${status}`);
-      setEditingRes(null); loadData();
+      setEditingRes(null); 
+      loadData(true); // Silent refresh
     }
   };
 
@@ -332,7 +336,7 @@ const Agenda: React.FC = () => {
           setEditingRes(null);
           setIsCancelling(false);
           setCancelReason('');
-          loadData();
+          loadData(true); // Silent Refresh
       } catch (e) {
           console.error(e);
           alert("Erro ao cancelar reserva.");
