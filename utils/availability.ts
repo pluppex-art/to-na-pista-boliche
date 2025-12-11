@@ -70,12 +70,14 @@ export const checkHourCapacity = (
 
 /**
  * Gera todos os slots de horário para um dia, com status de disponibilidade e tempo
+ * Agora aceita isStaff para aplicar regra de tolerância
  */
 export const generateDailySlots = (
   dateStr: string,
   settings: AppSettings,
   allReservations: Reservation[],
-  excludeReservationId?: string
+  excludeReservationId?: string,
+  isStaff: boolean = false
 ): TimeSlot[] => {
   const dayConfig = getDayConfiguration(dateStr, settings);
   
@@ -90,7 +92,10 @@ export const generateDailySlots = (
   if (end < start) end += 24;
 
   const isToday = isDateToday(dateStr);
-  const currentHour = new Date().getHours();
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentMinute = now.getMinutes();
+  
   const slots: TimeSlot[] = [];
 
   for (let h = start; h < end; h++) {
@@ -108,9 +113,22 @@ export const generateDailySlots = (
       excludeReservationId
     );
 
-    // Checa se já passou do horário (apenas se for hoje)
-    // Se for 18h agora, o slot das 18h já era.
-    const isPast = isToday && (displayHourInt < currentHour || (displayHourInt === currentHour));
+    // LÓGICA DE PASSADO COM TOLERÂNCIA
+    let isPast = false;
+    if (isToday) {
+        if (displayHourInt < currentHour) {
+            isPast = true;
+        } else if (displayHourInt === currentHour) {
+            // Se for a hora atual:
+            // Cliente: Bloqueado
+            // Staff: Liberado até X minutos (ex: 5 min)
+            if (isStaff) {
+                isPast = currentMinute > 5; // Tolerância de 5 minutos
+            } else {
+                isPast = true; // Cliente não pode agendar hora atual
+            }
+        }
+    }
 
     slots.push({
       time: timeValue,

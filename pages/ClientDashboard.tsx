@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Client, Reservation, LoyaltyTransaction, ReservationStatus, PaymentStatus } from '../types';
 import { db } from '../services/mockBackend';
 import { useApp } from '../contexts/AppContext';
-import { LogOut, User, Gift, Clock, Calendar, MapPin, Coins, Loader2, MessageCircle, Edit, Save, X, Camera, CreditCard, AlertCircle, Trash2, HelpCircle, Store, CheckCircle2 } from 'lucide-react';
+import { LogOut, User, Gift, Clock, Calendar, Coins, Loader2, MessageCircle, Edit, Save, X, Camera, CreditCard, Trash2, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
 const ClientDashboard: React.FC = () => {
@@ -20,10 +20,6 @@ const ClientDashboard: React.FC = () => {
   const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', photoUrl: '' });
   const [isSaving, setIsSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Cancel State
-  const [reservationToCancel, setReservationToCancel] = useState<Reservation | null>(null);
-  const [cancelReason, setCancelReason] = useState('');
 
   // Clock for countdowns
   const [now, setNow] = useState(new Date());
@@ -165,40 +161,10 @@ const ClientDashboard: React.FC = () => {
       window.open(whatsappUrl, '_blank');
   };
 
-  const handleCancelRequest = async () => {
-      if (!reservationToCancel) return;
-      if (!cancelReason.trim()) { alert("Por favor, informe um motivo."); return; }
-
-      try {
-          // Re-use logic similar to Agenda but customized for self-service
-          const res = reservationToCancel;
-          
-          // Estorno de pontos se já pago
-          const shouldRevertPoints = res.status === ReservationStatus.CONFIRMADA || res.paymentStatus === PaymentStatus.PAGO;
-          if (shouldRevertPoints && client) {
-               const points = Math.floor(res.totalValue);
-               if (points > 0) {
-                   await db.loyalty.addTransaction(client.id, -points, "Estorno: Cancelamento pelo Cliente");
-               }
-          }
-
-          const updatedRes = { 
-              ...res, 
-              status: ReservationStatus.CANCELADA, 
-              observations: (res.observations || '') + ` [Cancelado pelo cliente: ${cancelReason}]` 
-          };
-          
-          await db.reservations.update(updatedRes, 'CLIENT', `Cliente cancelou: ${cancelReason}`);
-          
-          setHistory(prev => prev.map(r => r.id === res.id ? updatedRes : r));
-          setReservationToCancel(null);
-          setCancelReason('');
-          alert("Reserva cancelada.");
-          loadData(true);
-      } catch (e) {
-          console.error(e);
-          alert("Erro ao cancelar.");
-      }
+  const handleCancelRedirect = (res: Reservation) => {
+      const message = `Olá, gostaria de cancelar minha reserva (ID: ${res.id.slice(0,5)}) do dia ${new Date(res.date).toLocaleDateString('pt-BR')} às ${res.time}.`;
+      const whatsappUrl = `https://wa.me/55${settings.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+      window.open(whatsappUrl, '_blank');
   };
 
   // Helper: Check if reservation is more than 2 hours away
@@ -408,7 +374,7 @@ const ClientDashboard: React.FC = () => {
                                                 </button>
                                                 
                                                 {allowCancel && (
-                                                    <button onClick={() => setReservationToCancel(res)} className="text-xs text-red-500/70 hover:text-red-400 hover:underline transition flex items-center gap-1">
+                                                    <button onClick={() => handleCancelRedirect(res)} className="text-xs text-red-500/70 hover:text-red-400 hover:underline transition flex items-center gap-1">
                                                         <Trash2 size={12}/> Cancelar
                                                     </button>
                                                 )}
@@ -426,28 +392,6 @@ const ClientDashboard: React.FC = () => {
             </div>
 
         </main>
-
-        {/* Cancel Confirmation Modal */}
-        {reservationToCancel && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-                <div className="bg-slate-800 border border-slate-700 w-full max-w-sm rounded-xl shadow-2xl p-6 animate-scale-in">
-                     <h3 className="text-lg font-bold text-white mb-2">Cancelar Reserva?</h3>
-                     <p className="text-sm text-slate-400 mb-4">Tem certeza que deseja cancelar? O valor pago poderá ser convertido em crédito.</p>
-                     
-                     <textarea 
-                        className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white text-sm mb-4"
-                        placeholder="Motivo do cancelamento..."
-                        value={cancelReason}
-                        onChange={e => setCancelReason(e.target.value)}
-                     />
-
-                     <div className="flex gap-2">
-                         <button onClick={() => { setReservationToCancel(null); setCancelReason(''); }} className="flex-1 py-2 rounded bg-slate-700 text-white text-sm">Voltar</button>
-                         <button onClick={handleCancelRequest} className="flex-1 py-2 rounded bg-red-600 text-white font-bold text-sm">Confirmar</button>
-                     </div>
-                </div>
-            </div>
-        )}
 
         {/* Floating WhatsApp Button */}
         {settings && (

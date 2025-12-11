@@ -686,7 +686,8 @@ export const db = {
         birthdayName: r.birthday_name,
         tableSeatCount: r.table_seat_count,
         payOnSite: r.pay_on_site, // Mapeado do banco
-        createdBy: r.created_by
+        createdBy: r.created_by,
+        lanesAssigned: r.pistas_usadas || [] // Mapeamento novo
       }));
 
       // --- AUTOMATIC EXPIRATION CHECK (30 MIN RULE) ---
@@ -764,7 +765,8 @@ export const db = {
         birthday_name: res.birthdayName,
         table_seat_count: res.tableSeatCount,
         pay_on_site: res.payOnSite, // Grava no banco
-        created_by: createdByUserId
+        created_by: createdByUserId,
+        pistas_usadas: res.lanesAssigned // Salva no banco
       };
       
       const { error } = await supabase.from('reservas').insert(dbRes);
@@ -799,7 +801,8 @@ export const db = {
         has_table_reservation: res.hasTableReservation,
         birthday_name: res.birthdayName,
         table_seat_count: res.tableSeatCount,
-        pay_on_site: res.payOnSite
+        pay_on_site: res.payOnSite,
+        pistas_usadas: res.lanesAssigned // Atualiza no banco
       };
       
       const { error } = await supabase.from('reservas').update(dbRes).eq('id', res.id);

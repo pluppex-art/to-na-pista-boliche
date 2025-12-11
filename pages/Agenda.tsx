@@ -5,7 +5,7 @@ import { supabase } from '../services/supabaseClient';
 import { Reservation, ReservationStatus, EventType, UserRole, PaymentStatus } from '../types';
 import { useApp } from '../contexts/AppContext'; // Context
 import { generateDailySlots, checkHourCapacity } from '../utils/availability'; // Utils
-import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, CheckCircle2, X, AlertTriangle, MessageCircle, Clock, Store } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, CheckCircle2, X, AlertTriangle, MessageCircle, Clock, Store, LayoutGrid, Hash, DollarSign } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -30,6 +30,11 @@ const Agenda: React.FC = () => {
   const [editingRes, setEditingRes] = useState<Reservation | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Reservation>>({});
+  
+  // Lane Selection State
+  const [showLaneSelector, setShowLaneSelector] = useState(false);
+  const [laneSelectorTargetRes, setLaneSelectorTargetRes] = useState<Reservation | null>(null);
+  const [tempSelectedLanes, setTempSelectedLanes] = useState<number[]>([]);
   
   // Cancel Logic State
   const [isCancelling, setIsCancelling] = useState(false);
@@ -65,7 +70,9 @@ const Agenda: React.FC = () => {
 
       let total = 0, pending = 0, confirmed = 0, checkIn = 0, noShow = 0;
       dayReservations.forEach(r => {
-          const slotCount = r.laneCount * r.duration;
+          // CORREÇÃO: Arredondar para cima (Math.ceil) para evitar números quebrados (ex: 2.9 virar 3)
+          const slotCount = Math.ceil(r.laneCount * r.duration);
+          
           total += slotCount;
           checkIn += r.checkedInIds?.length || 0;
           noShow += r.noShowIds?.length || 0;
@@ -128,20 +135,65 @@ const Agenda: React.FC = () => {
       let newCheckedInIds = [...currentCheckedInIds];
       let newNoShowIds = [...currentNoShowIds];
 
+      let openLaneSelector = false;
+
       if (type === 'CHECK_IN') {
-          if (newCheckedInIds.includes(uniqueId)) newCheckedInIds = newCheckedInIds.filter(id => id !== uniqueId);
-          else { newCheckedInIds.push(uniqueId); newNoShowIds = newNoShowIds.filter(id => id !== uniqueId); }
+          if (newCheckedInIds.includes(uniqueId)) {
+              newCheckedInIds = newCheckedInIds.filter(id => id !== uniqueId);
+          } else { 
+              newCheckedInIds.push(uniqueId); 
+              newNoShowIds = newNoShowIds.filter(id => id !== uniqueId); 
+              // TRIGGER LANE SELECTOR ON CHECK-IN
+              openLaneSelector = true;
+          }
       } else if (type === 'NO_SHOW') {
           if (newNoShowIds.includes(uniqueId)) newNoShowIds = newNoShowIds.filter(id => id !== uniqueId);
           else { newNoShowIds.push(uniqueId); newCheckedInIds = newCheckedInIds.filter(id => id !== uniqueId); }
       }
 
       const updatedRes = { ...res, checkedInIds: newCheckedInIds, noShowIds: newNoShowIds };
-      setReservations(prev => prev.map(r => r.id === res.id ? updatedRes : r));
       
       // Update with audit trail
       await db.reservations.update(updatedRes, currentUser?.id, `${type} em ${res.clientName}`);
+      
+      if (openLaneSelector) {
+          // Open Modal for Lane Selection
+          setLaneSelectorTargetRes(updatedRes);
+          setTempSelectedLanes(updatedRes.lanesAssigned || []);
+          setShowLaneSelector(true);
+      } else {
+          loadData(true);
+      }
+  };
+
+  // --- LANE SELECTION LOGIC ---
+  const toggleLaneSelection = (laneNumber: number) => {
+      setTempSelectedLanes(prev => {
+          if (prev.includes(laneNumber)) return prev.filter(l => l !== laneNumber);
+          return [...prev, laneNumber].sort((a,b) => a-b);
+      });
+  };
+
+  const saveLaneSelection = async () => {
+      if (!laneSelectorTargetRes) return;
+      const updatedRes = { ...laneSelectorTargetRes, lanesAssigned: tempSelectedLanes };
+      await db.reservations.update(updatedRes, currentUser?.id, 'Atualizou pistas atribuídas');
+      
+      // Update local state immediately for responsiveness
+      if (editingRes && editingRes.id === updatedRes.id) {
+          setEditingRes(updatedRes);
+      }
+      
+      setShowLaneSelector(false);
+      setLaneSelectorTargetRes(null);
       loadData(true);
+  };
+
+  const openLaneSelectorModal = (e: React.MouseEvent, res: Reservation) => {
+      e.stopPropagation();
+      setLaneSelectorTargetRes(res);
+      setTempSelectedLanes(res.lanesAssigned || []);
+      setShowLaneSelector(true);
   };
 
   // --- SLOT CALCULATION FOR EDIT (USING UTILS) ---
@@ -476,9 +528,29 @@ const Agenda: React.FC = () => {
                                             )}
                                         </div>
                                     </div>
-                                    <div className="flex gap-1">
-                                        <button disabled={!canEdit} onClick={(e) => handleGranularStatus(e, res, uniqueId, 'CHECK_IN')} className={`w-7 h-7 flex items-center justify-center rounded border transition ${!canEdit ? 'opacity-50' : isCheckedIn ? 'bg-green-500 text-white border-green-400' : 'bg-slate-800 text-slate-500 border-slate-600 hover:text-green-400'}`}><Check size={14}/></button>
-                                        <button disabled={!canEdit} onClick={(e) => handleGranularStatus(e, res, uniqueId, 'NO_SHOW')} className={`w-7 h-7 flex items-center justify-center rounded border transition ${!canEdit ? 'opacity-50' : isNoShow ? 'bg-red-500 text-white border-red-400' : 'bg-slate-800 text-slate-500 border-slate-600 hover:text-red-400'}`}><Ban size={14}/></button>
+                                    <div className="flex flex-col items-end gap-2">
+                                        <div className="flex gap-1">
+                                            <button disabled={!canEdit} onClick={(e) => handleGranularStatus(e, res, uniqueId, 'CHECK_IN')} className={`w-7 h-7 flex items-center justify-center rounded border transition ${!canEdit ? 'opacity-50' : isCheckedIn ? 'bg-green-500 text-white border-green-400' : 'bg-slate-800 text-slate-500 border-slate-600 hover:text-green-400'}`}><Check size={14}/></button>
+                                            <button disabled={!canEdit} onClick={(e) => handleGranularStatus(e, res, uniqueId, 'NO_SHOW')} className={`w-7 h-7 flex items-center justify-center rounded border transition ${!canEdit ? 'opacity-50' : isNoShow ? 'bg-red-500 text-white border-red-400' : 'bg-slate-800 text-slate-500 border-slate-600 hover:text-red-400'}`}><Ban size={14}/></button>
+                                        </div>
+                                        
+                                        {/* LANE SELECTION (Aparece apenas quando Check-In Confirmado) */}
+                                        {isCheckedIn && (
+                                            <div 
+                                                onClick={(e) => canEdit ? openLaneSelectorModal(e, res) : null}
+                                                className={`flex items-center gap-1 ${canEdit ? 'cursor-pointer hover:opacity-80' : 'opacity-70'}`}
+                                            >
+                                                {res.lanesAssigned && res.lanesAssigned.length > 0 ? (
+                                                    res.lanesAssigned.map(l => (
+                                                        <span key={l} className="w-5 h-5 rounded-full bg-slate-900 border border-slate-600 text-[10px] flex items-center justify-center text-white font-bold">{l}</span>
+                                                    ))
+                                                ) : (
+                                                    <div className="w-6 h-6 rounded flex items-center justify-center bg-slate-800 border border-slate-600 text-slate-400 hover:text-white hover:border-slate-400 transition" title="Atribuir Pista">
+                                                        <Hash size={12} />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                   </div>
                                   {res.hasTableReservation && <div className="mt-2 pt-2 border-t border-slate-700/50"><div className="flex flex-col gap-1"><span className="text-[10px] font-bold text-neon-orange uppercase tracking-wider flex items-center gap-1"><Utensils size={10} /> Mesa: {res.tableSeatCount} lug.</span>{res.birthdayName && <span className="text-[10px] text-neon-blue flex items-center gap-1 truncate font-bold"><Cake size={10} /> {res.birthdayName}</span>}</div></div>}
@@ -504,20 +576,112 @@ const Agenda: React.FC = () => {
             </div>
             
             {!isEditMode ? (
-                <div className="p-6 space-y-4 overflow-y-auto">
-                    {/* View Mode UI */}
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div><p className="text-slate-400">Cliente</p><p className="text-white font-medium text-lg">{editingRes.clientName}</p></div>
-                        <div><p className="text-slate-400">Tipo</p><p className="text-neon-orange font-medium">{editingRes.eventType}</p></div>
-                        <div><p className="text-slate-400">Horário</p><p className="text-white font-medium">{editingRes.time} ({editingRes.date.split('-').reverse().join('/')})</p></div>
-                        <div><p className="text-slate-400">Pistas</p><p className="text-white font-medium">{editingRes.laneCount} Pista(s) / {editingRes.peopleCount} Pessoas</p></div>
-                        {editingRes.hasTableReservation && <div className="col-span-2 bg-slate-900/50 p-3 rounded border border-slate-700/50 flex gap-4 items-center"><div className="flex items-center gap-2"><Utensils size={16} className="text-neon-orange"/> <span className="text-white font-bold">{editingRes.tableSeatCount} Cadeiras</span></div>{editingRes.birthdayName && <div className="flex items-center gap-2 pl-4 border-l border-slate-700"><Cake size={16} className="text-neon-blue"/><span className="text-white font-bold">{editingRes.birthdayName}</span></div>}</div>}
-                        {editingRes.payOnSite && editingRes.status === ReservationStatus.PENDENTE && (
-                            <div className="col-span-2 bg-blue-900/20 p-2 rounded border border-blue-500/30 flex items-center gap-2 text-blue-300 text-xs">
-                                <Store size={14}/> <strong>Pagamento no Local:</strong> Reserva segura contra cancelamento automático.
+                <div className="p-6 space-y-6 overflow-y-auto max-h-[70vh]">
+                    {/* Header Info */}
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <h2 className="text-2xl font-bold text-white mb-1">{editingRes.clientName}</h2>
+                            <div className="flex items-center gap-2 text-slate-400 text-sm">
+                                <Phone size={14} />
+                                <span>{clientPhones[editingRes.clientId] || 'Sem telefone'}</span>
+                            </div>
+                        </div>
+                        <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide border ${
+                            editingRes.status === ReservationStatus.CONFIRMADA ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+                            editingRes.status === ReservationStatus.PENDENTE ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
+                            'bg-slate-700 text-slate-400 border-slate-600'
+                        }`}>
+                            {editingRes.status}
+                        </div>
+                    </div>
+
+                    {/* Main Stats Grid */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-slate-900/50 p-4 rounded-xl border border-slate-700/50">
+                        <div>
+                            <span className="text-xs text-slate-500 uppercase font-bold block mb-1">Data</span>
+                            <span className="text-white font-medium flex items-center gap-2">
+                                <Calendar size={16} className="text-neon-blue"/>
+                                {editingRes.date.split('-').reverse().join('/')}
+                            </span>
+                        </div>
+                        <div>
+                            <span className="text-xs text-slate-500 uppercase font-bold block mb-1">Horário</span>
+                            <span className="text-white font-medium flex items-center gap-2">
+                                <Clock size={16} className="text-neon-blue"/>
+                                {editingRes.time} ({editingRes.duration}h)
+                            </span>
+                        </div>
+                        <div>
+                            <span className="text-xs text-slate-500 uppercase font-bold block mb-1">Pistas / Pessoas</span>
+                            <span className="text-white font-medium flex items-center gap-2">
+                                <LayoutGrid size={16} className="text-neon-blue"/>
+                                {editingRes.laneCount} / {editingRes.peopleCount}
+                            </span>
+                        </div>
+                        <div>
+                            <span className="text-xs text-slate-500 uppercase font-bold block mb-1">Valor Total</span>
+                            <span className="text-green-400 font-bold text-lg flex items-center gap-1">
+                                <DollarSign size={16}/>
+                                {editingRes.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }).replace('R$', '').trim()}
+                            </span>
+                        </div>
+                    </div>
+
+                    {/* Lane Assignment & Table Info */}
+                    <div className="space-y-3">
+                        {/* Lane Assignment */}
+                        <div className="flex items-center justify-between bg-slate-800 p-3 rounded-lg border border-slate-700">
+                            <div className="flex items-center gap-3">
+                                <div className="bg-slate-700 p-2 rounded text-slate-300"><Hash size={18}/></div>
+                                <div>
+                                    <span className="text-xs text-slate-400 block">Pistas em Uso</span>
+                                    <div className="flex gap-1 mt-1">
+                                        {editingRes.lanesAssigned && editingRes.lanesAssigned.length > 0 ? (
+                                            editingRes.lanesAssigned.map(l => (
+                                                <span key={l} className="w-6 h-6 rounded-full bg-neon-blue text-white flex items-center justify-center text-xs font-bold shadow-sm shadow-blue-500/50">{l}</span>
+                                            ))
+                                        ) : (
+                                            <span className="text-sm text-slate-500 italic">Não atribuídas</span>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                            {canEdit && editingRes.checkedInIds && editingRes.checkedInIds.length > 0 && (
+                                <button 
+                                    onClick={() => {
+                                        setLaneSelectorTargetRes(editingRes);
+                                        setTempSelectedLanes(editingRes.lanesAssigned || []);
+                                        setShowLaneSelector(true);
+                                    }}
+                                    className="text-xs font-bold text-neon-blue hover:text-white px-3 py-1.5 rounded border border-neon-blue hover:bg-neon-blue transition"
+                                >
+                                    Alterar Pistas
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Table Info */}
+                        {editingRes.hasTableReservation && (
+                            <div className="flex items-center gap-3 bg-slate-800 p-3 rounded-lg border border-slate-700">
+                                <div className="bg-slate-700 p-2 rounded text-neon-orange"><Utensils size={18}/></div>
+                                <div>
+                                    <span className="text-xs text-slate-400 block">Reserva de Mesa</span>
+                                    <span className="text-white text-sm font-medium">
+                                        {editingRes.tableSeatCount} lugares 
+                                        {editingRes.birthdayName && <span className="text-slate-400 mx-1">• Aniv: {editingRes.birthdayName}</span>}
+                                    </span>
+                                </div>
                             </div>
                         )}
                     </div>
+
+                    {/* Observations */}
+                    {editingRes.observations && (
+                        <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-800">
+                            <span className="text-xs text-slate-500 font-bold mb-1 block">Observações</span>
+                            <p className="text-sm text-slate-300 italic">{editingRes.observations}</p>
+                        </div>
+                    )}
                     
                     {/* Botões de Ação ou Fluxo de Cancelamento */}
                     {!isCancelling ? (
@@ -577,6 +741,37 @@ const Agenda: React.FC = () => {
             )}
           </div>
         </div>
+      )}
+
+      {/* LANE SELECTION MODAL */}
+      {showLaneSelector && laneSelectorTargetRes && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+              <div className="bg-slate-800 border border-slate-600 w-full max-w-sm rounded-2xl shadow-2xl animate-scale-in p-6">
+                  <h3 className="text-xl font-bold text-white mb-2 text-center">Selecionar Pista(s)</h3>
+                  <p className="text-sm text-slate-400 text-center mb-6">Em qual pista o cliente está jogando?</p>
+                  
+                  <div className="grid grid-cols-3 gap-4 mb-6">
+                      {Array.from({ length: settings.activeLanes }).map((_, i) => {
+                          const laneNum = i + 1;
+                          const isSelected = tempSelectedLanes.includes(laneNum);
+                          return (
+                              <button 
+                                key={laneNum}
+                                onClick={() => toggleLaneSelection(laneNum)}
+                                className={`h-16 rounded-xl flex items-center justify-center text-2xl font-bold transition border-2 ${isSelected ? 'bg-neon-blue border-neon-blue text-white shadow-lg scale-105' : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-500'}`}
+                              >
+                                  {laneNum}
+                              </button>
+                          )
+                      })}
+                  </div>
+
+                  <div className="flex gap-3">
+                      <button onClick={() => { setShowLaneSelector(false); setLaneSelectorTargetRes(null); }} className="flex-1 py-3 bg-slate-700 text-white rounded-lg font-medium">Cancelar</button>
+                      <button onClick={saveLaneSelection} className="flex-1 py-3 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold">Confirmar</button>
+                  </div>
+              </div>
+          </div>
       )}
     </div>
   );

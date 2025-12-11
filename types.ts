@@ -114,6 +114,9 @@ export interface Reservation {
 
   // Auditoria
   createdBy?: string; // User ID of staff who created
+  
+  // Pistas Específicas (1, 2, 3...)
+  lanesAssigned?: number[];
 }
 
 export interface FunnelCard {

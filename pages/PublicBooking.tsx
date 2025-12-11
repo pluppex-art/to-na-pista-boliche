@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { db } from '../services/mockBackend';
@@ -7,7 +8,7 @@ import { useApp } from '../contexts/AppContext';
 import { generateDailySlots, checkHourCapacity } from '../utils/availability';
 import { EventType, ReservationStatus, PaymentStatus, Reservation, FunnelStage, UserRole } from '../types';
 import { EVENT_TYPES, INITIAL_SETTINGS } from '../constants';
-import { CheckCircle, Calendar as CalendarIcon, Clock, Users, ChevronRight, DollarSign, ChevronLeft, Lock, LayoutDashboard, Loader2, UserPlus, Mail, Phone, User as UserIcon, AlertCircle, XCircle, ShieldCheck, CreditCard, ArrowRight, Cake, Utensils, MessageCircle, LogIn, AlertTriangle, Store } from 'lucide-react';
+import { CheckCircle, Calendar as CalendarIcon, Clock, Users, ChevronRight, DollarSign, ChevronLeft, Lock, LayoutDashboard, Loader2, UserPlus, Mail, Phone, User as UserIcon, AlertCircle, XCircle, ShieldCheck, CreditCard, ArrowRight, Cake, Utensils, MessageCircle, LogIn, AlertTriangle, Store, Settings, PenTool } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
 const steps = ['Data', 'Configuração & Horário', 'Seus Dados', 'Resumo', 'Pagamento'];
@@ -40,6 +41,12 @@ const PublicBooking: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedTimes, setSelectedTimes] = useState<string[]>([]);
   
+  // Manual Mode State (Staff Only)
+  const [isManualMode, setIsManualMode] = useState(false);
+  const [manualStartTime, setManualStartTime] = useState('18:00');
+  const [manualEndTime, setManualEndTime] = useState('19:00');
+  const [manualPrice, setManualPrice] = useState<string>('');
+
   // State for Inputs (Allow empty string for typing)
   const [peopleInput, setPeopleInput] = useState<string>('6');
   const [lanesInput, setLanesInput] = useState<string>('1');
@@ -130,7 +137,8 @@ const PublicBooking: React.FC = () => {
 
   const currentPrice = getPricePerHour();
   const totalDuration = selectedTimes.length;
-  const totalValue = currentPrice * formData.lanes * (totalDuration || 0);
+  // Use Manual Price if mode is active and price is set, otherwise calc standard
+  const totalValue = isManualMode && manualPrice ? parseFloat(manualPrice) : (currentPrice * formData.lanes * (totalDuration || 0));
 
   useEffect(() => {
     let isMounted = true;
@@ -370,9 +378,16 @@ const PublicBooking: React.FC = () => {
                    if (!formData.tableSeatCount) newErrors.tableSeatCount = true;
               }
           }
-          if (selectedTimes.length === 0) {
-              alert("Por favor, selecione pelo menos um horário.");
-              isValid = false;
+          if (isManualMode) {
+              if (!manualStartTime || !manualEndTime || !manualPrice) {
+                  alert("Preencha horário de início, fim e valor para agendamento manual.");
+                  isValid = false;
+              }
+          } else {
+              if (selectedTimes.length === 0) {
+                  alert("Por favor, selecione pelo menos um horário.");
+                  isValid = false;
+              }
           }
       }
 
@@ -557,7 +572,7 @@ const PublicBooking: React.FC = () => {
         <button
           key={d}
           disabled={!allowed}
-          onClick={() => { setSelectedDate(dateStr); setSelectedTimes([]); }}
+          onClick={() => { setSelectedDate(dateStr); setSelectedTimes([]); setIsManualMode(false); }}
           className={`h-12 rounded-lg flex items-center justify-center font-medium transition-all relative ${isSelected ? 'bg-neon-orange text-white shadow-[0_0_10px_rgba(249,115,22,0.5)] z-10 scale-110' : allowed ? 'bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-700' : 'bg-slate-900/50 text-slate-600 cursor-not-allowed opacity-50'}`}
         >
           {d}
@@ -584,7 +599,8 @@ const PublicBooking: React.FC = () => {
     );
   };
 
-  const timeSlots = generateDailySlots(selectedDate, settings, existingReservations);
+  // PASS STAFF STATUS TO GENERATOR FOR 5-MIN TOLERANCE
+  const timeSlots = generateDailySlots(selectedDate, settings, existingReservations, undefined, !!staffUser);
 
   const toggleTimeSelection = (time: string) => {
       setSelectedTimes(prev => {
@@ -597,6 +613,14 @@ const PublicBooking: React.FC = () => {
   };
 
   const getReservationBlocks = () => {
+    if (isManualMode) {
+        // Approximate Duration Calculation for Manual Mode (Just for display/save, not for slots logic)
+        const [h1, m1] = manualStartTime.split(':').map(Number);
+        const [h2, m2] = manualEndTime.split(':').map(Number);
+        const diffHours = (h2 + m2/60) - (h1 + m1/60);
+        return [{ time: manualStartTime, duration: Math.max(0.5, parseFloat(diffHours.toFixed(1))) }];
+    }
+
     if (selectedTimes.length === 0) return [];
     const sortedHours = selectedTimes.map(t => parseInt(t.split(':')[0])).sort((a,b) => a - b);
     const blocks: { time: string, duration: number }[] = [];
@@ -629,40 +653,75 @@ const PublicBooking: React.FC = () => {
           // Force fresh fetch for validation just in case
           const allRes = await db.reservations.getAll();
           
-          for (const block of blocks) {
-             const startH = parseInt(block.time.split(':')[0]);
-             
-             // 1. Check Reservation Count Limit (Max 2 per slot)
-             const reservationsAtStart = allRes.filter(r => 
-                 r.date === selectedDate && 
-                 r.time === block.time && 
-                 r.status !== ReservationStatus.CANCELADA
-             );
-             
-             // 2. Check Total People Limit (Max 50 total per slot)
-             const totalPeopleAtStart = reservationsAtStart.reduce((sum, r) => sum + r.peopleCount, 0);
+          if (isManualMode) {
+              // --- MANUAL CONFLICT CHECK (SIMPLE) ---
+              // Convert manual time to minutes for comparison
+              const [hStart, mStart] = manualStartTime.split(':').map(Number);
+              const [hEnd, mEnd] = manualEndTime.split(':').map(Number);
+              const newStartMins = hStart * 60 + mStart;
+              const newEndMins = hEnd * 60 + mEnd;
 
-             if (reservationsAtStart.length >= 2) {
-                 alert(`O horário das ${block.time} atingiu o limite de reservas simultâneas.`);
-                 setIsSaving(false);
-                 return;
-             }
+              if (newEndMins <= newStartMins) {
+                  alert("Hora de fim deve ser maior que hora de início.");
+                  setIsSaving(false); return;
+              }
 
-             if (totalPeopleAtStart + formData.people > 50) {
-                 alert(`O horário das ${block.time} atingiu a capacidade máxima de pessoas (Máx 50).`);
-                 setIsSaving(false);
-                 return;
-             }
+              // Count conflicting lanes
+              const conflictingLanes = allRes.filter(r => {
+                  if (r.date !== selectedDate || r.status === ReservationStatus.CANCELADA) return false;
+                  
+                  // Convert existing res to minutes
+                  const [rH, rM] = r.time.split(':').map(Number);
+                  const resStartMins = rH * 60 + rM;
+                  const resEndMins = resStartMins + (r.duration * 60);
 
-             for(let h=0; h<block.duration; h++) {
-                 const checkH = startH + h;
-                 const { left } = checkHourCapacity(checkH, selectedDate, allRes, settings.activeLanes);
-                 if(left < formData.lanes) {
-                     alert(`O horário das ${checkH}:00 acabou de ser ocupado.`);
+                  // Check Overlap: (StartA < EndB) and (EndA > StartB)
+                  return (newStartMins < resEndMins) && (newEndMins > resStartMins);
+              }).reduce((acc, curr) => acc + curr.laneCount, 0);
+
+              const availableLanes = settings.activeLanes - conflictingLanes;
+              if (availableLanes < formData.lanes) {
+                  alert(`Conflito de horário! Apenas ${availableLanes} pista(s) disponível(is) neste intervalo.`);
+                  setIsSaving(false); return;
+              }
+
+          } else {
+              // --- STANDARD SLOT CHECK ---
+              for (const block of blocks) {
+                 const startH = parseInt(block.time.split(':')[0]);
+                 
+                 // 1. Check Reservation Count Limit (Max 2 per slot)
+                 const reservationsAtStart = allRes.filter(r => 
+                     r.date === selectedDate && 
+                     r.time === block.time && 
+                     r.status !== ReservationStatus.CANCELADA
+                 );
+                 
+                 // 2. Check Total People Limit (Max 50 total per slot)
+                 const totalPeopleAtStart = reservationsAtStart.reduce((sum, r) => sum + r.peopleCount, 0);
+
+                 if (reservationsAtStart.length >= 2) {
+                     alert(`O horário das ${block.time} atingiu o limite de reservas simultâneas.`);
                      setIsSaving(false);
                      return;
                  }
-             }
+
+                 if (totalPeopleAtStart + formData.people > 50) {
+                     alert(`O horário das ${block.time} atingiu a capacidade máxima de pessoas (Máx 50).`);
+                     setIsSaving(false);
+                     return;
+                 }
+
+                 for(let h=0; h<block.duration; h++) {
+                     const checkH = startH + h;
+                     const { left } = checkHourCapacity(checkH, selectedDate, allRes, settings.activeLanes);
+                     if(left < formData.lanes) {
+                         alert(`O horário das ${checkH}:00 acabou de ser ocupado.`);
+                         setIsSaving(false);
+                         return;
+                     }
+                 }
+              }
           }
 
           // Nota: clientId pode ser VAZIO se for reserva de balcão sem cadastro (Staff Mode)
@@ -671,7 +730,11 @@ const PublicBooking: React.FC = () => {
 
           const newIds: string[] = [];
           for (const block of blocks) {
-             const blockTotalValue = (totalValue / (blocks.reduce((acc, b) => acc + b.duration, 0))) * block.duration;
+             // If manual, value is already set in totalValue variable
+             const blockTotalValue = isManualMode 
+                ? parseFloat(manualPrice) 
+                : (totalValue / (blocks.reduce((acc, b) => acc + b.duration, 0))) * block.duration;
+
              const res: Reservation = {
                  id: uuidv4(),
                  clientId: clientId || '', // Envia string vazia se null, o backend trata
@@ -683,7 +746,7 @@ const PublicBooking: React.FC = () => {
                  duration: block.duration,
                  totalValue: blockTotalValue,
                  eventType: formData.type,
-                 observations: formData.obs,
+                 observations: formData.obs + (isManualMode ? ' [Agendamento Manual]' : ''),
                  status: ReservationStatus.PENDENTE,
                  paymentStatus: PaymentStatus.PENDENTE,
                  createdAt: new Date().toISOString(),
@@ -705,9 +768,10 @@ const PublicBooking: React.FC = () => {
           setExistingReservations(await db.reservations.getAll());
           setCurrentStep(4);
 
-      } catch (e) {
+      } catch (e: any) {
           console.error(e);
-          alert("Erro ao criar agendamento.");
+          // Melhoria na mensagem de erro para debug
+          alert(`Erro ao criar agendamento: ${e.message || 'Erro de conexão ou dados inválidos.'}`);
       } finally {
           setIsSaving(false);
       }
@@ -718,7 +782,7 @@ const PublicBooking: React.FC = () => {
       try {
           if (type === 'CONFIRM_NOW') {
               // Staff confirmou pagamento total agora
-              navigate('/checkout', { state: { ...formData, date: selectedDate, time: selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
+              navigate('/checkout', { state: { ...formData, date: selectedDate, time: isManualMode ? manualStartTime : selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
           } else if (type === 'PAY_ON_SITE') {
               // Staff marcou para pagar no local (Mantém Pendente, adiciona obs, flag payOnSite)
               
@@ -754,11 +818,11 @@ const PublicBooking: React.FC = () => {
                   return; 
               } else {
                   alert("Erro no banco. Redirecionando para manual.");
-                  navigate('/checkout', { state: { ...formData, date: selectedDate, time: selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
+                  navigate('/checkout', { state: { ...formData, date: selectedDate, time: isManualMode ? manualStartTime : selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
               }
           } else {
              // Fluxo Manual (Cliente)
-             navigate('/checkout', { state: { ...formData, date: selectedDate, time: selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
+             navigate('/checkout', { state: { ...formData, date: selectedDate, time: isManualMode ? manualStartTime : selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
           }
       } catch (e) {
           console.error(e);
@@ -899,32 +963,75 @@ const PublicBooking: React.FC = () => {
                     </div>
                 </div>
 
-                <div className="mb-6">
-                    <h3 className="text-sm font-bold text-slate-300 uppercase mb-3">Horários Disponíveis</h3>
-                    <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
-                        {timeSlots.map(slot => (
-                            <button
-                                key={slot.time}
-                                disabled={!slot.available}
-                                onClick={() => toggleTimeSelection(slot.time)}
-                                className={`p-2 rounded text-xs font-bold border transition ${
-                                    selectedTimes.includes(slot.time) 
-                                        ? 'bg-neon-blue text-white border-neon-blue' 
-                                        : !slot.available 
-                                            ? 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed' 
-                                            : 'bg-slate-800 text-slate-300 border-slate-600 hover:border-slate-400'
-                                }`}
-                            >
-                                {slot.label}
-                            </button>
-                        ))}
+                {/* STAFF: MANUAL MODE TOGGLE */}
+                {staffUser && (
+                    <div className="mb-6 p-4 bg-slate-800 border border-neon-blue/30 rounded-lg animate-fade-in">
+                        <label className="flex items-center gap-3 cursor-pointer mb-4">
+                            <input 
+                                type="checkbox" 
+                                className="w-5 h-5 accent-neon-blue" 
+                                checked={isManualMode} 
+                                onChange={(e) => {
+                                    setIsManualMode(e.target.checked);
+                                    if (e.target.checked) setSelectedTimes([]); // Clear standard selection
+                                }} 
+                            />
+                            <span className="text-neon-blue font-bold flex items-center gap-2"><PenTool size={18}/> Definir manualmente horário da reserva</span>
+                        </label>
+
+                        {isManualMode && (
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pl-8 border-l-2 border-slate-700">
+                                <div>
+                                    <label className="block text-xs text-slate-400 mb-1">Hora Início</label>
+                                    <input type="time" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={manualStartTime} onChange={e => setManualStartTime(e.target.value)} />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-slate-400 mb-1">Hora Fim</label>
+                                    <input type="time" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={manualEndTime} onChange={e => setManualEndTime(e.target.value)} />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-slate-400 mb-1">Valor Personalizado (R$)</label>
+                                    <input type="number" step="0.01" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white font-bold text-neon-green" placeholder="0,00" value={manualPrice} onChange={e => setManualPrice(e.target.value)} />
+                                </div>
+                                <div className="col-span-full text-xs text-slate-500 italic">
+                                    Modo manual ignora regras de duração padrão. O sistema verificará conflitos exatos.
+                                </div>
+                            </div>
+                        )}
                     </div>
-                    {selectedTimes.length > 0 && (
-                        <div className="mt-4 p-3 bg-neon-blue/10 border border-neon-blue/30 rounded text-neon-blue text-sm font-bold text-center">
-                            {selectedTimes.length} hora(s) selecionada(s) • Total: {(currentPrice * formData.lanes * selectedTimes.length).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                )}
+
+                {!isManualMode && (
+                    <div className="mb-6">
+                        <h3 className="text-sm font-bold text-slate-300 uppercase mb-3">Horários Disponíveis</h3>
+                        <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
+                            {timeSlots.map(slot => (
+                                <button
+                                    key={slot.time}
+                                    disabled={!slot.available}
+                                    onClick={() => toggleTimeSelection(slot.time)}
+                                    className={`p-2 rounded text-xs font-bold border transition ${
+                                        selectedTimes.includes(slot.time) 
+                                            ? 'bg-neon-blue text-white border-neon-blue' 
+                                            : !slot.available 
+                                                ? 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed' 
+                                                : 'bg-slate-800 text-slate-300 border-slate-600 hover:border-slate-400'
+                                    }`}
+                                >
+                                    {slot.label}
+                                </button>
+                            ))}
                         </div>
-                    )}
-                </div>
+                        {staffUser && timeSlots.some(s => s.isPast && s.available) && (
+                            <p className="text-xs text-neon-blue mt-2 italic">* Horários recentes liberados (Tolerância Staff 5min)</p>
+                        )}
+                        {selectedTimes.length > 0 && (
+                            <div className="mt-4 p-3 bg-neon-blue/10 border border-neon-blue/30 rounded text-neon-blue text-sm font-bold text-center">
+                                {selectedTimes.length} hora(s) selecionada(s) • Total: {(currentPrice * formData.lanes * selectedTimes.length).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 <div className="flex justify-between">
                     <button onClick={handleBack} className="px-6 py-3 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800">Voltar</button>
