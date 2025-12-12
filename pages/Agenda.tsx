@@ -767,31 +767,37 @@ const Agenda: React.FC = () => {
                 </div>
             ) : (
                 <form onSubmit={handleSaveEdit} className="p-6 space-y-4 animate-fade-in overflow-y-auto">
-                    {/* Expanded Edit Form */}
-                    <div className="grid grid-cols-2 gap-4">
-                       <div><label className="text-xs text-slate-400">Data</label><input type="date" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={editForm.date} onChange={e => setEditForm({...editForm, date: e.target.value})} /></div>
-                       <div><label className="text-xs text-slate-400">Duração</label><div className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white font-bold text-neon-blue">{selectedEditTimes.length}h</div></div>
-                       <div className="col-span-2">
-                           <label className="text-xs text-slate-400">Horários</label>
+                    {/* Grid Principal Layout para Inputs */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                       
+                       {/* Data e Duração */}
+                       <div className="col-span-1">
+                          <label className="text-xs text-slate-400 block mb-1">Data</label>
+                          <input type="date" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={editForm.date} onChange={e => setEditForm({...editForm, date: e.target.value})} />
+                       </div>
+                       <div className="col-span-1">
+                          <label className="text-xs text-slate-400 block mb-1">Duração</label>
+                          <div className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white font-bold text-neon-blue">{selectedEditTimes.length}h</div>
+                       </div>
+                       
+                       {/* Seleção de Horários (Full Width) */}
+                       <div className="col-span-1 md:col-span-2">
+                           <label className="text-xs text-slate-400 block mb-1">Horários</label>
                            {calculatingSlots ? <div className="text-slate-400 text-sm"><Loader2 className="animate-spin inline mr-2"/>Calculando...</div> : (
-                               <div className="grid grid-cols-6 gap-2 max-h-40 overflow-y-auto">
+                               <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-40 overflow-y-auto p-1 bg-slate-900/30 rounded border border-slate-700/50">
                                    {availableSlots.map(slot => {
                                        const isSelected = selectedEditTimes.includes(slot.time);
                                        return (
-                                           <button key={slot.time} type="button" disabled={!slot.available && !isSelected} onClick={() => toggleEditTime(slot.time)} className={`p-2 rounded text-xs font-bold border ${isSelected ? 'bg-neon-blue text-white' : !slot.available ? 'opacity-50 bg-slate-900' : 'bg-slate-800 text-slate-300'}`}>{slot.label}</button>
+                                           <button key={slot.time} type="button" disabled={!slot.available && !isSelected} onClick={() => toggleEditTime(slot.time)} className={`p-2 rounded text-xs font-bold border transition ${isSelected ? 'bg-neon-blue text-white shadow-md' : !slot.available ? 'opacity-30 cursor-not-allowed bg-slate-900 text-slate-500' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>{slot.label}</button>
                                        )
                                    })}
                                </div>
                            )}
                        </div>
                        
-                       {/* Basic Info */}
-                       <div><label className="text-xs text-slate-400">Pistas</label><input type="number" min="1" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={editForm.laneCount} onChange={e => setEditForm({...editForm, laneCount: parseInt(e.target.value)})} /></div>
-                       <div><label className="text-xs text-slate-400">Pessoas</label><input type="number" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={editForm.peopleCount} onChange={e => setEditForm({...editForm, peopleCount: parseInt(e.target.value)})} /></div>
-                       
-                       {/* New Fields: Event Type & Value */}
-                       <div>
-                           <label className="text-xs text-slate-400">Tipo de Evento</label>
+                       {/* Tipo de Evento e Valor */}
+                       <div className="col-span-1">
+                           <label className="text-xs text-slate-400 block mb-1">Tipo de Evento</label>
                            <select 
                                 className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" 
                                 value={editForm.eventType} 
@@ -800,8 +806,8 @@ const Agenda: React.FC = () => {
                                {EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                            </select>
                        </div>
-                       <div>
-                           <label className="text-xs text-slate-400">Valor Total (R$)</label>
+                       <div className="col-span-1">
+                           <label className="text-xs text-slate-400 block mb-1">Valor Total (R$)</label>
                            <input 
                                 type="number" 
                                 step="0.01"
@@ -811,8 +817,18 @@ const Agenda: React.FC = () => {
                            />
                        </div>
 
-                       {/* Table Reservation Toggle & Details */}
-                       <div className="col-span-2 bg-slate-900/50 p-3 rounded border border-slate-700">
+                       {/* Pistas e Pessoas */}
+                       <div className="col-span-1">
+                            <label className="text-xs text-slate-400 block mb-1">Pistas</label>
+                            <input type="number" min="1" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={editForm.laneCount} onChange={e => setEditForm({...editForm, laneCount: parseInt(e.target.value)})} />
+                       </div>
+                       <div className="col-span-1">
+                            <label className="text-xs text-slate-400 block mb-1">Pessoas</label>
+                            <input type="number" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={editForm.peopleCount} onChange={e => setEditForm({...editForm, peopleCount: parseInt(e.target.value)})} />
+                       </div>
+                       
+                       {/* Reserva de Mesa (Full Width) */}
+                       <div className="col-span-1 md:col-span-2 bg-slate-900/50 p-3 rounded border border-slate-700">
                            <label className="flex items-center gap-2 cursor-pointer mb-2">
                                <input 
                                     type="checkbox" 
@@ -824,9 +840,9 @@ const Agenda: React.FC = () => {
                            </label>
                            
                            {editForm.hasTableReservation && (
-                               <div className="grid grid-cols-2 gap-3 mt-2 pl-6 animate-fade-in">
+                               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2 pl-4 border-l-2 border-slate-700 animate-fade-in">
                                    <div>
-                                       <label className="text-xs text-slate-500">Qtd. Lugares</label>
+                                       <label className="text-xs text-slate-500 block mb-1">Qtd. Lugares</label>
                                        <input 
                                             type="number" 
                                             className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" 
@@ -834,22 +850,25 @@ const Agenda: React.FC = () => {
                                             onChange={e => setEditForm({...editForm, tableSeatCount: parseInt(e.target.value)})} 
                                         />
                                    </div>
-                                   <div>
-                                       <label className="text-xs text-slate-500">Aniversariante (Opcional)</label>
-                                       <input 
-                                            type="text" 
-                                            className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" 
-                                            value={editForm.birthdayName || ''} 
-                                            onChange={e => setEditForm({...editForm, birthdayName: e.target.value})} 
-                                        />
-                                   </div>
+                                   {/* Lógica Condicional: Só mostra Aniversariante se o Tipo for Aniversário */}
+                                   {(editForm.eventType === EventType.ANIVERSARIO) && (
+                                       <div>
+                                           <label className="text-xs text-slate-500 block mb-1">Nome do Aniversariante</label>
+                                           <input 
+                                                type="text" 
+                                                className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" 
+                                                value={editForm.birthdayName || ''} 
+                                                onChange={e => setEditForm({...editForm, birthdayName: e.target.value})} 
+                                            />
+                                       </div>
+                                   )}
                                </div>
                            )}
                        </div>
                        
-                       {/* Observations */}
-                       <div className="col-span-2">
-                           <label className="text-xs text-slate-400">Observações</label>
+                       {/* Observações (Full Width) */}
+                       <div className="col-span-1 md:col-span-2">
+                           <label className="text-xs text-slate-400 block mb-1">Observações</label>
                            <textarea 
                                 className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white h-20 text-sm" 
                                 value={editForm.observations} 
@@ -858,7 +877,11 @@ const Agenda: React.FC = () => {
                        </div>
 
                     </div>
-                    <div className="flex gap-3 pt-2"><button type="button" onClick={() => setIsEditMode(false)} className="flex-1 py-3 bg-slate-700 text-white rounded-lg">Cancelar</button><button type="submit" disabled={loading || selectedEditTimes.length === 0} className="flex-1 py-3 bg-neon-blue hover:bg-blue-500 text-white rounded-lg font-bold">{loading ? <Loader2 className="animate-spin" /> : 'Salvar Detalhes'}</button></div>
+                    
+                    <div className="flex gap-3 pt-4 border-t border-slate-700">
+                        <button type="button" onClick={() => setIsEditMode(false)} className="flex-1 py-3 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition">Cancelar</button>
+                        <button type="submit" disabled={loading || selectedEditTimes.length === 0} className="flex-1 py-3 bg-neon-blue hover:bg-blue-500 text-white rounded-lg font-bold shadow-lg transition">{loading ? <Loader2 className="animate-spin" /> : 'Salvar Detalhes'}</button>
+                    </div>
                 </form>
             )}
           </div>
