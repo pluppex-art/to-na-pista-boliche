@@ -4,20 +4,22 @@
   "name": "Tô Na Pista - Agenda & CRM",
   "icons": [
     {
-      "src": "/logo.png",
+      "src": "/logo.png?v=3",
       "type": "image/png",
-      "sizes": "192x192"
+      "sizes": "192x192",
+      "purpose": "any maskable"
     },
     {
-      "src": "/logo.png",
+      "src": "/logo.png?v=3",
       "type": "image/png",
-      "sizes": "512x512"
+      "sizes": "512x512",
+      "purpose": "any maskable"
     }
   ],
   "start_url": "/",
   "background_color": "#0f172a",
   "display": "standalone",
   "scope": "/",
-  "theme_color": "#0f172a",
+  "theme_color": "#f97316",
   "orientation": "portrait"
 }
