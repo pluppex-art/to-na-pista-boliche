@@ -2,18 +2,18 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
 import { Reservation, ReservationStatus, PaymentStatus, AuditLog, StaffPerformance, User } from '../types';
-import { Loader2, DollarSign, TrendingUp, Users, Calendar, Filter, AlertCircle, Clock, Award, Shield, History, ArrowRight, X } from 'lucide-react';
+import { Loader2, DollarSign, TrendingUp, Users, Calendar, Filter, AlertCircle, Clock, Shield, History, ArrowRight, X, Calculator, Percent, CalendarRange, ListChecks } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { supabase } from '../services/supabaseClient';
 
 const Financeiro: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'TEAM'>('OVERVIEW');
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'LOGS'>('OVERVIEW');
   const [loading, setLoading] = useState(true);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  // rawReservations inclui canceladas para cálculo de métricas de taxa
+  const [rawReservations, setRawReservations] = useState<Reservation[]>([]);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
 
-  // Team Metrics State
-  const [teamStats, setTeamStats] = useState<StaffPerformance[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
 
@@ -24,15 +24,16 @@ const Financeiro: React.FC = () => {
       endDate: ''
   });
 
+  // Helpers de Data
+  const toLocalISO = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   useEffect(() => {
     const now = new Date();
-    const toLocalISO = (date: Date) => {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    };
-
     const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
     const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
@@ -47,12 +48,9 @@ const Financeiro: React.FC = () => {
     if (!dateRange.start || !dateRange.end) return;
     if (!isBackground) setLoading(true);
     try {
-        // OPTIMIZED: Fetch only filtered range
         const all = await db.reservations.getByDateRange(dateRange.start, dateRange.end);
-        setReservations(all);
-        
-        const stats = await db.users.getPerformance(dateRange.start, dateRange.end);
-        setTeamStats(stats);
+        setRawReservations(all);
+        setReservations(all.filter(r => r.status !== ReservationStatus.CANCELADA));
         
         const usersList = await db.users.getAll();
         setAllUsers(usersList);
@@ -81,9 +79,7 @@ const Financeiro: React.FC = () => {
         .channel('financeiro-updates')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, (payload) => {
             const newRes = payload.new as any;
-            // Only update if relevant to current range
             if (newRes && newRes.date >= dateRange.start && newRes.date <= dateRange.end) {
-                console.log('[Financeiro] Realtime refresh (in range)');
                 refreshData(true);
             }
         })
@@ -99,28 +95,82 @@ const Financeiro: React.FC = () => {
       refreshAuditLogs();
   }, [auditFilters.userId, auditFilters.actionType]); 
 
-  // Filters logic
-  const filtered = reservations.filter(r => {
-    if (r.status === ReservationStatus.CANCELADA) return false;
-    return true;
-  });
+  // --- LÓGICA DE ATALHOS DE DATA ---
+  const applyDatePreset = (preset: 'TODAY' | '7D' | '30D' | '90D' | 'WEEK' | 'MONTH' | 'YEAR') => {
+      const today = new Date();
+      let start = new Date();
+      let end = new Date();
 
-  const totalRevenue = filtered
+      switch(preset) {
+          case 'TODAY':
+              // Start e End = Hoje
+              break;
+          case '7D':
+              start.setDate(today.getDate() - 6);
+              break;
+          case '30D':
+              start.setDate(today.getDate() - 29);
+              break;
+          case '90D':
+              start.setDate(today.getDate() - 89);
+              break;
+          case 'WEEK':
+              // Segunda a Domingo (ou Hoje)
+              const day = today.getDay(); // 0 (Dom) - 6 (Sab)
+              const diff = today.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
+              start.setDate(diff);
+              // End is today
+              break;
+          case 'MONTH':
+              start = new Date(today.getFullYear(), today.getMonth(), 1);
+              end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+              break;
+          case 'YEAR':
+              start = new Date(today.getFullYear(), 0, 1);
+              end = new Date(today.getFullYear(), 11, 31);
+              break;
+      }
+
+      const s = toLocalISO(start);
+      const e = toLocalISO(end);
+      setDateRange({ start: s, end: e });
+      setAuditFilters(prev => ({ ...prev, startDate: s, endDate: e }));
+  };
+
+  // --- CÁLCULOS DE MÉTRICAS ---
+  const totalRevenue = reservations
     .filter(r => r.status !== ReservationStatus.PENDENTE)
     .reduce((acc, curr) => acc + curr.totalValue, 0);
   
-  const pendingRevenue = filtered
+  const pendingRevenue = reservations
     .filter(r => r.status === ReservationStatus.PENDENTE)
     .reduce((acc, curr) => acc + curr.totalValue, 0);
 
-  const confirmedSlots = filtered
-    .filter(r => r.status !== ReservationStatus.PENDENTE && r.status !== ReservationStatus.NO_SHOW)
-    .reduce((acc, curr) => acc + (curr.duration * curr.laneCount), 0);
-
-  const avgTicket = confirmedSlots > 0 ? totalRevenue / confirmedSlots : 0;
+  const confirmedCount = reservations.filter(r => r.status !== ReservationStatus.PENDENTE && r.status !== ReservationStatus.NO_SHOW).length;
   
+  // Avg Ticket based on Confirmed Reservations (not slots)
+  const avgTicket = confirmedCount > 0 ? totalRevenue / confirmedCount : 0;
+  
+  // --- NOVAS MÉTRICAS ---
+  // 1. Dias no intervalo
+  const startD = new Date(dateRange.start);
+  const endD = new Date(dateRange.end);
+  const diffTime = Math.abs(endD.getTime() - startD.getTime());
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; 
+  
+  // 2. Média de Reservas por Dia
+  const dailyAverage = diffDays > 0 ? (confirmedCount / diffDays) : 0;
+
+  // 3. Taxa de Cancelamento
+  const totalBookingsIncludingCancelled = rawReservations.length;
+  const cancelledCount = rawReservations.filter(r => r.status === ReservationStatus.CANCELADA).length;
+  const cancellationRate = totalBookingsIncludingCancelled > 0 
+      ? (cancelledCount / totalBookingsIncludingCancelled) * 100 
+      : 0;
+
+  // Gráfico
   const revenueByDayMap = new Map<string, number>();
-  filtered
+  reservations
     .filter(r => r.status !== ReservationStatus.PENDENTE)
     .forEach(r => {
         const val = revenueByDayMap.get(r.date) || 0;
@@ -131,12 +181,12 @@ const Financeiro: React.FC = () => {
     .sort((a,b) => a.date.localeCompare(b.date));
 
   const clientSpendMap = new Map<string, {name: string, total: number, slots: number}>();
-  filtered.forEach(r => {
+  reservations.forEach(r => {
       const current = clientSpendMap.get(r.clientId) || { name: r.clientName, total: 0, slots: 0 };
       if (r.status !== ReservationStatus.PENDENTE) {
         current.total += r.totalValue;
       }
-      current.slots += (r.duration * r.laneCount);
+      current.slots += 1;
       clientSpendMap.set(r.clientId, current);
   });
   
@@ -148,77 +198,131 @@ const Financeiro: React.FC = () => {
 
   return (
     <div className="space-y-8 animate-fade-in pb-20 md:pb-0">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-6">
-            <div>
-                <h1 className="text-3xl font-bold text-white">Financeiro & Performance</h1>
-                <p className="text-slate-400">Resultados, vendas e ranking de equipe</p>
+        <div className="flex flex-col gap-6 border-b border-slate-800 pb-6">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                    <h1 className="text-3xl font-bold text-white">Financeiro</h1>
+                    <p className="text-slate-400">Resultados, estatísticas e logs do sistema</p>
+                </div>
             </div>
-            
-            <div className="flex items-center gap-2 bg-slate-800 p-2 rounded-lg border border-slate-700 w-full md:w-auto overflow-x-auto">
-                <Filter size={18} className="text-slate-400 ml-2 flex-shrink-0" />
-                <input 
-                    type="date" 
-                    className="bg-transparent text-white text-sm focus:outline-none border-r border-slate-700 pr-2"
-                    value={dateRange.start}
-                    onChange={e => {
-                        setDateRange({...dateRange, start: e.target.value});
-                        setAuditFilters(prev => ({ ...prev, startDate: e.target.value }));
-                    }}
-                />
-                <span className="text-slate-500 flex-shrink-0">até</span>
-                <input 
-                    type="date" 
-                    className="bg-transparent text-white text-sm focus:outline-none pl-2"
-                    value={dateRange.end}
-                    onChange={e => {
-                        setDateRange({...dateRange, end: e.target.value});
-                        setAuditFilters(prev => ({ ...prev, endDate: e.target.value }));
-                    }}
-                />
+
+            {/* SELETORES DE DATA */}
+            <div className="flex flex-col gap-3 bg-slate-800 p-4 rounded-xl border border-slate-700">
+                <div className="flex flex-wrap gap-2">
+                    <button onClick={() => applyDatePreset('TODAY')} className="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-700 text-slate-300 hover:bg-neon-blue hover:text-white transition">Hoje</button>
+                    <button onClick={() => applyDatePreset('WEEK')} className="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-700 text-slate-300 hover:bg-neon-blue hover:text-white transition">Esta Semana</button>
+                    <button onClick={() => applyDatePreset('7D')} className="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-700 text-slate-300 hover:bg-neon-blue hover:text-white transition">Últimos 7 dias</button>
+                    <button onClick={() => applyDatePreset('MONTH')} className="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-700 text-slate-300 hover:bg-neon-blue hover:text-white transition">Este Mês</button>
+                    <button onClick={() => applyDatePreset('30D')} className="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-700 text-slate-300 hover:bg-neon-blue hover:text-white transition">Últimos 30 dias</button>
+                    <button onClick={() => applyDatePreset('90D')} className="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-700 text-slate-300 hover:bg-neon-blue hover:text-white transition">Últimos 90 dias</button>
+                    <button onClick={() => applyDatePreset('YEAR')} className="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-700 text-slate-300 hover:bg-neon-blue hover:text-white transition">Este Ano</button>
+                </div>
+
+                <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto pt-2 border-t border-slate-700/50">
+                    <span className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><CalendarRange size={14}/> Personalizado:</span>
+                    <input 
+                        type="date" 
+                        className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-white text-sm focus:border-neon-blue outline-none"
+                        value={dateRange.start}
+                        onChange={e => {
+                            setDateRange({...dateRange, start: e.target.value});
+                            setAuditFilters(prev => ({ ...prev, startDate: e.target.value }));
+                        }}
+                    />
+                    <span className="text-slate-500 text-xs">até</span>
+                    <input 
+                        type="date" 
+                        className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-white text-sm focus:border-neon-blue outline-none"
+                        value={dateRange.end}
+                        onChange={e => {
+                            setDateRange({...dateRange, end: e.target.value});
+                            setAuditFilters(prev => ({ ...prev, endDate: e.target.value }));
+                        }}
+                    />
+                </div>
             </div>
         </div>
 
         <div className="flex space-x-4 border-b border-slate-700 mb-6">
-            <button onClick={() => setActiveTab('OVERVIEW')} className={`pb-2 px-4 font-medium transition ${activeTab === 'OVERVIEW' ? 'text-neon-blue border-b-2 border-neon-blue' : 'text-slate-400 hover:text-white'}`}>Visão Geral</button>
-            <button onClick={() => setActiveTab('TEAM')} className={`pb-2 px-4 font-medium transition ${activeTab === 'TEAM' ? 'text-neon-orange border-b-2 border-neon-orange' : 'text-slate-400 hover:text-white'}`}>Performance de Equipe</button>
+            <button onClick={() => setActiveTab('OVERVIEW')} className={`pb-2 px-4 font-medium transition flex items-center gap-2 ${activeTab === 'OVERVIEW' ? 'text-neon-blue border-b-2 border-neon-blue' : 'text-slate-400 hover:text-white'}`}><TrendingUp size={16}/> Visão Geral</button>
+            <button onClick={() => setActiveTab('LOGS')} className={`pb-2 px-4 font-medium transition flex items-center gap-2 ${activeTab === 'LOGS' ? 'text-neon-orange border-b-2 border-neon-orange' : 'text-slate-400 hover:text-white'}`}><Shield size={16}/> Auditoria & Logs</button>
         </div>
 
         {activeTab === 'OVERVIEW' ? (
-            <div className="space-y-8 animate-fade-in">
-                <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 lg:gap-6">
-                    <div className="bg-slate-800 p-3 lg:p-6 rounded-xl border border-green-500/30 flex items-center justify-between shadow-sm lg:shadow-lg hover:border-green-500 transition">
-                        <div className="flex flex-row lg:flex-col lg:items-start items-center gap-3 lg:gap-0">
-                            <div className="lg:hidden p-1.5 sm:p-2 bg-green-500/10 rounded-lg text-green-500"><DollarSign size={18} /></div>
-                            <div><span className="text-[10px] sm:text-xs lg:text-sm text-green-500 lg:text-slate-400 uppercase font-bold lg:tracking-wide">Faturamento</span><p className="hidden lg:block text-2xl xl:text-3xl font-bold text-green-500 mt-2">{totalRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p></div>
-                        </div>
-                        <div><span className="lg:hidden text-lg sm:text-2xl font-bold text-green-500">{totalRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span><div className="hidden lg:block p-4 bg-green-500/10 rounded-full text-green-500 border border-green-500/20"><DollarSign size={28} /></div></div>
+            <div className="space-y-6 animate-fade-in">
+                {/* GRID DE MÉTRICAS */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                    
+                    {/* Faturamento */}
+                    <div className="bg-slate-800 p-4 rounded-xl border border-green-500/30 shadow-lg hover:border-green-500 transition xl:col-span-2">
+                         <div className="flex justify-between items-start">
+                             <div>
+                                 <p className="text-xs text-green-500 font-bold uppercase tracking-wide mb-1">Faturamento Realizado</p>
+                                 <h3 className="text-2xl font-bold text-white">{totalRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3>
+                             </div>
+                             <div className="p-2 bg-green-500/10 rounded-lg text-green-500"><DollarSign size={24}/></div>
+                         </div>
                     </div>
-                    <div className="bg-slate-800 p-3 lg:p-6 rounded-xl border border-yellow-500/30 flex items-center justify-between shadow-sm lg:shadow-lg hover:border-yellow-500 transition">
-                        <div className="flex flex-row lg:flex-col lg:items-start items-center gap-3 lg:gap-0">
-                            <div className="lg:hidden p-1.5 sm:p-2 bg-yellow-500/10 rounded-lg text-yellow-500"><AlertCircle size={18} /></div>
-                            <div><span className="text-[10px] sm:text-xs lg:text-sm text-yellow-500 lg:text-slate-400 uppercase font-bold lg:tracking-wide">Pendente</span><p className="hidden lg:block text-2xl xl:text-3xl font-bold text-yellow-500 mt-2">{pendingRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p></div>
-                        </div>
-                        <div><span className="lg:hidden text-lg sm:text-2xl font-bold text-yellow-500">{pendingRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span><div className="hidden lg:block p-4 bg-yellow-500/10 rounded-full text-yellow-500 border border-yellow-500/20"><AlertCircle size={28} /></div></div>
+
+                    {/* Pendente */}
+                    <div className="bg-slate-800 p-4 rounded-xl border border-yellow-500/30 shadow-lg hover:border-yellow-500 transition xl:col-span-2">
+                         <div className="flex justify-between items-start">
+                             <div>
+                                 <p className="text-xs text-yellow-500 font-bold uppercase tracking-wide mb-1">A Receber / Pendente</p>
+                                 <h3 className="text-2xl font-bold text-white">{pendingRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3>
+                             </div>
+                             <div className="p-2 bg-yellow-500/10 rounded-lg text-yellow-500"><AlertCircle size={24}/></div>
+                         </div>
                     </div>
-                    <div className="bg-slate-800 p-3 lg:p-6 rounded-xl border border-slate-700 flex items-center justify-between shadow-sm lg:shadow-lg hover:border-slate-500 transition">
-                        <div className="flex flex-row lg:flex-col lg:items-start items-center gap-3 lg:gap-0">
-                            <div className="lg:hidden p-1.5 sm:p-2 bg-slate-700/50 rounded-lg text-slate-400"><Clock size={18} /></div>
-                            <div><span className="text-[10px] sm:text-xs lg:text-sm text-slate-400 lg:text-slate-400 uppercase font-bold lg:tracking-wide">Total De Reservas</span><p className="hidden lg:block text-2xl xl:text-3xl font-bold text-white mt-2">{confirmedSlots}</p></div>
-                        </div>
-                        <div><span className="lg:hidden text-lg sm:text-2xl font-bold text-white">{confirmedSlots}</span><div className="hidden lg:block p-4 bg-slate-700/30 rounded-full text-slate-200 border border-slate-600"><Clock size={28} /></div></div>
+
+                     {/* Ticket Médio */}
+                     <div className="bg-slate-800 p-4 rounded-xl border border-neon-blue/30 shadow-lg hover:border-neon-blue transition xl:col-span-2">
+                         <div className="flex justify-between items-start">
+                             <div>
+                                 <p className="text-xs text-neon-blue font-bold uppercase tracking-wide mb-1">Ticket Médio</p>
+                                 <h3 className="text-2xl font-bold text-white">{avgTicket.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3>
+                             </div>
+                             <div className="p-2 bg-neon-blue/10 rounded-lg text-neon-blue"><TrendingUp size={24}/></div>
+                         </div>
                     </div>
-                    <div className="bg-slate-800 p-3 lg:p-6 rounded-xl border border-neon-orange/30 flex items-center justify-between shadow-sm lg:shadow-lg hover:border-neon-orange transition">
-                        <div className="flex flex-row lg:flex-col lg:items-start items-center gap-3 lg:gap-0">
-                            <div className="lg:hidden p-1.5 sm:p-2 bg-neon-orange/10 rounded-lg text-neon-orange"><TrendingUp size={18} /></div>
-                            <div><span className="text-[10px] sm:text-xs lg:text-sm text-neon-orange lg:text-slate-400 uppercase font-bold lg:tracking-wide">Ticket Médio</span><p className="hidden lg:block text-2xl xl:text-3xl font-bold text-neon-orange mt-2">{avgTicket.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p></div>
-                        </div>
-                        <div><span className="lg:hidden text-lg sm:text-2xl font-bold text-neon-orange">{avgTicket.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span><div className="hidden lg:block p-4 bg-neon-orange/10 rounded-full text-neon-orange border border-neon-orange/20"><TrendingUp size={28} /></div></div>
+
+                    {/* Reservas Totais */}
+                    <div className="bg-slate-800 p-4 rounded-xl border border-slate-600 shadow-lg xl:col-span-2">
+                         <div className="flex justify-between items-start">
+                             <div>
+                                 <p className="text-xs text-slate-400 font-bold uppercase tracking-wide mb-1">Reservas Confirmadas</p>
+                                 <h3 className="text-2xl font-bold text-white">{confirmedCount}</h3>
+                             </div>
+                             <div className="p-2 bg-slate-700 rounded-lg text-slate-300"><ListChecks size={24}/></div>
+                         </div>
+                    </div>
+
+                    {/* Média Diária */}
+                    <div className="bg-slate-800 p-4 rounded-xl border border-purple-500/30 shadow-lg hover:border-purple-500 transition xl:col-span-2">
+                         <div className="flex justify-between items-start">
+                             <div>
+                                 <p className="text-xs text-purple-400 font-bold uppercase tracking-wide mb-1">Média Diária de Reservas</p>
+                                 <h3 className="text-2xl font-bold text-white">{dailyAverage.toFixed(1)} <span className="text-sm font-normal text-slate-400">/ dia</span></h3>
+                             </div>
+                             <div className="p-2 bg-purple-500/10 rounded-lg text-purple-500"><Calculator size={24}/></div>
+                         </div>
+                    </div>
+
+                    {/* Taxa de Cancelamento */}
+                    <div className="bg-slate-800 p-4 rounded-xl border border-red-500/30 shadow-lg hover:border-red-500 transition xl:col-span-2">
+                         <div className="flex justify-between items-start">
+                             <div>
+                                 <p className="text-xs text-red-400 font-bold uppercase tracking-wide mb-1">Taxa de Cancelamento</p>
+                                 <h3 className="text-2xl font-bold text-white">{cancellationRate.toFixed(1)}%</h3>
+                             </div>
+                             <div className="p-2 bg-red-500/10 rounded-lg text-red-500"><Percent size={24}/></div>
+                         </div>
                     </div>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     <div className="lg:col-span-2 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-                        <h3 className="text-lg font-bold text-white mb-6">Faturamento Diário (Realizado)</h3>
+                        <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2"><DollarSign size={20} className="text-green-500"/> Faturamento Diário (Realizado)</h3>
                         <div className="h-80 w-full">
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={revenueChartData}>
@@ -232,10 +336,10 @@ const Financeiro: React.FC = () => {
                         </div>
                     </div>
                     <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg flex flex-col">
-                        <h3 className="text-lg font-bold text-white mb-4">Top 5 Clientes</h3>
+                        <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Users size={20} className="text-neon-blue"/> Top 5 Clientes</h3>
                         <div className="flex-1 overflow-auto">
                             <table className="w-full text-left text-sm">
-                                <thead className="text-slate-400 border-b border-slate-700"><tr><th className="pb-2">Cliente</th><th className="pb-2 text-right">Reservas</th><th className="pb-2 text-right">Pago</th></tr></thead>
+                                <thead className="text-slate-400 border-b border-slate-700"><tr><th className="pb-2">Cliente</th><th className="pb-2 text-right">Qtd</th><th className="pb-2 text-right">Total</th></tr></thead>
                                 <tbody className="divide-y divide-slate-700">
                                     {topClients.map((c, i) => (<tr key={i} className="group hover:bg-slate-700/50"><td className="py-3 font-medium text-white">{c.name}</td><td className="py-3 text-right text-slate-400">{c.slots}</td><td className="py-3 text-right text-neon-green font-bold">{c.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td></tr>))}
                                     {topClients.length === 0 && (<tr><td colSpan={3} className="py-8 text-center text-slate-500">Sem dados no período</td></tr>)}
@@ -246,32 +350,17 @@ const Financeiro: React.FC = () => {
                 </div>
             </div>
         ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in">
-                <div className="lg:col-span-2 space-y-6">
-                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-                        <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2"><Award className="text-neon-orange"/> Ranking de Vendas</h3>
-                        {teamStats.length === 0 ? (<div className="text-center py-10 text-slate-500">Nenhum dado de venda registrado no período.</div>) : (
-                            <div className="space-y-4">
-                                <div className="flex justify-center mb-8"><div className="flex flex-col items-center"><div className="relative"><div className="w-20 h-20 bg-neon-orange/20 rounded-full flex items-center justify-center border-2 border-neon-orange shadow-[0_0_20px_rgba(249,115,22,0.3)]"><span className="text-2xl font-bold text-neon-orange">1º</span></div><Award size={24} className="absolute -bottom-2 -right-2 text-neon-orange drop-shadow-lg" fill="currentColor"/></div><h4 className="mt-2 font-bold text-white text-lg">{teamStats[0].userName}</h4><p className="text-neon-green font-bold">{teamStats[0].totalSales.toLocaleString('pt-BR', {style:'currency', currency:'BRL'})}</p></div></div>
-                                <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-900/50 text-slate-400 uppercase text-xs"><tr><th className="p-3">Posição</th><th className="p-3">Colaborador</th><th className="p-3 text-right">Reservas Criadas</th><th className="p-3 text-right">Confirmadas</th><th className="p-3 text-right">Total Vendido</th></tr></thead><tbody className="divide-y divide-slate-700">{teamStats.map((s, idx) => (<tr key={s.userId} className="hover:bg-slate-700/30"><td className="p-3 font-bold text-slate-500">#{idx + 1}</td><td className="p-3 text-white font-medium">{s.userName}</td><td className="p-3 text-right">{s.reservationsCreated}</td><td className="p-3 text-right">{s.reservationsConfirmed}</td><td className="p-3 text-right text-neon-green font-bold">{s.totalSales.toLocaleString('pt-BR', {style:'currency', currency:'BRL'})}</td></tr>))}</tbody></table></div>
-                            </div>
-                        )}
+            <div className="animate-fade-in bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg flex flex-col h-[700px]">
+                <div className="mb-4">
+                    <h3 className="text-xl font-bold text-white flex items-center gap-2 mb-4"><Shield className="text-neon-orange"/> Registro de Atividades (Logs)</h3>
+                    <div className="flex flex-col md:flex-row gap-2 bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+                        <select className="bg-slate-800 border border-slate-600 rounded text-xs text-white p-2 flex-1 outline-none" value={auditFilters.userId} onChange={e => setAuditFilters({...auditFilters, userId: e.target.value})}><option value="ALL">Todos Usuários</option>{allUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
+                        <select className="bg-slate-800 border border-slate-600 rounded text-xs text-white p-2 flex-1 outline-none" value={auditFilters.actionType} onChange={e => setAuditFilters({...auditFilters, actionType: e.target.value})}><option value="ALL">Todas Ações</option><option value="LOGIN">Login</option><option value="CREATE_RESERVATION">Criar Reserva</option><option value="UPDATE_RESERVATION">Atualizar Reserva</option><option value="CREATE_CLIENT">Criar Cliente</option><option value="LOYALTY_UPDATE">Fidelidade</option></select>
+                        <button onClick={refreshAuditLogs} className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded text-xs font-bold flex items-center gap-2"><History size={14}/> Atualizar</button>
                     </div>
                 </div>
-                <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg flex flex-col h-[600px]">
-                    <div className="mb-4">
-                        <h3 className="text-xl font-bold text-white flex items-center gap-2 mb-4"><Shield className="text-neon-blue"/> Auditoria (Logs)</h3>
-                        <div className="flex flex-col gap-2 bg-slate-900/50 p-3 rounded-lg border border-slate-700">
-                            <div className="flex gap-2">
-                                <select className="bg-slate-800 border border-slate-600 rounded text-xs text-white p-2 flex-1 outline-none" value={auditFilters.userId} onChange={e => setAuditFilters({...auditFilters, userId: e.target.value})}><option value="ALL">Todos Usuários</option>{allUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
-                                <select className="bg-slate-800 border border-slate-600 rounded text-xs text-white p-2 flex-1 outline-none" value={auditFilters.actionType} onChange={e => setAuditFilters({...auditFilters, actionType: e.target.value})}><option value="ALL">Todas Ações</option><option value="LOGIN">Login</option><option value="CREATE_RESERVATION">Criar Reserva</option><option value="UPDATE_RESERVATION">Atualizar Reserva</option><option value="CREATE_CLIENT">Criar Cliente</option><option value="LOYALTY_UPDATE">Fidelidade</option></select>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-                        {auditLogs.length === 0 ? (<div className="text-center text-slate-500 py-10">Nenhuma atividade com os filtros atuais.</div>) : (auditLogs.map(log => (<div key={log.id} className="relative pl-6 pb-4 border-l border-slate-700 last:border-0 last:pb-0"><div className="absolute left-[-5px] top-0 w-2.5 h-2.5 rounded-full bg-slate-600 border-2 border-slate-800"></div><p className="text-xs text-slate-500 mb-1 flex justify-between"><span>{new Date(log.createdAt).toLocaleString('pt-BR')}</span></p><p className="text-sm text-white font-bold">{log.userName}</p><p className="text-xs text-slate-400 mt-1">{log.details}</p><span className="inline-block mt-2 text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">{log.actionType}</span></div>)))}
-                    </div>
-                    <div className="pt-4 mt-4 border-t border-slate-700 text-center"><button onClick={refreshAuditLogs} className="text-xs text-neon-blue hover:text-white flex items-center justify-center gap-1 mx-auto"><History size={12}/> Atualizar Logs</button></div>
+                <div className="flex-1 overflow-y-auto space-y-4 pr-2">
+                    {auditLogs.length === 0 ? (<div className="text-center text-slate-500 py-10">Nenhuma atividade encontrada com os filtros atuais.</div>) : (auditLogs.map(log => (<div key={log.id} className="relative pl-6 pb-6 border-l border-slate-700 last:border-0 last:pb-0"><div className="absolute left-[-5px] top-0 w-2.5 h-2.5 rounded-full bg-neon-blue border-2 border-slate-800"></div><p className="text-xs text-slate-500 mb-1 flex justify-between"><span>{new Date(log.createdAt).toLocaleString('pt-BR')}</span></p><div className="bg-slate-900/50 p-3 rounded border border-slate-700/50"><p className="text-sm text-white font-bold flex items-center gap-2">{log.userName} <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">{log.actionType}</span></p><p className="text-xs text-slate-400 mt-1">{log.details}</p></div></div>)))}
                 </div>
             </div>
         )}
