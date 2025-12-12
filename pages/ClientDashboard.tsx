@@ -4,12 +4,34 @@ import { useNavigate } from 'react-router-dom';
 import { Client, Reservation, LoyaltyTransaction, ReservationStatus, PaymentStatus } from '../types';
 import { db } from '../services/mockBackend';
 import { useApp } from '../contexts/AppContext';
-import { LogOut, User, Users, Gift, Clock, Calendar, Coins, Loader2, MessageCircle, Edit, Save, X, Camera, CreditCard, Trash2, CheckCircle2, DollarSign, Utensils, Hash, LayoutGrid, AlertCircle, FileText, Store, Tag } from 'lucide-react';
+import { 
+  LogOut, 
+  User, 
+  Users, 
+  Gift, 
+  Clock, 
+  Calendar, 
+  Coins, 
+  Loader2, 
+  MessageCircle, 
+  Edit, 
+  Save, 
+  X, 
+  Camera, 
+  CreditCard, 
+  Trash2, 
+  DollarSign, 
+  Utensils, 
+  LayoutGrid, 
+  AlertCircle, 
+  Store, 
+  Tag 
+} from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
 const ClientDashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { settings, refreshUser } = useApp();
+  const { settings } = useApp();
   const [client, setClient] = useState<Client | null>(null);
   const [history, setHistory] = useState<Reservation[]>([]);
   const [loyalty, setLoyalty] = useState<LoyaltyTransaction[]>([]);
@@ -336,7 +358,7 @@ const ClientDashboard: React.FC = () => {
                             
                             // Determine Status Badge & Color
                             let statusColor = 'bg-slate-800 text-slate-400 border-slate-700';
-                            let statusLabel = res.status;
+                            let statusLabel: string = res.status;
 
                             if (res.status === ReservationStatus.CONFIRMADA) {
                                 statusColor = 'bg-green-500/20 text-green-400 border-green-500/30';

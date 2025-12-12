@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { UserRole, User } from '../types';
@@ -36,7 +35,10 @@ const Layout = ({ children }: LayoutProps) => {
     const fetchSettings = async () => {
         try {
             const s = await db.settings.get();
-            if(s.logoUrl) setLogoUrl(s.logoUrl);
+            if(s.logoUrl) {
+                setLogoUrl(s.logoUrl);
+                setImgError(false); // Reset error if new url comes
+            }
             if(s.establishmentName) setEstablishmentName(s.establishmentName);
         } catch (e) {
             console.error(e);
@@ -109,9 +111,9 @@ const Layout = ({ children }: LayoutProps) => {
 
                     {/* Logo & Brand Name */}
                     <div className="flex items-center gap-3 flex-shrink-0">
-                        {logoUrl && !imgError ? (
+                        {!imgError ? (
                         <img 
-                            src={logoUrl} 
+                            src={logoUrl || "/logo.png"} 
                             alt={establishmentName}
                             className="h-8 md:h-10 lg:h-12 w-auto object-contain drop-shadow-[0_0_8px_rgba(249,115,22,0.3)]" 
                             onError={() => setImgError(true)}
