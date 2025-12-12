@@ -76,7 +76,7 @@ const ClientDashboard: React.FC = () => {
 
           // Load History
           const allRes = await db.reservations.getAll();
-          // Ordena pela DATA DE CRIAÇÃO (createdAt) decrescente - Último agendamento realizado aparece primeiro
+          // Ordena pela DATA DE CRIAÇÃO (createdAt) decrescente
           const myRes = allRes
               .filter(r => r.clientId === activeClient.id)
               .sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -101,7 +101,6 @@ const ClientDashboard: React.FC = () => {
           loadData(true);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, (payload) => {
-          // Check if update is for this client
           if (client && payload.new && (payload.new as any).client_id === client.id) {
               loadData(true);
           }
@@ -145,7 +144,6 @@ const ClientDashboard: React.FC = () => {
           
           await db.clients.update(updatedClient);
           
-          // Update Local Storage and State
           localStorage.setItem('tonapista_client_auth', JSON.stringify(updatedClient));
           setClient(updatedClient);
           setIsEditing(false);
@@ -172,7 +170,7 @@ const ClientDashboard: React.FC = () => {
               type: res.eventType,
               totalValue: res.totalValue,
               obs: res.observations,
-              reservationIds: [res.id] // Pass ID to update instead of create
+              reservationIds: [res.id]
           } 
       });
   };
@@ -189,7 +187,6 @@ const ClientDashboard: React.FC = () => {
       window.open(whatsappUrl, '_blank');
   };
 
-  // Helper: Check if reservation is more than 2 hours away
   const canCancel = (res: Reservation) => {
       if (res.status === ReservationStatus.CANCELADA) return false;
       const gameDate = new Date(`${res.date}T${res.time}`);
@@ -198,7 +195,6 @@ const ClientDashboard: React.FC = () => {
       return diffHours >= 2;
   };
 
-  // Helper: Get remaining time for pending reservations
   const getExpiresIn = (res: Reservation) => {
       if (res.status !== ReservationStatus.PENDENTE) return null;
       if (!res.createdAt) return null;
@@ -213,26 +209,20 @@ const ClientDashboard: React.FC = () => {
       return `${mins} min`;
   };
 
-  // Lógica inteligente para extrair o motivo real do cancelamento
   const getCleanCancellationReason = (obs: string | undefined) => {
       if (!obs) return 'Cancelado pelo estabelecimento.';
       
-      // 1. Prioridade: Motivo Automático de Tempo
       if (obs.includes('Tempo de confirmação excedido')) return 'Tempo limite de pagamento excedido (30 min).';
       
-      // 2. Prioridade: Motivo Manual Específico
       if (obs.includes('Motivo:')) {
           const parts = obs.split('Motivo:');
           if (parts.length > 1 && parts[1].trim()) return parts[1].trim();
       }
 
-      // 3. Filtragem: Ignorar mensagens de sucesso de pagamento antigo
-      // Se a observação contém dados de pagamento (MP ID) mas está cancelada, não mostra isso como "Motivo"
       if (obs.includes('Pagamento PIX') || obs.includes('confirmado via MP')) {
           return 'Cancelado pela equipe.';
       }
 
-      // 4. Fallback: Retorna a observação se não for técnica demais, ou msg padrão
       return obs.length < 50 ? obs : 'Cancelamento administrativo.';
   };
 
@@ -241,7 +231,6 @@ const ClientDashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200">
-        {/* Header Mobile-First */}
         <header className="bg-slate-900 border-b border-slate-800 p-4 sticky top-0 z-20">
             <div className="max-w-md mx-auto flex justify-between items-center">
                 <h1 className="text-xl font-bold text-white">Minha Conta</h1>
@@ -250,8 +239,6 @@ const ClientDashboard: React.FC = () => {
         </header>
 
         <main className="max-w-md mx-auto p-4 space-y-6">
-            
-            {/* User Profile Section */}
             <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 relative">
                 {!isEditing ? (
                     <div className="flex items-center gap-4">
@@ -313,7 +300,6 @@ const ClientDashboard: React.FC = () => {
                 )}
             </div>
 
-            {/* Loyalty Card */}
             <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-2xl border border-neon-orange/30 shadow-lg relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-neon-orange/10 rounded-full blur-3xl -mr-10 -mt-10"></div>
                 <div className="relative z-10">
@@ -329,7 +315,6 @@ const ClientDashboard: React.FC = () => {
                 </div>
             </div>
 
-            {/* Actions */}
             <div className="grid grid-cols-2 gap-4">
                 <button onClick={() => navigate('/agendamento')} className="bg-neon-blue hover:bg-blue-600 text-white p-4 rounded-xl shadow-lg flex flex-col items-center justify-center gap-2 transition">
                     <Calendar size={24}/>
@@ -342,7 +327,6 @@ const ClientDashboard: React.FC = () => {
                 </div>
             </div>
 
-            {/* History Tabs (Recent vs Loyalty) */}
             <div>
                 <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Clock size={18} className="text-slate-400"/> Meus Agendamentos</h3>
                 
@@ -356,7 +340,6 @@ const ClientDashboard: React.FC = () => {
                             const expiresIn = getExpiresIn(res);
                             const allowCancel = canCancel(res);
                             
-                            // Determine Status Badge & Color
                             let statusColor = 'bg-slate-800 text-slate-400 border-slate-700';
                             let statusLabel: string = res.status;
 
@@ -376,14 +359,12 @@ const ClientDashboard: React.FC = () => {
                                 statusLabel = 'CANCELADA';
                             }
 
-                            // Extract Clean Reason
                             const cancellationReason = res.status === ReservationStatus.CANCELADA 
                                 ? getCleanCancellationReason(res.observations) 
                                 : null;
 
                             return (
                                 <div key={res.id} className={`relative p-4 rounded-xl border mb-4 shadow-sm ${statusColor.replace('bg-', 'bg-opacity-10 ')} border-opacity-50`}>
-                                    {/* Header: Date, Time (NO STATUS HERE, NO EVENT TYPE HERE) */}
                                     <div className="flex justify-between items-start mb-3 border-b border-white/5 pb-2">
                                         <div className="text-lg font-bold text-white flex items-center gap-2">
                                             <Calendar size={18} className="text-slate-400"/>
@@ -394,10 +375,7 @@ const ClientDashboard: React.FC = () => {
                                         </div>
                                     </div>
 
-                                    {/* Body: Info Grid - EVENT TYPE MOVED HERE */}
                                     <div className="grid grid-cols-2 gap-4 text-sm text-slate-300 mb-4 bg-slate-900/50 p-3 rounded-lg border border-slate-800">
-                                        
-                                        {/* EVENT TYPE */}
                                         <div className="col-span-2 sm:col-span-1">
                                             <span className="block text-xs text-slate-500 font-bold uppercase">Tipo</span>
                                             <span className="font-bold text-white flex items-center gap-2">
@@ -441,7 +419,6 @@ const ClientDashboard: React.FC = () => {
                                         )}
                                     </div>
 
-                                    {/* Alerts Section (Countdown / PayOnSite) */}
                                     {res.status === ReservationStatus.PENDENTE && !res.payOnSite && expiresIn && (
                                         <div className="mb-4 bg-yellow-900/20 border border-yellow-500/30 p-2 rounded text-yellow-500 text-xs flex items-center gap-2 animate-pulse">
                                             <Clock size={14} />
@@ -467,15 +444,12 @@ const ClientDashboard: React.FC = () => {
                                         </div>
                                     )}
 
-                                    {/* STATUS BADGE - MOVED TO BOTTOM */}
                                     <div className={`mb-3 py-2 px-3 rounded text-center text-xs font-bold uppercase border tracking-wider ${statusColor}`}>
                                         {statusLabel}
                                     </div>
 
-                                    {/* Footer Actions */}
                                     {res.status !== ReservationStatus.CANCELADA && (
                                         <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-800">
-                                            {/* Discreet Actions */}
                                             <div className="flex gap-4">
                                                 <button onClick={() => handleEditRequest(res)} className="text-xs text-slate-500 hover:text-white transition flex items-center gap-1">
                                                     <Edit size={12}/> Alterar
@@ -487,7 +461,6 @@ const ClientDashboard: React.FC = () => {
                                                 )}
                                             </div>
 
-                                            {/* Prominent Pay Button */}
                                             {res.status === ReservationStatus.PENDENTE && !res.payOnSite && res.paymentStatus !== PaymentStatus.PAGO && (
                                                 <button 
                                                     onClick={() => handlePayNow(res)}
@@ -504,16 +477,13 @@ const ClientDashboard: React.FC = () => {
                     </div>
                 )}
             </div>
-
         </main>
 
-        {/* Floating WhatsApp Button */}
         {settings && (
             <a
                 href={settings.whatsappLink || `https://wa.me/55${settings.phone?.replace(/\D/g, '')}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                // Adjusted Position for Mobile: bottom-24 to avoid overlapping bottom buttons
                 className="fixed bottom-24 md:bottom-6 right-6 z-50 bg-[#25D366] hover:bg-[#128c7e] text-white p-3 md:p-4 rounded-full shadow-[0_4px_20px_rgba(37,211,102,0.4)] transition-all transform hover:scale-110 flex items-center justify-center border-2 border-white/10"
                 aria-label="Fale conosco no WhatsApp"
             >
