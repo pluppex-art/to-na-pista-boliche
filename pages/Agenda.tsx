@@ -3,15 +3,15 @@ import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
 import { supabase } from '../services/supabaseClient';
 import { Reservation, ReservationStatus, EventType, UserRole, PaymentStatus } from '../types';
-import { useApp } from '../contexts/AppContext'; // Context
-import { generateDailySlots, checkHourCapacity } from '../utils/availability'; // Utils
+import { useApp } from '../contexts/AppContext'; 
+import { generateDailySlots, checkHourCapacity } from '../utils/availability'; 
 import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, CheckCircle2, X, AlertTriangle, MessageCircle, Clock, Store, LayoutGrid, Hash, DollarSign, FileText } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { EVENT_TYPES } from '../constants';
 
 const Agenda: React.FC = () => {
-  const { settings, user: currentUser } = useApp(); // Use Context
+  const { settings, user: currentUser } = useApp(); 
   
   const [selectedDate, setSelectedDate] = useState(() => {
     const now = new Date();
@@ -22,7 +22,6 @@ const Agenda: React.FC = () => {
   const [clientPhones, setClientPhones] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   
-  // Metrics State
   const [metrics, setMetrics] = useState({
       totalSlots: 0, pendingSlots: 0, confirmedSlots: 0, checkInSlots: 0, noShowSlots: 0
   });
@@ -53,12 +52,23 @@ const Agenda: React.FC = () => {
   const canEdit = currentUser?.role === UserRole.ADMIN || currentUser?.perm_edit_reservation;
   const canDelete = currentUser?.role === UserRole.ADMIN || currentUser?.perm_delete_reservation;
 
-  // CORREÇÃO: Adicionado parâmetro isBackground para evitar o 'piscar' da tela
+  // OPTIMIZATION: Fetch Month Range
+  const getMonthRange = (dateStr: string) => {
+      const [y, m] = dateStr.split('-').map(Number);
+      const start = `${y}-${String(m).padStart(2, '0')}-01`;
+      const lastDay = new Date(y, m, 0).getDate();
+      const end = `${y}-${String(m).padStart(2, '0')}-${lastDay}`;
+      return { start, end };
+  };
+
   const loadData = async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
-      const [allReservations, allClients] = await Promise.all([
-          db.reservations.getAll(),
+      const { start, end } = getMonthRange(selectedDate);
+      
+      // OPTIMIZED: Fetch ONLY current month reservations
+      const [monthReservations, allClients] = await Promise.all([
+          db.reservations.getByDateRange(start, end),
           db.clients.getAll()
       ]);
 
@@ -66,14 +76,12 @@ const Agenda: React.FC = () => {
       allClients.forEach(c => { phoneMap[c.id] = c.phone; });
       setClientPhones(phoneMap);
 
-      const dayReservations = allReservations.filter(r => r.date === selectedDate && r.status !== ReservationStatus.CANCELADA);
+      const dayReservations = monthReservations.filter(r => r.date === selectedDate && r.status !== ReservationStatus.CANCELADA);
       setReservations(dayReservations);
 
       let total = 0, pending = 0, confirmed = 0, checkIn = 0, noShow = 0;
       dayReservations.forEach(r => {
-          // CORREÇÃO: Arredondar para cima (Math.ceil) para evitar números quebrados (ex: 2.9 virar 3)
           const slotCount = Math.ceil(r.laneCount * r.duration);
-          
           total += slotCount;
           checkIn += r.checkedInIds?.length || 0;
           noShow += r.noShowIds?.length || 0;
@@ -82,16 +90,16 @@ const Agenda: React.FC = () => {
 
       setMetrics({ totalSlots: total, pendingSlots: pending, confirmedSlots: confirmed, checkInSlots: checkIn, noShowSlots: noShow });
 
-      // --- CHECK EXPIRING SOON ---
-      // Find pending reservations created between 20 and 30 minutes ago, EXCLUDING payOnSite
+      // Expiring Logic (Requires current day mostly)
       const now = new Date();
-      const expiring = allReservations.filter(r => {
-          if (r.payOnSite) return false; // Ignore reservations marked to pay on site
+      const expiring = monthReservations.filter(r => {
+          if (r.date !== selectedDate) return false; // Optimization
+          if (r.payOnSite) return false; 
           if (r.status !== ReservationStatus.PENDENTE) return false;
           if (!r.createdAt) return false;
           const created = new Date(r.createdAt);
           const diffMins = (now.getTime() - created.getTime()) / 60000;
-          return diffMins >= 20 && diffMins < 30; // Between 20 and 30 mins old
+          return diffMins >= 20 && diffMins < 30; 
       });
       setExpiringReservations(expiring);
 
@@ -103,21 +111,23 @@ const Agenda: React.FC = () => {
   useEffect(() => { 
     loadData();
 
-    // --- SUPABASE REALTIME SUBSCRIPTION ---
     const channel = supabase
       .channel('agenda-updates')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'reservas' },
-        (payload) => {
-          console.log('Realtime change detected, silent refresh...');
-          // Chama loadData com true para ser silencioso (sem spinner)
-          loadData(true);
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, (payload) => {
+          // Optimization: Only refresh if update is within current view
+          const newData = payload.new as any;
+          if (!newData || !newData.date) {
+              loadData(true);
+              return;
+          }
+          const { start, end } = getMonthRange(selectedDate);
+          if (newData.date >= start && newData.date <= end) {
+              console.log('Realtime change relevant to view, refreshing...');
+              loadData(true);
+          }
+      })
       .subscribe();
     
-    // Refresh expiring alerts every minute (silently)
     const interval = setInterval(() => loadData(true), 60000);
 
     return () => {
@@ -144,7 +154,6 @@ const Agenda: React.FC = () => {
           } else { 
               newCheckedInIds.push(uniqueId); 
               newNoShowIds = newNoShowIds.filter(id => id !== uniqueId); 
-              // TRIGGER LANE SELECTOR ON CHECK-IN
               openLaneSelector = true;
           }
       } else if (type === 'NO_SHOW') {
@@ -154,11 +163,9 @@ const Agenda: React.FC = () => {
 
       const updatedRes = { ...res, checkedInIds: newCheckedInIds, noShowIds: newNoShowIds };
       
-      // Update with audit trail
       await db.reservations.update(updatedRes, currentUser?.id, `${type} em ${res.clientName}`);
       
       if (openLaneSelector) {
-          // Open Modal for Lane Selection
           setLaneSelectorTargetRes(updatedRes);
           setTempSelectedLanes(updatedRes.lanesAssigned || []);
           setShowLaneSelector(true);
@@ -180,7 +187,6 @@ const Agenda: React.FC = () => {
       const updatedRes = { ...laneSelectorTargetRes, lanesAssigned: tempSelectedLanes };
       await db.reservations.update(updatedRes, currentUser?.id, 'Atualizou pistas atribuídas');
       
-      // Update local state immediately for responsiveness
       if (editingRes && editingRes.id === updatedRes.id) {
           setEditingRes(updatedRes);
       }
@@ -206,12 +212,13 @@ const Agenda: React.FC = () => {
 
         setCalculatingSlots(true);
         const targetLanes = editForm.laneCount || editingRes.laneCount || 1;
-        const allRes = await db.reservations.getAll();
         
-        // Use utility logic, but we need to pass 'excludeReservationId'
+        // Fetch only relevant date for capacity check
+        const { start, end } = getMonthRange(targetDate);
+        const allRes = await db.reservations.getByDateRange(start, end);
+        
         const rawSlots = generateDailySlots(targetDate, settings, allRes, editingRes.id);
         
-        // Post-process to respect 'targetLanes' (utility only checks > 0, we need >= targetLanes)
         const slots = rawSlots.map(s => ({
             ...s,
             available: s.available && s.left >= targetLanes
@@ -250,10 +257,8 @@ const Agenda: React.FC = () => {
     const startHour = parseInt(res.time.split(':')[0]);
     for(let i=0; i<res.duration; i++) times.push(`${startHour + i}:00`);
     setSelectedEditTimes(times);
-    // Populate Form with ALL existing values
     setEditForm({ 
         ...res,
-        // Ensure table props are set even if undefined in original object
         hasTableReservation: res.hasTableReservation || false,
         tableSeatCount: res.tableSeatCount || 0,
         birthdayName: res.birthdayName || '',
@@ -270,12 +275,13 @@ const Agenda: React.FC = () => {
       if(editingRes && editForm && selectedEditTimes.length > 0) {
           setLoading(true);
           try {
-             // Validate Availability using Utility Logic directly
              const reqLanes = editForm.laneCount || editingRes.laneCount || 1;
-             const reqDate = editForm.date || editingRes.date;
-             const allRes = await db.reservations.getAll();
+             const reqDate = editForm.date || editingRes.date || selectedDate;
+             
+             // Check Capacity Efficiently
+             const { start, end } = getMonthRange(reqDate);
+             const allRes = await db.reservations.getByDateRange(start, end);
 
-             // Check for table limit if this reservation has a table
              const hasTable = editForm.hasTableReservation ?? editingRes.hasTableReservation;
              if (hasTable) {
                  const tableCount = allRes.filter(r => 
@@ -301,7 +307,6 @@ const Agenda: React.FC = () => {
                  }
              }
 
-             // Proceed to save (blocks creation logic same as before)
              const sortedHours = selectedEditTimes.map(t => parseInt(t.split(':')[0])).sort((a,b) => a - b);
              const blocks: { time: string, duration: number }[] = [];
              let currentStart = sortedHours[0];
@@ -314,18 +319,15 @@ const Agenda: React.FC = () => {
 
              const firstBlock = blocks[0];
              
-             // Update main block with spread to capture all edited fields
              const updated = { 
                  ...editingRes, 
                  ...editForm, 
                  time: firstBlock.time, 
                  duration: firstBlock.duration,
-                 // Ensure conditionals
                  birthdayName: editForm.hasTableReservation ? editForm.birthdayName : undefined,
                  tableSeatCount: editForm.hasTableReservation ? editForm.tableSeatCount : undefined
              };
              
-             // Update main block with audit
              await db.reservations.update(updated, currentUser?.id, `Editou detalhes completos da reserva`);
              
              if (blocks.length > 1) {
@@ -342,7 +344,7 @@ const Agenda: React.FC = () => {
                   }
              }
              setIsEditMode(false); setEditingRes(updated); 
-             loadData(true); // Silent refresh
+             loadData(true); 
           } catch (error) { console.error(error); alert("Erro ao salvar."); } finally { setLoading(false); }
       }
   };
@@ -350,35 +352,24 @@ const Agenda: React.FC = () => {
   const handleStatusChange = async (status: ReservationStatus) => {
     if (editingRes) {
       if (status === ReservationStatus.CANCELADA) {
-          // Agora o cancelamento é tratado por handleConfirmCancellation
           setIsCancelling(true);
           return;
       }
-      
       if (!canEdit) { alert("Sem permissão."); return; }
       
-      // Lógica de Fidelidade: Se o status mudar para CONFIRMADA e antes NÃO ERA confirmada, adiciona pontos
       if (status === ReservationStatus.CONFIRMADA && editingRes.status !== ReservationStatus.CONFIRMADA) {
           try {
               const points = Math.floor(editingRes.totalValue);
               if (points > 0) {
-                  await db.loyalty.addTransaction(
-                      editingRes.clientId,
-                      points,
-                      `Confirmação Manual (${editingRes.date})`,
-                      currentUser?.id
-                  );
+                  await db.loyalty.addTransaction(editingRes.clientId, points, `Confirmação Manual (${editingRes.date})`, currentUser?.id);
               }
-          } catch (error) {
-              console.error("Erro ao adicionar pontos de fidelidade", error);
-          }
+          } catch (error) { console.error("Erro fidelidade", error); }
       }
 
       const updated = { ...editingRes, status };
-      // Update with audit
       await db.reservations.update(updated, currentUser?.id, `Alterou status para ${status}`);
       setEditingRes(null); 
-      loadData(true); // Silent refresh
+      loadData(true); 
     }
   };
 
@@ -389,29 +380,20 @@ const Agenda: React.FC = () => {
 
       setLoading(true);
       try {
-          // ESTORNO DE PONTOS DE FIDELIDADE
-          // Se a reserva já estava CONFIRMADA ou PAGA, subtrai os pontos
           const shouldRevertPoints = editingRes.status === ReservationStatus.CONFIRMADA || editingRes.paymentStatus === PaymentStatus.PAGO;
-
           if (shouldRevertPoints) {
               const points = Math.floor(editingRes.totalValue);
               if (points > 0) {
-                  await db.loyalty.addTransaction(
-                      editingRes.clientId,
-                      -points, // Valor negativo para subtrair
-                      `Estorno: Cancelamento de Reserva`,
-                      currentUser?.id
-                  );
+                  await db.loyalty.addTransaction(editingRes.clientId, -points, `Estorno: Cancelamento de Reserva`, currentUser?.id);
               }
           }
 
           const updated = { ...editingRes, status: ReservationStatus.CANCELADA };
-          // Atualiza com o motivo no log de auditoria
           await db.reservations.update(updated, currentUser?.id, `CANCELADO. Motivo: ${cancelReason}`);
           setEditingRes(null);
           setIsCancelling(false);
           setCancelReason('');
-          loadData(true); // Silent Refresh
+          loadData(true); 
       } catch (e) {
           console.error(e);
           alert("Erro ao cancelar reserva.");
@@ -426,9 +408,7 @@ const Agenda: React.FC = () => {
     setSelectedDate([newDate.getFullYear(), String(newDate.getMonth() + 1).padStart(2, '0'), String(newDate.getDate()).padStart(2, '0')].join('-'));
   };
 
-  // Uses utility to get hours for display list
   const getDailyHours = () => {
-      // We pass empty reservations just to get the time range structure from settings
       return generateDailySlots(selectedDate, settings, []).map(s => s.time);
   };
 
@@ -452,7 +432,6 @@ const Agenda: React.FC = () => {
       window.open(url, '_blank');
   };
 
-  // KPI Component
   const KPI = ({ label, value, color, icon: Icon }: any) => (
       <div className={`p-3 rounded-xl border flex items-center justify-between shadow-sm bg-slate-800 border-${color}-500/30`}>
           <div className="flex items-center gap-3"><div className={`p-2 bg-${color}-500/10 rounded-lg text-${color}-500`}><Icon size={18} /></div><span className={`text-xs uppercase font-bold text-${color}-500`}>{label}</span></div>
@@ -543,17 +522,11 @@ const Agenda: React.FC = () => {
                                         <div className="flex items-center gap-1 text-[11px] text-slate-400 mt-0.5"><Phone size={10} /> {clientPhones[res.clientId] || 'Sem telefone'}</div>
                                         <div className="flex items-center gap-2 mt-2 flex-wrap">
                                             {isCheckedIn ? <span className="text-[10px] font-bold text-green-400 bg-green-500/20 px-1 rounded uppercase">CHECK-IN</span> : isNoShow ? <span className="text-[10px] font-bold text-red-400 bg-red-500/20 px-1 rounded uppercase">NO-SHOW</span> : <span className={`text-[10px] font-bold px-1 rounded uppercase ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border border-neon-blue/30' : res.status === ReservationStatus.PENDENTE ? 'text-yellow-400 bg-yellow-900/40 border border-yellow-500/30' : 'text-slate-400 bg-slate-800'}`}>{res.status}</span>}
-                                            {/* Indicador de Pagamento no Local */}
                                             {res.payOnSite && res.status === ReservationStatus.PENDENTE && (
-                                                <span className="text-[10px] font-bold text-white bg-slate-600 px-1 rounded flex items-center gap-0.5" title="Pagamento no Local">
-                                                    <Store size={10}/> Local
-                                                </span>
+                                                <span className="text-[10px] font-bold text-white bg-slate-600 px-1 rounded flex items-center gap-0.5" title="Pagamento no Local"><Store size={10}/> Local</span>
                                             )}
-                                            {/* Comanda Display */}
                                             {res.comandaId && (
-                                                <span className="text-[10px] font-bold text-white bg-purple-600 px-1 rounded flex items-center gap-0.5" title="Comanda">
-                                                    <Hash size={10}/> {res.comandaId}
-                                                </span>
+                                                <span className="text-[10px] font-bold text-white bg-purple-600 px-1 rounded flex items-center gap-0.5" title="Comanda"><Hash size={10}/> {res.comandaId}</span>
                                             )}
                                         </div>
                                     </div>
@@ -562,21 +535,14 @@ const Agenda: React.FC = () => {
                                             <button disabled={!canEdit} onClick={(e) => handleGranularStatus(e, res, uniqueId, 'CHECK_IN')} className={`w-7 h-7 flex items-center justify-center rounded border transition ${!canEdit ? 'opacity-50' : isCheckedIn ? 'bg-green-500 text-white border-green-400' : 'bg-slate-800 text-slate-500 border-slate-600 hover:text-green-400'}`}><Check size={14}/></button>
                                             <button disabled={!canEdit} onClick={(e) => handleGranularStatus(e, res, uniqueId, 'NO_SHOW')} className={`w-7 h-7 flex items-center justify-center rounded border transition ${!canEdit ? 'opacity-50' : isNoShow ? 'bg-red-500 text-white border-red-400' : 'bg-slate-800 text-slate-500 border-slate-600 hover:text-red-400'}`}><Ban size={14}/></button>
                                         </div>
-                                        
-                                        {/* LANE SELECTION (Aparece apenas quando Check-In Confirmado) */}
                                         {isCheckedIn && (
-                                            <div 
-                                                onClick={(e) => canEdit ? openLaneSelectorModal(e, res) : null}
-                                                className={`flex items-center gap-1 ${canEdit ? 'cursor-pointer hover:opacity-80' : 'opacity-70'}`}
-                                            >
+                                            <div onClick={(e) => canEdit ? openLaneSelectorModal(e, res) : null} className={`flex items-center gap-1 ${canEdit ? 'cursor-pointer hover:opacity-80' : 'opacity-70'}`}>
                                                 {res.lanesAssigned && res.lanesAssigned.length > 0 ? (
                                                     res.lanesAssigned.map(l => (
                                                         <span key={l} className="w-5 h-5 rounded-full bg-slate-900 border border-slate-600 text-[10px] flex items-center justify-center text-white font-bold">{l}</span>
                                                     ))
                                                 ) : (
-                                                    <div className="w-6 h-6 rounded flex items-center justify-center bg-slate-800 border border-slate-600 text-slate-400 hover:text-white hover:border-slate-400 transition" title="Atribuir Pista">
-                                                        <Hash size={12} />
-                                                    </div>
+                                                    <div className="w-6 h-6 rounded flex items-center justify-center bg-slate-800 border border-slate-600 text-slate-400 hover:text-white hover:border-slate-400 transition" title="Atribuir Pista"><Hash size={12} /></div>
                                                 )}
                                             </div>
                                         )}
@@ -603,138 +569,31 @@ const Agenda: React.FC = () => {
               <div className="flex items-center gap-3"><h3 className="text-xl font-bold text-white">Detalhes da Reserva</h3>{!isEditMode && canEdit && !isCancelling && (<button onClick={() => setIsEditMode(true)} className="p-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition"><Pencil size={14} /></button>)}</div>
               <button onClick={closeResModal} className="text-slate-400 hover:text-white"><X /></button>
             </div>
-            
             {!isEditMode ? (
                 <div className="p-6 space-y-6 overflow-y-auto max-h-[70vh]">
-                    {/* Header Info */}
                     <div className="flex justify-between items-start">
                         <div>
                             <h2 className="text-2xl font-bold text-white mb-1">{editingRes.clientName}</h2>
-                            <div className="flex items-center gap-2 text-slate-400 text-sm">
-                                <Phone size={14} />
-                                <span>{clientPhones[editingRes.clientId] || 'Sem telefone'}</span>
-                            </div>
+                            <div className="flex items-center gap-2 text-slate-400 text-sm"><Phone size={14} /><span>{clientPhones[editingRes.clientId] || 'Sem telefone'}</span></div>
                         </div>
-                        <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide border ${
-                            editingRes.status === ReservationStatus.CONFIRMADA ? 'bg-green-500/20 text-green-400 border-green-500/30' :
-                            editingRes.status === ReservationStatus.PENDENTE ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
-                            'bg-slate-700 text-slate-400 border-slate-600'
-                        }`}>
-                            {editingRes.status}
-                        </div>
+                        <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide border ${editingRes.status === ReservationStatus.CONFIRMADA ? 'bg-green-500/20 text-green-400 border-green-500/30' : editingRes.status === ReservationStatus.PENDENTE ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' : 'bg-slate-700 text-slate-400 border-slate-600'}`}>{editingRes.status}</div>
                     </div>
-
-                    {/* Main Stats Grid */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-slate-900/50 p-4 rounded-xl border border-slate-700/50">
-                        <div>
-                            <span className="text-xs text-slate-500 uppercase font-bold block mb-1">Data</span>
-                            <span className="text-white font-medium flex items-center gap-2">
-                                <Calendar size={16} className="text-neon-blue"/>
-                                {editingRes.date.split('-').reverse().join('/')}
-                            </span>
-                        </div>
-                        <div>
-                            <span className="text-xs text-slate-500 uppercase font-bold block mb-1">Horário</span>
-                            <span className="text-white font-medium flex items-center gap-2">
-                                <Clock size={16} className="text-neon-blue"/>
-                                {editingRes.time} ({editingRes.duration}h)
-                            </span>
-                        </div>
-                        <div>
-                            <span className="text-xs text-slate-500 uppercase font-bold block mb-1">Pistas / Pessoas</span>
-                            <span className="text-white font-medium flex items-center gap-2">
-                                <LayoutGrid size={16} className="text-neon-blue"/>
-                                {editingRes.laneCount} / {editingRes.peopleCount}
-                            </span>
-                        </div>
-                        <div>
-                            <span className="text-xs text-slate-500 uppercase font-bold block mb-1">Valor Total</span>
-                            <span className="text-green-400 font-bold text-lg flex items-center gap-1">
-                                <DollarSign size={16}/>
-                                {editingRes.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }).replace('R$', '').trim()}
-                            </span>
-                        </div>
+                        <div><span className="text-xs text-slate-500 uppercase font-bold block mb-1">Data</span><span className="text-white font-medium flex items-center gap-2"><Calendar size={16} className="text-neon-blue"/>{editingRes.date.split('-').reverse().join('/')}</span></div>
+                        <div><span className="text-xs text-slate-500 uppercase font-bold block mb-1">Horário</span><span className="text-white font-medium flex items-center gap-2"><Clock size={16} className="text-neon-blue"/>{editingRes.time} ({editingRes.duration}h)</span></div>
+                        <div><span className="text-xs text-slate-500 uppercase font-bold block mb-1">Pistas / Pessoas</span><span className="text-white font-medium flex items-center gap-2"><LayoutGrid size={16} className="text-neon-blue"/>{editingRes.laneCount} / {editingRes.peopleCount}</span></div>
+                        <div><span className="text-xs text-slate-500 uppercase font-bold block mb-1">Valor Total</span><span className="text-green-400 font-bold text-lg flex items-center gap-1"><DollarSign size={16}/>{editingRes.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }).replace('R$', '').trim()}</span></div>
                     </div>
-
-                    {/* Lane Assignment & Table Info */}
                     <div className="space-y-3">
-                        {/* Comanda Info (NEW) */}
-                        {editingRes.comandaId && (
-                            <div className="flex items-center gap-3 bg-purple-900/30 p-3 rounded-lg border border-purple-500/30">
-                                <div className="bg-purple-900/50 p-2 rounded text-purple-400"><Hash size={18}/></div>
-                                <div>
-                                    <span className="text-xs text-purple-400 block font-bold">Comanda / Mesa</span>
-                                    <span className="text-white text-lg font-bold">
-                                        {editingRes.comandaId}
-                                    </span>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Event Type Display */}
-                        <div className="flex items-center gap-3 bg-slate-800 p-3 rounded-lg border border-slate-700">
-                             <div className="bg-slate-700 p-2 rounded text-slate-300"><Cake size={18}/></div>
-                             <div>
-                                 <span className="text-xs text-slate-400 block">Tipo de Evento</span>
-                                 <span className="text-white text-sm font-medium">{editingRes.eventType}</span>
-                             </div>
-                        </div>
-
-                        {/* Lane Assignment */}
+                        {editingRes.comandaId && (<div className="flex items-center gap-3 bg-purple-900/30 p-3 rounded-lg border border-purple-500/30"><div className="bg-purple-900/50 p-2 rounded text-purple-400"><Hash size={18}/></div><div><span className="text-xs text-purple-400 block font-bold">Comanda / Mesa</span><span className="text-white text-lg font-bold">{editingRes.comandaId}</span></div></div>)}
+                        <div className="flex items-center gap-3 bg-slate-800 p-3 rounded-lg border border-slate-700"><div className="bg-slate-700 p-2 rounded text-slate-300"><Cake size={18}/></div><div><span className="text-xs text-slate-400 block">Tipo de Evento</span><span className="text-white text-sm font-medium">{editingRes.eventType}</span></div></div>
                         <div className="flex items-center justify-between bg-slate-800 p-3 rounded-lg border border-slate-700">
-                            <div className="flex items-center gap-3">
-                                <div className="bg-slate-700 p-2 rounded text-slate-300"><Hash size={18}/></div>
-                                <div>
-                                    <span className="text-xs text-slate-400 block">Pistas em Uso</span>
-                                    <div className="flex gap-1 mt-1">
-                                        {editingRes.lanesAssigned && editingRes.lanesAssigned.length > 0 ? (
-                                            editingRes.lanesAssigned.map(l => (
-                                                <span key={l} className="w-6 h-6 rounded-full bg-neon-blue text-white flex items-center justify-center text-xs font-bold shadow-sm shadow-blue-500/50">{l}</span>
-                                            ))
-                                        ) : (
-                                            <span className="text-sm text-slate-500 italic">Não atribuídas</span>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                            {canEdit && editingRes.checkedInIds && editingRes.checkedInIds.length > 0 && (
-                                <button 
-                                    onClick={() => {
-                                        setLaneSelectorTargetRes(editingRes);
-                                        setTempSelectedLanes(editingRes.lanesAssigned || []);
-                                        setShowLaneSelector(true);
-                                    }}
-                                    className="text-xs font-bold text-neon-blue hover:text-white px-3 py-1.5 rounded border border-neon-blue hover:bg-neon-blue transition"
-                                >
-                                    Alterar Pistas
-                                </button>
-                            )}
+                            <div className="flex items-center gap-3"><div className="bg-slate-700 p-2 rounded text-slate-300"><Hash size={18}/></div><div><span className="text-xs text-slate-400 block">Pistas em Uso</span><div className="flex gap-1 mt-1">{editingRes.lanesAssigned && editingRes.lanesAssigned.length > 0 ? (editingRes.lanesAssigned.map(l => (<span key={l} className="w-6 h-6 rounded-full bg-neon-blue text-white flex items-center justify-center text-xs font-bold shadow-sm shadow-blue-500/50">{l}</span>))) : (<span className="text-sm text-slate-500 italic">Não atribuídas</span>)}</div></div></div>
+                            {canEdit && editingRes.checkedInIds && editingRes.checkedInIds.length > 0 && (<button onClick={() => { setLaneSelectorTargetRes(editingRes); setTempSelectedLanes(editingRes.lanesAssigned || []); setShowLaneSelector(true); }} className="text-xs font-bold text-neon-blue hover:text-white px-3 py-1.5 rounded border border-neon-blue hover:bg-neon-blue transition">Alterar Pistas</button>)}
                         </div>
-
-                        {/* Table Info */}
-                        {editingRes.hasTableReservation && (
-                            <div className="flex items-center gap-3 bg-slate-800 p-3 rounded-lg border border-slate-700">
-                                <div className="bg-slate-700 p-2 rounded text-neon-orange"><Utensils size={18}/></div>
-                                <div>
-                                    <span className="text-xs text-slate-400 block">Reserva de Mesa</span>
-                                    <span className="text-white text-sm font-medium">
-                                        {editingRes.tableSeatCount} lugares 
-                                        {editingRes.birthdayName && <span className="text-slate-400 mx-1">• Aniv: {editingRes.birthdayName}</span>}
-                                    </span>
-                                </div>
-                            </div>
-                        )}
+                        {editingRes.hasTableReservation && (<div className="flex items-center gap-3 bg-slate-800 p-3 rounded-lg border border-slate-700"><div className="bg-slate-700 p-2 rounded text-neon-orange"><Utensils size={18}/></div><div><span className="text-xs text-slate-400 block">Reserva de Mesa</span><span className="text-white text-sm font-medium">{editingRes.tableSeatCount} lugares {editingRes.birthdayName && <span className="text-slate-400 mx-1">• Aniv: {editingRes.birthdayName}</span>}</span></div></div>)}
                     </div>
-
-                    {/* Observations */}
-                    {editingRes.observations && (
-                        <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-800">
-                            <span className="text-xs text-slate-500 font-bold mb-1 block">Observações</span>
-                            <p className="text-sm text-slate-300 italic">{editingRes.observations}</p>
-                        </div>
-                    )}
-                    
-                    {/* Botões de Ação ou Fluxo de Cancelamento */}
+                    {editingRes.observations && (<div className="bg-slate-900/30 p-3 rounded-lg border border-slate-800"><span className="text-xs text-slate-500 font-bold mb-1 block">Observações</span><p className="text-sm text-slate-300 italic">{editingRes.observations}</p></div>)}
                     {!isCancelling ? (
                         <div className="pt-4 border-t border-slate-700 flex gap-2">
                             <button disabled={!canEdit} onClick={() => handleStatusChange(ReservationStatus.CONFIRMADA)} className={`px-4 py-2 rounded-lg text-sm font-medium flex-1 ${!canEdit ? 'opacity-50' : 'bg-green-600 hover:bg-green-500 text-white'}`}>Confirmar</button>
@@ -743,178 +602,38 @@ const Agenda: React.FC = () => {
                         </div>
                     ) : (
                         <div className="pt-4 border-t border-slate-700 animate-fade-in space-y-4 bg-red-900/10 p-4 rounded-lg border border-red-500/20">
-                            <div className="flex items-start gap-3">
-                                <AlertTriangle className="text-red-500 flex-shrink-0" />
-                                <div className="w-full">
-                                    <h4 className="font-bold text-red-500 mb-2">Cancelar Reserva</h4>
-                                    <p className="text-xs text-slate-300 mb-2">Por favor, informe o motivo do cancelamento para confirmar. (Se a reserva já estiver confirmada, os pontos de fidelidade serão estornados).</p>
-                                    <textarea 
-                                        autoFocus
-                                        className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white text-sm focus:border-red-500 outline-none" 
-                                        placeholder="Justificativa (obrigatório)..."
-                                        rows={2}
-                                        value={cancelReason}
-                                        onChange={e => setCancelReason(e.target.value)}
-                                    />
-                                </div>
-                            </div>
-                            <div className="flex gap-2 justify-end">
-                                <button onClick={() => { setIsCancelling(false); setCancelReason(''); }} className="px-3 py-2 rounded text-sm bg-slate-700 text-slate-300 hover:text-white">Voltar</button>
-                                <button onClick={handleConfirmCancellation} disabled={!cancelReason.trim()} className="px-3 py-2 rounded text-sm bg-red-600 hover:bg-red-500 text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed">Confirmar Cancelamento</button>
-                            </div>
+                            <div className="flex items-start gap-3"><AlertTriangle className="text-red-500 flex-shrink-0" /><div className="w-full"><h4 className="font-bold text-red-500 mb-2">Cancelar Reserva</h4><p className="text-xs text-slate-300 mb-2">Por favor, informe o motivo do cancelamento.</p><textarea autoFocus className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white text-sm focus:border-red-500 outline-none" placeholder="Justificativa (obrigatório)..." rows={2} value={cancelReason} onChange={e => setCancelReason(e.target.value)}/></div></div>
+                            <div className="flex gap-2 justify-end"><button onClick={() => { setIsCancelling(false); setCancelReason(''); }} className="px-3 py-2 rounded text-sm bg-slate-700 text-slate-300 hover:text-white">Voltar</button><button onClick={handleConfirmCancellation} disabled={!cancelReason.trim()} className="px-3 py-2 rounded text-sm bg-red-600 hover:bg-red-500 text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed">Confirmar Cancelamento</button></div>
                         </div>
                     )}
                 </div>
             ) : (
                 <form onSubmit={handleSaveEdit} className="p-6 space-y-4 animate-fade-in overflow-y-auto">
-                    {/* Grid Principal Layout para Inputs */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                       
-                       {/* Data e Duração */}
-                       <div className="col-span-1">
-                          <label className="text-xs text-slate-400 block mb-1">Data</label>
-                          <input type="date" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={editForm.date} onChange={e => setEditForm({...editForm, date: e.target.value})} />
-                       </div>
-                       <div className="col-span-1">
-                          <label className="text-xs text-slate-400 block mb-1">Duração</label>
-                          <div className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white font-bold text-neon-blue">{selectedEditTimes.length}h</div>
-                       </div>
-                       
-                       {/* Seleção de Horários (Full Width) */}
-                       <div className="col-span-1 md:col-span-2">
-                           <label className="text-xs text-slate-400 block mb-1">Horários</label>
-                           {calculatingSlots ? <div className="text-slate-400 text-sm"><Loader2 className="animate-spin inline mr-2"/>Calculando...</div> : (
-                               <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-40 overflow-y-auto p-1 bg-slate-900/30 rounded border border-slate-700/50">
-                                   {availableSlots.map(slot => {
-                                       const isSelected = selectedEditTimes.includes(slot.time);
-                                       return (
-                                           <button key={slot.time} type="button" disabled={!slot.available && !isSelected} onClick={() => toggleEditTime(slot.time)} className={`p-2 rounded text-xs font-bold border transition ${isSelected ? 'bg-neon-blue text-white shadow-md' : !slot.available ? 'opacity-30 cursor-not-allowed bg-slate-900 text-slate-500' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>{slot.label}</button>
-                                       )
-                                   })}
-                               </div>
-                           )}
-                       </div>
-                       
-                       {/* Tipo de Evento e Valor */}
-                       <div className="col-span-1">
-                           <label className="text-xs text-slate-400 block mb-1">Tipo de Evento</label>
-                           <select 
-                                className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" 
-                                value={editForm.eventType} 
-                                onChange={e => setEditForm({...editForm, eventType: e.target.value as EventType})}
-                           >
-                               {EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                           </select>
-                       </div>
-                       <div className="col-span-1">
-                           <label className="text-xs text-slate-400 block mb-1">Valor Total (R$)</label>
-                           <input 
-                                type="number" 
-                                step="0.01"
-                                className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white font-bold text-neon-green" 
-                                value={editForm.totalValue} 
-                                onChange={e => setEditForm({...editForm, totalValue: parseFloat(e.target.value)})} 
-                           />
-                       </div>
-
-                       {/* Pistas e Pessoas */}
-                       <div className="col-span-1">
-                            <label className="text-xs text-slate-400 block mb-1">Pistas</label>
-                            <input type="number" min="1" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={editForm.laneCount} onChange={e => setEditForm({...editForm, laneCount: parseInt(e.target.value)})} />
-                       </div>
-                       <div className="col-span-1">
-                            <label className="text-xs text-slate-400 block mb-1">Pessoas</label>
-                            <input type="number" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={editForm.peopleCount} onChange={e => setEditForm({...editForm, peopleCount: parseInt(e.target.value)})} />
-                       </div>
-                       
-                       {/* Reserva de Mesa (Full Width) */}
-                       <div className="col-span-1 md:col-span-2 bg-slate-900/50 p-3 rounded border border-slate-700">
-                           <label className="flex items-center gap-2 cursor-pointer mb-2">
-                               <input 
-                                    type="checkbox" 
-                                    className="w-4 h-4 accent-neon-orange" 
-                                    checked={editForm.hasTableReservation} 
-                                    onChange={e => setEditForm({...editForm, hasTableReservation: e.target.checked})}
-                                />
-                               <span className="text-sm font-bold text-white flex items-center gap-2"><Utensils size={14}/> Reservar Mesa no Restaurante?</span>
-                           </label>
-                           
-                           {editForm.hasTableReservation && (
-                               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2 pl-4 border-l-2 border-slate-700 animate-fade-in">
-                                   <div>
-                                       <label className="text-xs text-slate-500 block mb-1">Qtd. Lugares</label>
-                                       <input 
-                                            type="number" 
-                                            className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" 
-                                            value={editForm.tableSeatCount} 
-                                            onChange={e => setEditForm({...editForm, tableSeatCount: parseInt(e.target.value)})} 
-                                        />
-                                   </div>
-                                   {/* Lógica Condicional: Só mostra Aniversariante se o Tipo for Aniversário */}
-                                   {(editForm.eventType === EventType.ANIVERSARIO) && (
-                                       <div>
-                                           <label className="text-xs text-slate-500 block mb-1">Nome do Aniversariante</label>
-                                           <input 
-                                                type="text" 
-                                                className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" 
-                                                value={editForm.birthdayName || ''} 
-                                                onChange={e => setEditForm({...editForm, birthdayName: e.target.value})} 
-                                            />
-                                       </div>
-                                   )}
-                               </div>
-                           )}
-                       </div>
-                       
-                       {/* Observações (Full Width) */}
-                       <div className="col-span-1 md:col-span-2">
-                           <label className="text-xs text-slate-400 block mb-1">Observações</label>
-                           <textarea 
-                                className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white h-20 text-sm" 
-                                value={editForm.observations} 
-                                onChange={e => setEditForm({...editForm, observations: e.target.value})} 
-                            />
-                       </div>
-
+                       <div className="col-span-1"><label className="text-xs text-slate-400 block mb-1">Data</label><input type="date" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={editForm.date} onChange={e => setEditForm({...editForm, date: e.target.value})} /></div>
+                       <div className="col-span-1"><label className="text-xs text-slate-400 block mb-1">Duração</label><div className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white font-bold text-neon-blue">{selectedEditTimes.length}h</div></div>
+                       <div className="col-span-1 md:col-span-2"><label className="text-xs text-slate-400 block mb-1">Horários</label>{calculatingSlots ? <div className="text-slate-400 text-sm"><Loader2 className="animate-spin inline mr-2"/>Calculando...</div> : (<div className="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-40 overflow-y-auto p-1 bg-slate-900/30 rounded border border-slate-700/50">{availableSlots.map(slot => { const isSelected = selectedEditTimes.includes(slot.time); return (<button key={slot.time} type="button" disabled={!slot.available && !isSelected} onClick={() => toggleEditTime(slot.time)} className={`p-2 rounded text-xs font-bold border transition ${isSelected ? 'bg-neon-blue text-white shadow-md' : !slot.available ? 'opacity-30 cursor-not-allowed bg-slate-900 text-slate-500' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>{slot.label}</button>)})}</div>)}</div>
+                       <div className="col-span-1"><label className="text-xs text-slate-400 block mb-1">Tipo de Evento</label><select className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={editForm.eventType} onChange={e => setEditForm({...editForm, eventType: e.target.value as EventType})}>{EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+                       <div className="col-span-1"><label className="text-xs text-slate-400 block mb-1">Valor Total (R$)</label><input type="number" step="0.01" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white font-bold text-neon-green" value={editForm.totalValue} onChange={e => setEditForm({...editForm, totalValue: parseFloat(e.target.value)})} /></div>
+                       <div className="col-span-1"><label className="text-xs text-slate-400 block mb-1">Pistas</label><input type="number" min="1" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={editForm.laneCount} onChange={e => setEditForm({...editForm, laneCount: parseInt(e.target.value)})} /></div>
+                       <div className="col-span-1"><label className="text-xs text-slate-400 block mb-1">Pessoas</label><input type="number" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={editForm.peopleCount} onChange={e => setEditForm({...editForm, peopleCount: parseInt(e.target.value)})} /></div>
+                       <div className="col-span-1 md:col-span-2 bg-slate-900/50 p-3 rounded border border-slate-700"><label className="flex items-center gap-2 cursor-pointer mb-2"><input type="checkbox" className="w-4 h-4 accent-neon-orange" checked={editForm.hasTableReservation} onChange={e => setEditForm({...editForm, hasTableReservation: e.target.checked})}/><span className="text-sm font-bold text-white flex items-center gap-2"><Utensils size={14}/> Reservar Mesa no Restaurante?</span></label>{editForm.hasTableReservation && (<div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2 pl-4 border-l-2 border-slate-700 animate-fade-in"><div><label className="text-xs text-slate-500 block mb-1">Qtd. Lugares</label><input type="number" className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" value={editForm.tableSeatCount} onChange={e => setEditForm({...editForm, tableSeatCount: parseInt(e.target.value)})} /></div>{(editForm.eventType === EventType.ANIVERSARIO) && (<div><label className="text-xs text-slate-500 block mb-1">Nome do Aniversariante</label><input type="text" className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" value={editForm.birthdayName || ''} onChange={e => setEditForm({...editForm, birthdayName: e.target.value})} /></div>)}</div>)}</div>
+                       <div className="col-span-1 md:col-span-2"><label className="text-xs text-slate-400 block mb-1">Observações</label><textarea className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white h-20 text-sm" value={editForm.observations} onChange={e => setEditForm({...editForm, observations: e.target.value})} /></div>
                     </div>
-                    
-                    <div className="flex gap-3 pt-4 border-t border-slate-700">
-                        <button type="button" onClick={() => setIsEditMode(false)} className="flex-1 py-3 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition">Cancelar</button>
-                        <button type="submit" disabled={loading || selectedEditTimes.length === 0} className="flex-1 py-3 bg-neon-blue hover:bg-blue-500 text-white rounded-lg font-bold shadow-lg transition">{loading ? <Loader2 className="animate-spin" /> : 'Salvar Detalhes'}</button>
-                    </div>
+                    <div className="flex gap-3 pt-4 border-t border-slate-700"><button type="button" onClick={() => setIsEditMode(false)} className="flex-1 py-3 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition">Cancelar</button><button type="submit" disabled={loading || selectedEditTimes.length === 0} className="flex-1 py-3 bg-neon-blue hover:bg-blue-500 text-white rounded-lg font-bold shadow-lg transition">{loading ? <Loader2 className="animate-spin" /> : 'Salvar Detalhes'}</button></div>
                 </form>
             )}
           </div>
         </div>
       )}
 
-      {/* LANE SELECTION MODAL */}
       {showLaneSelector && laneSelectorTargetRes && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
               <div className="bg-slate-800 border border-slate-600 w-full max-w-sm rounded-2xl shadow-2xl animate-scale-in p-6">
                   <h3 className="text-xl font-bold text-white mb-2 text-center">Selecionar Pista(s)</h3>
                   <p className="text-sm text-slate-400 text-center mb-6">Em qual pista o cliente está jogando?</p>
-                  
-                  <div className="grid grid-cols-3 gap-4 mb-6">
-                      {Array.from({ length: settings.activeLanes }).map((_, i) => {
-                          const laneNum = i + 1;
-                          const isSelected = tempSelectedLanes.includes(laneNum);
-                          return (
-                              <button 
-                                key={laneNum}
-                                onClick={() => toggleLaneSelection(laneNum)}
-                                className={`h-16 rounded-xl flex items-center justify-center text-2xl font-bold transition border-2 ${isSelected ? 'bg-neon-blue border-neon-blue text-white shadow-lg scale-105' : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-500'}`}
-                              >
-                                  {laneNum}
-                              </button>
-                          )
-                      })}
-                  </div>
-
-                  <div className="flex gap-3">
-                      <button onClick={() => { setShowLaneSelector(false); setLaneSelectorTargetRes(null); }} className="flex-1 py-3 bg-slate-700 text-white rounded-lg font-medium">Cancelar</button>
-                      <button onClick={saveLaneSelection} className="flex-1 py-3 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold">Confirmar</button>
-                  </div>
+                  <div className="grid grid-cols-3 gap-4 mb-6">{Array.from({ length: settings.activeLanes }).map((_, i) => { const laneNum = i + 1; const isSelected = tempSelectedLanes.includes(laneNum); return (<button key={laneNum} onClick={() => toggleLaneSelection(laneNum)} className={`h-16 rounded-xl flex items-center justify-center text-2xl font-bold transition border-2 ${isSelected ? 'bg-neon-blue border-neon-blue text-white shadow-lg scale-105' : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-500'}`}>{laneNum}</button>)})}</div>
+                  <div className="flex gap-3"><button onClick={() => { setShowLaneSelector(false); setLaneSelectorTargetRes(null); }} className="flex-1 py-3 bg-slate-700 text-white rounded-lg font-medium">Cancelar</button><button onClick={saveLaneSelection} className="flex-1 py-3 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold">Confirmar</button></div>
               </div>
           </div>
       )}
