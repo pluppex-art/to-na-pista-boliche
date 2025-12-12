@@ -1,0 +1,17 @@
+{
+  "short_name": "Tô Na Pista",
+  "name": "Tô Na Pista - Agenda & CRM",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0f172a",
+  "display": "standalone",
+  "scope": "/",
+  "theme_color": "#0f172a",
+  "orientation": "portrait"
+}
