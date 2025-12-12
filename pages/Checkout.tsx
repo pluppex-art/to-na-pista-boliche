@@ -4,11 +4,10 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { db } from '../services/mockBackend';
 import { Integrations } from '../services/integrations';
 import { Reservation, ReservationStatus, FunnelStage, User, PaymentStatus } from '../types';
-import { CheckCircle, CreditCard, Smartphone, Loader2, ShieldCheck, Store, Lock, QrCode, Banknote, CalendarCheck, Wallet, Hash, ArrowRight, User as UserIcon, Calendar, RefreshCw, ExternalLink } from 'lucide-react';
+import { CheckCircle, CreditCard, Loader2, ShieldCheck, Store, Lock, Hash, ArrowRight, User as UserIcon, Calendar, RefreshCw, ExternalLink, Shield } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../services/supabaseClient';
 
-type PaymentMethodClient = 'PIX' | 'DEBIT' | 'CREDIT';
 type PaymentMethodStaff = 'DINHEIRO' | 'PIX' | 'DEBITO' | 'CREDITO';
 
 const Checkout: React.FC = () => {
@@ -18,18 +17,11 @@ const Checkout: React.FC = () => {
   const [isSuccess, setIsSuccess] = useState(false);
   const [isCheckingPayment, setIsCheckingPayment] = useState(false);
   
-  // State for UI selection
-  const [selectedMethod, setSelectedMethod] = useState<PaymentMethodClient>('PIX');
+  // Staff Selection State
   const [staffMethod, setStaffMethod] = useState<PaymentMethodStaff>('DINHEIRO');
   
   // Staff Comanda Input
   const [comandaInput, setComandaInput] = useState('');
-
-  // Mock Card Inputs
-  const [cardName, setCardName] = useState('');
-  const [cardNumber, setCardNumber] = useState('');
-  const [cardExpiry, setCardExpiry] = useState('');
-  const [cardCvv, setCardCvv] = useState('');
 
   const [imgError, setImgError] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -112,19 +104,6 @@ const Checkout: React.FC = () => {
 
   if (!reservationData) return null;
 
-  // --- MASCARAS DE CARTÃO ---
-  const handleCardNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      let val = e.target.value.replace(/\D/g, '');
-      val = val.replace(/(\d{4})/g, '$1 ').trim();
-      setCardNumber(val.slice(0, 19));
-  };
-
-  const handleExpiryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      let val = e.target.value.replace(/\D/g, '');
-      if (val.length >= 2) val = val.slice(0, 2) + '/' + val.slice(2, 4);
-      setCardExpiry(val.slice(0, 5));
-  };
-
   // --- PROCESSAMENTO ---
   const processPayment = async (mode: 'CLIENT_ONLINE' | 'STAFF_CONFIRM' | 'STAFF_LATER') => {
     setIsProcessing(true);
@@ -176,10 +155,10 @@ const Checkout: React.FC = () => {
                 // Simulação Visual -> Confirma
                 finalStatus = ReservationStatus.CONFIRMADA;
                 paymentStatus = PaymentStatus.PAGO;
-                obsDetail = `[Pgto Online Simulado: ${selectedMethod === 'PIX' ? 'PIX' : 'Cartão'}]`;
+                obsDetail = `[Pgto Online Simulado]`;
             } else {
                 // Integração Real -> Mantém Pendente até callback
-                obsDetail = `[Aguardando Gateway: ${selectedMethod}]`;
+                obsDetail = `[Aguardando Gateway de Pagamento]`;
             }
         }
 
@@ -272,7 +251,7 @@ const Checkout: React.FC = () => {
                  setIsSuccess(true);
              }
         } else {
-            // Se não for pagamento online real, sucesso imediato (Modo Simulação)
+            // Se não for pagamento online real, sucesso imediato (Modo Simulação ou Staff)
             if (mode !== 'CLIENT_ONLINE' || !settings?.onlinePaymentEnabled) {
                 setIsSuccess(true);
             }
@@ -434,7 +413,7 @@ const Checkout: React.FC = () => {
                             {/* OPÇÃO 2: PAGAR DEPOIS (COMANDA) */}
                             <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 flex flex-col justify-between">
                                 <div>
-                                    <h3 className="text-sm font-bold text-yellow-500 uppercase mb-4 flex items-center gap-2"><CalendarCheck size={16}/> Pagar no Local / Comanda</h3>
+                                    <h3 className="text-sm font-bold text-yellow-500 uppercase mb-4 flex items-center gap-2"><Calendar size={16}/> Pagar no Local / Comanda</h3>
                                     <p className="text-xs text-slate-400 mb-2">
                                         Mantém a reserva <span className="text-yellow-500">Pendente</span> mas ignora timeout.
                                     </p>
@@ -465,153 +444,80 @@ const Checkout: React.FC = () => {
                 </div>
             ) : (
                 
-            /* --- VISÃO DO CLIENTE --- */
-            <div className="space-y-6">
-                <h2 className="text-2xl font-bold text-white">Como você prefere pagar?</h2>
+            /* --- VISÃO DO CLIENTE UNIFICADA --- */
+            <div className="space-y-6 animate-fade-in">
+                <h2 className="text-2xl font-bold text-white mb-4">Pagamento Seguro</h2>
                 
-                {/* PAYMENT METHOD SELECTION */}
-                <div className="grid grid-cols-3 gap-3">
-                    <button 
-                        onClick={() => setSelectedMethod('PIX')}
-                        className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition ${selectedMethod === 'PIX' ? 'border-neon-green bg-green-500/10 text-white' : 'border-slate-700 bg-slate-900 text-slate-400 hover:bg-slate-800'}`}
-                    >
-                        <QrCode size={24} className={selectedMethod === 'PIX' ? 'text-neon-green' : ''} />
-                        <span className="text-xs md:text-sm font-bold">PIX</span>
-                    </button>
-                    <button 
-                        onClick={() => setSelectedMethod('DEBIT')}
-                        className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition ${selectedMethod === 'DEBIT' ? 'border-neon-blue bg-blue-500/10 text-white' : 'border-slate-700 bg-slate-900 text-slate-400 hover:bg-slate-800'}`}
-                    >
-                        <CreditCard size={24} className={selectedMethod === 'DEBIT' ? 'text-neon-blue' : ''} />
-                        <span className="text-xs md:text-sm font-bold">Débito</span>
-                    </button>
-                    <button 
-                        onClick={() => setSelectedMethod('CREDIT')}
-                        className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition ${selectedMethod === 'CREDIT' ? 'border-neon-blue bg-blue-500/10 text-white' : 'border-slate-700 bg-slate-900 text-slate-400 hover:bg-slate-800'}`}
-                    >
-                        <Wallet size={24} className={selectedMethod === 'CREDIT' ? 'text-neon-blue' : ''} />
-                        <span className="text-xs md:text-sm font-bold">Crédito (A Vista)</span>
-                    </button>
-                </div>
-
-                {/* PAYMENT DETAILS CONTENT */}
-                <div className="bg-slate-900 rounded-xl p-6 border border-slate-800 shadow-lg min-h-[300px]">
+                <div className="bg-slate-900 rounded-xl p-8 border border-slate-800 shadow-lg text-center">
                     
-                    {/* PIX CONTENT */}
-                    {selectedMethod === 'PIX' && (
-                        <div className="flex flex-col items-center animate-fade-in text-center">
-                             {!settings?.onlinePaymentEnabled ? (
-                                 /* MODO SIMULAÇÃO: MOSTRA QR CODE FAKE */
-                                 <>
-                                     <div className="bg-white p-2 rounded-lg mb-4 relative">
-                                         <div className="absolute -top-2 -right-2 bg-yellow-500 text-black text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg">TESTE</div>
-                                         <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=SimulacaoPagamentoToNaPista" alt="QR Code" className="w-48 h-48"/>
-                                     </div>
-                                     <p className="text-sm text-slate-300 font-bold mb-1">Escaneie o QR Code (Simulação)</p>
-                                     <p className="text-xs text-slate-500 mb-6">Aprovação imediata para fins de teste</p>
-                                     <button 
-                                        onClick={() => processPayment('CLIENT_ONLINE')}
-                                        disabled={isProcessing}
-                                        className="w-full max-w-sm bg-neon-green hover:bg-green-500 text-black font-bold py-3 rounded-lg flex items-center justify-center gap-2 shadow-lg shadow-green-500/20"
-                                     >
-                                         {isProcessing ? <Loader2 className="animate-spin"/> : 'Simular Confirmação'}
-                                     </button>
-                                 </>
-                             ) : (
-                                 /* MODO PRODUÇÃO: REDIRECIONA OU AGUARDA */
-                                 <>
-                                     <div className="p-6 bg-slate-800 rounded-lg border border-slate-700 mb-6 w-full max-w-sm">
-                                         <QrCode className="w-16 h-16 text-neon-green mx-auto mb-4"/>
-                                         <h3 className="text-white font-bold mb-2">Pagamento Seguro via Mercado Pago</h3>
-                                         <p className="text-slate-400 text-xs mb-4">Você será redirecionado para concluir o pagamento com segurança.</p>
-                                     </div>
-                                     
-                                     <button 
-                                        onClick={() => processPayment('CLIENT_ONLINE')}
-                                        disabled={isProcessing}
-                                        className="w-full max-w-sm bg-neon-blue hover:bg-blue-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20"
-                                     >
-                                         {isProcessing ? <Loader2 className="animate-spin"/> : <><ExternalLink size={18}/> Ir para Pagamento</>}
-                                     </button>
-                                 </>
-                             )}
+                    {!settings?.onlinePaymentEnabled ? (
+                         /* MODO SIMULAÇÃO */
+                         <div className="flex flex-col items-center gap-6">
+                            <div className="w-20 h-20 bg-yellow-500/10 rounded-full flex items-center justify-center border border-yellow-500/30">
+                                <Shield className="text-yellow-500 w-10 h-10" />
+                            </div>
+                            
+                            <div>
+                                <div className="inline-block bg-yellow-500 text-black text-[10px] font-bold px-2 py-1 rounded mb-2">MODO SIMULAÇÃO</div>
+                                <h3 className="text-xl font-bold text-white mb-2">Ambiente de Teste</h3>
+                                <p className="text-slate-400 text-sm max-w-md mx-auto">
+                                    O pagamento online ainda não foi ativado pelo estabelecimento.
+                                    Clique abaixo para simular uma confirmação imediata.
+                                </p>
+                            </div>
 
-                             {/* MONITORAMENTO MANUAL (Útil se o usuário voltar da tela de pagamento) */}
-                             {trackedReservationIds.length > 0 && settings?.onlinePaymentEnabled && (
-                                <div className="w-full max-w-sm mt-4 pt-4 border-t border-slate-800">
-                                    <p className="text-xs text-slate-500 mb-2">Já realizou o pagamento?</p>
+                            <button 
+                                onClick={() => processPayment('CLIENT_ONLINE')}
+                                disabled={isProcessing}
+                                className="w-full max-w-sm bg-neon-green hover:bg-green-500 text-black font-bold py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-green-500/20 transform hover:scale-105 transition"
+                            >
+                                {isProcessing ? <Loader2 className="animate-spin"/> : 'Simular Pagamento Aprovado'}
+                            </button>
+                         </div>
+                    ) : (
+                         /* MODO PRODUÇÃO (MERCADO PAGO) */
+                         <div className="flex flex-col items-center gap-6">
+                            <div className="w-20 h-20 bg-neon-blue/10 rounded-full flex items-center justify-center border border-neon-blue/30 relative">
+                                <ShieldCheck className="text-neon-blue w-10 h-10" />
+                                <div className="absolute -bottom-2 bg-slate-900 border border-slate-700 px-2 py-0.5 rounded text-[10px] text-slate-400 font-bold">SSL SEGURO</div>
+                            </div>
+
+                            <div>
+                                <h3 className="text-xl font-bold text-white mb-2">Finalizar Pagamento</h3>
+                                <p className="text-slate-400 text-sm max-w-md mx-auto mb-4">
+                                    Você será redirecionado para o ambiente seguro do Mercado Pago.
+                                    Lá você poderá escolher pagar com:
+                                </p>
+                                <div className="flex justify-center gap-3 text-xs font-bold text-slate-300">
+                                    <span className="bg-slate-800 px-3 py-1 rounded border border-slate-700">PIX</span>
+                                    <span className="bg-slate-800 px-3 py-1 rounded border border-slate-700">Cartão de Crédito</span>
+                                    <span className="bg-slate-800 px-3 py-1 rounded border border-slate-700">Débito</span>
+                                </div>
+                            </div>
+
+                            <button 
+                                onClick={() => processPayment('CLIENT_ONLINE')}
+                                disabled={isProcessing}
+                                className="w-full max-w-sm bg-neon-blue hover:bg-blue-500 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 transform hover:scale-105 transition"
+                            >
+                                {isProcessing ? <Loader2 className="animate-spin"/> : <><ExternalLink size={20}/> Ir para Pagamento Seguro</>}
+                            </button>
+                            
+                            {/* MONITORAMENTO MANUAL */}
+                            {trackedReservationIds.length > 0 && (
+                                <div className="w-full max-w-sm pt-6 border-t border-slate-800 mt-2">
+                                    <p className="text-xs text-slate-500 mb-3">Já realizou o pagamento na outra aba?</p>
                                     <button 
                                         onClick={checkPaymentStatusManual}
                                         disabled={isCheckingPayment}
-                                        className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 border border-slate-600"
+                                        className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-3 rounded-lg flex items-center justify-center gap-2 border border-slate-600 text-sm"
                                     >
-                                        {isCheckingPayment ? <Loader2 className="animate-spin text-white" size={18}/> : <RefreshCw size={18}/>}
-                                        Verificar Status Agora
+                                        {isCheckingPayment ? <Loader2 className="animate-spin" size={16}/> : <RefreshCw size={16}/>}
+                                        Verificar Status do Pagamento
                                     </button>
-                                </div>
-                             )}
-                        </div>
-                    )}
-
-                    {/* CARD CONTENT (DEBIT OR CREDIT) */}
-                    {(selectedMethod === 'DEBIT' || selectedMethod === 'CREDIT') && (
-                        <div className="max-w-md mx-auto animate-fade-in space-y-4">
-                            {!settings?.onlinePaymentEnabled ? (
-                                /* SIMULAÇÃO DE CARTÃO */
-                                <>
-                                    <div className="flex items-center justify-between mb-4">
-                                        <h3 className="text-white font-bold">Simulação de Cartão</h3>
-                                        <span className="text-[10px] bg-yellow-500 text-black px-2 py-1 rounded font-bold">MODO TESTE</span>
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs text-slate-400 mb-1">Número do Cartão</label>
-                                        <div className="relative">
-                                            <CreditCard className="absolute left-3 top-3 text-slate-500" size={18}/>
-                                            <input 
-                                                type="text" 
-                                                placeholder="0000 0000 0000 0000" 
-                                                maxLength={19}
-                                                value={cardNumber}
-                                                onChange={handleCardNumberChange}
-                                                className="w-full bg-slate-800 border border-slate-600 rounded-lg py-3 pl-10 text-white focus:border-neon-blue outline-none font-mono"
-                                            />
-                                        </div>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-xs text-slate-400 mb-1">Validade</label>
-                                            <input type="text" placeholder="MM/AA" maxLength={5} value={cardExpiry} onChange={handleExpiryChange} className="w-full bg-slate-800 border border-slate-600 rounded-lg py-3 px-4 text-white focus:border-neon-blue outline-none text-center" />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs text-slate-400 mb-1">CVV</label>
-                                            <input type="text" placeholder="123" maxLength={4} value={cardCvv} onChange={e => setCardCvv(e.target.value.replace(/\D/g, ''))} className="w-full bg-slate-800 border border-slate-600 rounded-lg py-3 px-4 text-white focus:border-neon-blue outline-none text-center" />
-                                        </div>
-                                    </div>
-                                    <button 
-                                        onClick={() => processPayment('CLIENT_ONLINE')}
-                                        disabled={isProcessing}
-                                        className="w-full mt-6 bg-neon-blue hover:bg-blue-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20"
-                                    >
-                                        {isProcessing ? <Loader2 className="animate-spin"/> : `Pagar ${reservationData.totalValue.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}`}
-                                    </button>
-                                </>
-                            ) : (
-                                /* PRODUÇÃO: AVISO DE REDIRECIONAMENTO */
-                                <div className="text-center py-10">
-                                     <CreditCard className="w-16 h-16 text-neon-blue mx-auto mb-4"/>
-                                     <h3 className="text-white font-bold mb-2">Cartão de Crédito/Débito</h3>
-                                     <p className="text-slate-400 text-sm mb-6">Para sua segurança, o pagamento com cartão é processado no ambiente criptografado do Mercado Pago.</p>
-                                     
-                                     <button 
-                                        onClick={() => processPayment('CLIENT_ONLINE')}
-                                        disabled={isProcessing}
-                                        className="w-full bg-neon-blue hover:bg-blue-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20"
-                                     >
-                                         {isProcessing ? <Loader2 className="animate-spin"/> : <><ExternalLink size={18}/> Ir para Pagamento Seguro</>}
-                                     </button>
                                 </div>
                             )}
-                        </div>
+                         </div>
                     )}
                 </div>
             </div>
