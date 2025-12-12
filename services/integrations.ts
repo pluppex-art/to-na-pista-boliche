@@ -13,6 +13,10 @@ export const Integrations = {
     // URL base do Supabase (Hardcoded based on current config to ensure consistency)
     const SUPABASE_PROJECT_URL = 'https://rmirkhebjgvsqqenszts.supabase.co';
     const WEBHOOK_URL = `${SUPABASE_PROJECT_URL}/functions/v1/mp-webhook`;
+    
+    // Captura a URL atual do navegador (funciona em localhost, vercel preview e produção)
+    // Se estiver rodando no server-side (improvável neste app React puro), fallback para string vazia
+    const BASE_URL = typeof window !== 'undefined' ? window.location.origin : 'https://www.tonapistaboliche.com.br';
 
     // DADOS PARA ENVIAR AO MERCADO PAGO
     const preferenceData = {
@@ -42,9 +46,9 @@ export const Integrations = {
             installments: 6 // Sugestão: Limita o parcelamento padrão para ficar mais limpo (opcional)
         },
         back_urls: {
-            success: "https://www.tonapistaboliche.com.br/minha-conta",
-            failure: "https://www.tonapistaboliche.com.br/agendamento",
-            pending: "https://www.tonapistaboliche.com.br/minha-conta"
+            success: `${BASE_URL}/minha-conta`,
+            failure: `${BASE_URL}/agendamento`,
+            pending: `${BASE_URL}/minha-conta`
         },
         notification_url: WEBHOOK_URL, // IMPORTANTE: Define explicitamente onde o MP deve avisar
         auto_return: "approved",
