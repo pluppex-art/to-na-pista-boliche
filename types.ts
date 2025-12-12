@@ -1,5 +1,4 @@
 
-
 export enum UserRole {
   ADMIN = 'ADMIN',
   GESTOR = 'GESTOR', // Mantemos o ID interno GESTOR, mas na UI será "Usuário"
@@ -109,8 +108,9 @@ export interface Reservation {
   birthdayName?: string;
   tableSeatCount?: number;
 
-  // Controle de Pagamento no Local
+  // Controle de Pagamento no Local e Comanda
   payOnSite?: boolean;
+  comandaId?: string;
 
   // Auditoria
   createdBy?: string; // User ID of staff who created

@@ -1,3 +1,4 @@
+
 import { AppSettings, Client, FunnelCard, Interaction, Reservation, User, ReservationStatus, PaymentStatus, UserRole, FunnelStage, LoyaltyTransaction, AuditLog, StaffPerformance } from '../types';
 import { supabase } from './supabaseClient';
 import { INITIAL_SETTINGS, FUNNEL_STAGES } from '../constants';
@@ -686,6 +687,7 @@ export const db = {
         birthdayName: r.birthday_name,
         tableSeatCount: r.table_seat_count,
         payOnSite: r.pay_on_site, // Mapeado do banco
+        comandaId: r.comanda_id, // Map Comanda ID
         createdBy: r.created_by,
         lanesAssigned: r.pistas_usadas || [] // Mapeamento novo
       }));
@@ -765,6 +767,7 @@ export const db = {
         birthday_name: res.birthdayName,
         table_seat_count: res.tableSeatCount,
         pay_on_site: res.payOnSite, // Grava no banco
+        comanda_id: res.comandaId, // Salva Comanda ID
         created_by: createdByUserId,
         pistas_usadas: res.lanesAssigned // Salva no banco
       };
@@ -802,6 +805,7 @@ export const db = {
         birthday_name: res.birthdayName,
         table_seat_count: res.tableSeatCount,
         pay_on_site: res.payOnSite,
+        comanda_id: res.comandaId, // Atualiza Comanda ID
         pistas_usadas: res.lanesAssigned // Atualiza no banco
       };
       

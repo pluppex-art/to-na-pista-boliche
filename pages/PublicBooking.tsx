@@ -803,25 +803,8 @@ const PublicBooking: React.FC = () => {
               alert("Reserva marcada para pagamento no local. O horário não será cancelado automaticamente.");
               navigate('/agenda');
 
-          } else if (settings.onlinePaymentEnabled) {
-              // Fluxo Online Padrão
-              const compositeRes = { 
-                  id: createdReservationIds[0], 
-                  totalValue: totalValue, 
-                  clientName: formData.name,
-                  clientEmail: formData.email
-              } as any;
-              
-              const checkoutUrl = await Integrations.createMercadoPagoPreference(compositeRes, settings);
-              if (checkoutUrl) {
-                  window.location.href = checkoutUrl;
-                  return; 
-              } else {
-                  alert("Erro no banco. Redirecionando para manual.");
-                  navigate('/checkout', { state: { ...formData, date: selectedDate, time: isManualMode ? manualStartTime : selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
-              }
           } else {
-             // Fluxo Manual (Cliente)
+             // Fluxo Cliente (Online) -> Vai para checkout interno sempre, não redireciona MP direto
              navigate('/checkout', { state: { ...formData, date: selectedDate, time: isManualMode ? manualStartTime : selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
           }
       } catch (e) {

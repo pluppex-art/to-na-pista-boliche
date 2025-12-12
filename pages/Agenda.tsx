@@ -518,12 +518,18 @@ const Agenda: React.FC = () => {
                                     <div className="min-w-0 pr-2">
                                         <h4 className={`font-bold truncate text-sm flex items-center gap-2 ${isNoShow ? 'line-through text-slate-500' : 'text-white'}`}>{res.clientName}</h4>
                                         <div className="flex items-center gap-1 text-[11px] text-slate-400 mt-0.5"><Phone size={10} /> {clientPhones[res.clientId] || 'Sem telefone'}</div>
-                                        <div className="flex items-center gap-2 mt-2">
+                                        <div className="flex items-center gap-2 mt-2 flex-wrap">
                                             {isCheckedIn ? <span className="text-[10px] font-bold text-green-400 bg-green-500/20 px-1 rounded uppercase">CHECK-IN</span> : isNoShow ? <span className="text-[10px] font-bold text-red-400 bg-red-500/20 px-1 rounded uppercase">NO-SHOW</span> : <span className={`text-[10px] font-bold px-1 rounded uppercase ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border border-neon-blue/30' : res.status === ReservationStatus.PENDENTE ? 'text-yellow-400 bg-yellow-900/40 border border-yellow-500/30' : 'text-slate-400 bg-slate-800'}`}>{res.status}</span>}
                                             {/* Indicador de Pagamento no Local */}
                                             {res.payOnSite && res.status === ReservationStatus.PENDENTE && (
                                                 <span className="text-[10px] font-bold text-white bg-slate-600 px-1 rounded flex items-center gap-0.5" title="Pagamento no Local">
                                                     <Store size={10}/> Local
+                                                </span>
+                                            )}
+                                            {/* Comanda Display */}
+                                            {res.comandaId && (
+                                                <span className="text-[10px] font-bold text-white bg-purple-600 px-1 rounded flex items-center gap-0.5" title="Comanda">
+                                                    <Hash size={10}/> {res.comandaId}
                                                 </span>
                                             )}
                                         </div>
@@ -629,6 +635,19 @@ const Agenda: React.FC = () => {
 
                     {/* Lane Assignment & Table Info */}
                     <div className="space-y-3">
+                        {/* Comanda Info (NEW) */}
+                        {editingRes.comandaId && (
+                            <div className="flex items-center gap-3 bg-purple-900/30 p-3 rounded-lg border border-purple-500/30">
+                                <div className="bg-purple-900/50 p-2 rounded text-purple-400"><Hash size={18}/></div>
+                                <div>
+                                    <span className="text-xs text-purple-400 block font-bold">Comanda / Mesa</span>
+                                    <span className="text-white text-lg font-bold">
+                                        {editingRes.comandaId}
+                                    </span>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Lane Assignment */}
                         <div className="flex items-center justify-between bg-slate-800 p-3 rounded-lg border border-slate-700">
                             <div className="flex items-center gap-3">

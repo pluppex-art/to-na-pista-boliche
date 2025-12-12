@@ -1,3 +1,4 @@
+
 import { Reservation, AppSettings } from '../types';
 
 export const Integrations = {
@@ -8,6 +9,10 @@ export const Integrations = {
     }
 
     console.log(`[Integration] Creating MP preference for reservation ${reservation.id}`);
+
+    // URL base do Supabase (Hardcoded based on current config to ensure consistency)
+    const SUPABASE_PROJECT_URL = 'https://rmirkhebjgvsqqenszts.supabase.co';
+    const WEBHOOK_URL = `${SUPABASE_PROJECT_URL}/functions/v1/mp-webhook`;
 
     // DADOS PARA ENVIAR AO MERCADO PAGO
     const preferenceData = {
@@ -25,13 +30,27 @@ export const Integrations = {
             name: reservation.clientName,
             email: reservation.clientEmail || 'cliente@email.com',
         },
-        back_urls: {
-            success: window.location.origin + '/checkout/success', 
-            failure: window.location.origin + '/checkout/failure',
-            pending: window.location.origin + '/checkout/pending'
+        // CONFIGURAÇÃO DE MÉTODOS DE PAGAMENTO
+        payment_methods: {
+            excluded_payment_types: [
+                { id: "ticket" }, // Remove Boleto Bancário e pagamentos em Lotérica (Pendentes)
+                { id: "atm" }     // Remove pagamento em caixa eletrônico
+            ],
+            excluded_payment_methods: [
+                // { id: "elo" } // Exemplo: Se quiser remover bandeira ELO, descomente aqui
+            ],
+            installments: 6 // Sugestão: Limita o parcelamento padrão para ficar mais limpo (opcional)
         },
+        back_urls: {
+            success: "https://www.tonapistaboliche.com.br/minha-conta",
+            failure: "https://www.tonapistaboliche.com.br/agendamento",
+            pending: "https://www.tonapistaboliche.com.br/minha-conta"
+        },
+        notification_url: WEBHOOK_URL, // IMPORTANTE: Define explicitamente onde o MP deve avisar
         auto_return: "approved",
-        external_reference: reservation.id
+        external_reference: reservation.id,
+        // Garante que só aceita pagamento de quem está logado ou convidado
+        binary_mode: true // IMPORTANTE: Isso força o pagamento a ser aprovado ou rejeitado na hora (sem pendência de boleto)
     };
 
     try {
