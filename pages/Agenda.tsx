@@ -5,9 +5,10 @@ import { supabase } from '../services/supabaseClient';
 import { Reservation, ReservationStatus, EventType, UserRole, PaymentStatus } from '../types';
 import { useApp } from '../contexts/AppContext'; // Context
 import { generateDailySlots, checkHourCapacity } from '../utils/availability'; // Utils
-import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, CheckCircle2, X, AlertTriangle, MessageCircle, Clock, Store, LayoutGrid, Hash, DollarSign } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, CheckCircle2, X, AlertTriangle, MessageCircle, Clock, Store, LayoutGrid, Hash, DollarSign, FileText } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
+import { EVENT_TYPES } from '../constants';
 
 const Agenda: React.FC = () => {
   const { settings, user: currentUser } = useApp(); // Use Context
@@ -249,7 +250,17 @@ const Agenda: React.FC = () => {
     const startHour = parseInt(res.time.split(':')[0]);
     for(let i=0; i<res.duration; i++) times.push(`${startHour + i}:00`);
     setSelectedEditTimes(times);
-    setEditForm({ ...res });
+    // Populate Form with ALL existing values
+    setEditForm({ 
+        ...res,
+        // Ensure table props are set even if undefined in original object
+        hasTableReservation: res.hasTableReservation || false,
+        tableSeatCount: res.tableSeatCount || 0,
+        birthdayName: res.birthdayName || '',
+        totalValue: res.totalValue,
+        eventType: res.eventType,
+        observations: res.observations || ''
+    });
   };
 
   const handleSaveEdit = async (e: React.FormEvent) => {
@@ -302,19 +313,31 @@ const Agenda: React.FC = () => {
              blocks.push({ time: `${currentStart}:00`, duration: currentDuration });
 
              const firstBlock = blocks[0];
+             
+             // Update main block with spread to capture all edited fields
              const updated = { 
-                 ...editingRes, ...editForm, time: firstBlock.time, duration: firstBlock.duration,
+                 ...editingRes, 
+                 ...editForm, 
+                 time: firstBlock.time, 
+                 duration: firstBlock.duration,
+                 // Ensure conditionals
                  birthdayName: editForm.hasTableReservation ? editForm.birthdayName : undefined,
                  tableSeatCount: editForm.hasTableReservation ? editForm.tableSeatCount : undefined
              };
              
              // Update main block with audit
-             await db.reservations.update(updated, currentUser?.id, `Editou detalhes da reserva`);
+             await db.reservations.update(updated, currentUser?.id, `Editou detalhes completos da reserva`);
              
              if (blocks.length > 1) {
                   for (let i = 1; i < blocks.length; i++) {
                       const newResId = uuidv4();
-                      const newRes: Reservation = { ...updated, id: newResId, time: blocks[i].time, duration: blocks[i].duration, createdAt: new Date().toISOString() };
+                      const newRes: Reservation = { 
+                          ...updated, 
+                          id: newResId, 
+                          time: blocks[i].time, 
+                          duration: blocks[i].duration, 
+                          createdAt: new Date().toISOString() 
+                        };
                       await db.reservations.create(newRes, currentUser?.id);
                   }
              }
@@ -648,6 +671,15 @@ const Agenda: React.FC = () => {
                             </div>
                         )}
 
+                        {/* Event Type Display */}
+                        <div className="flex items-center gap-3 bg-slate-800 p-3 rounded-lg border border-slate-700">
+                             <div className="bg-slate-700 p-2 rounded text-slate-300"><Cake size={18}/></div>
+                             <div>
+                                 <span className="text-xs text-slate-400 block">Tipo de Evento</span>
+                                 <span className="text-white text-sm font-medium">{editingRes.eventType}</span>
+                             </div>
+                        </div>
+
                         {/* Lane Assignment */}
                         <div className="flex items-center justify-between bg-slate-800 p-3 rounded-lg border border-slate-700">
                             <div className="flex items-center gap-3">
@@ -735,7 +767,7 @@ const Agenda: React.FC = () => {
                 </div>
             ) : (
                 <form onSubmit={handleSaveEdit} className="p-6 space-y-4 animate-fade-in overflow-y-auto">
-                    {/* Simplified Edit Form using utility availableSlots */}
+                    {/* Expanded Edit Form */}
                     <div className="grid grid-cols-2 gap-4">
                        <div><label className="text-xs text-slate-400">Data</label><input type="date" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={editForm.date} onChange={e => setEditForm({...editForm, date: e.target.value})} /></div>
                        <div><label className="text-xs text-slate-400">Duração</label><div className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white font-bold text-neon-blue">{selectedEditTimes.length}h</div></div>
@@ -752,10 +784,81 @@ const Agenda: React.FC = () => {
                                </div>
                            )}
                        </div>
+                       
+                       {/* Basic Info */}
                        <div><label className="text-xs text-slate-400">Pistas</label><input type="number" min="1" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={editForm.laneCount} onChange={e => setEditForm({...editForm, laneCount: parseInt(e.target.value)})} /></div>
                        <div><label className="text-xs text-slate-400">Pessoas</label><input type="number" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={editForm.peopleCount} onChange={e => setEditForm({...editForm, peopleCount: parseInt(e.target.value)})} /></div>
+                       
+                       {/* New Fields: Event Type & Value */}
+                       <div>
+                           <label className="text-xs text-slate-400">Tipo de Evento</label>
+                           <select 
+                                className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" 
+                                value={editForm.eventType} 
+                                onChange={e => setEditForm({...editForm, eventType: e.target.value as EventType})}
+                           >
+                               {EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                           </select>
+                       </div>
+                       <div>
+                           <label className="text-xs text-slate-400">Valor Total (R$)</label>
+                           <input 
+                                type="number" 
+                                step="0.01"
+                                className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white font-bold text-neon-green" 
+                                value={editForm.totalValue} 
+                                onChange={e => setEditForm({...editForm, totalValue: parseFloat(e.target.value)})} 
+                           />
+                       </div>
+
+                       {/* Table Reservation Toggle & Details */}
+                       <div className="col-span-2 bg-slate-900/50 p-3 rounded border border-slate-700">
+                           <label className="flex items-center gap-2 cursor-pointer mb-2">
+                               <input 
+                                    type="checkbox" 
+                                    className="w-4 h-4 accent-neon-orange" 
+                                    checked={editForm.hasTableReservation} 
+                                    onChange={e => setEditForm({...editForm, hasTableReservation: e.target.checked})}
+                                />
+                               <span className="text-sm font-bold text-white flex items-center gap-2"><Utensils size={14}/> Reservar Mesa no Restaurante?</span>
+                           </label>
+                           
+                           {editForm.hasTableReservation && (
+                               <div className="grid grid-cols-2 gap-3 mt-2 pl-6 animate-fade-in">
+                                   <div>
+                                       <label className="text-xs text-slate-500">Qtd. Lugares</label>
+                                       <input 
+                                            type="number" 
+                                            className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" 
+                                            value={editForm.tableSeatCount} 
+                                            onChange={e => setEditForm({...editForm, tableSeatCount: parseInt(e.target.value)})} 
+                                        />
+                                   </div>
+                                   <div>
+                                       <label className="text-xs text-slate-500">Aniversariante (Opcional)</label>
+                                       <input 
+                                            type="text" 
+                                            className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" 
+                                            value={editForm.birthdayName || ''} 
+                                            onChange={e => setEditForm({...editForm, birthdayName: e.target.value})} 
+                                        />
+                                   </div>
+                               </div>
+                           )}
+                       </div>
+                       
+                       {/* Observations */}
+                       <div className="col-span-2">
+                           <label className="text-xs text-slate-400">Observações</label>
+                           <textarea 
+                                className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white h-20 text-sm" 
+                                value={editForm.observations} 
+                                onChange={e => setEditForm({...editForm, observations: e.target.value})} 
+                            />
+                       </div>
+
                     </div>
-                    <div className="flex gap-3 pt-2"><button type="button" onClick={() => setIsEditMode(false)} className="flex-1 py-3 bg-slate-700 text-white rounded-lg">Cancelar</button><button type="submit" disabled={loading || selectedEditTimes.length === 0} className="flex-1 py-3 bg-neon-blue hover:bg-blue-500 text-white rounded-lg font-bold">{loading ? <Loader2 className="animate-spin" /> : 'Salvar'}</button></div>
+                    <div className="flex gap-3 pt-2"><button type="button" onClick={() => setIsEditMode(false)} className="flex-1 py-3 bg-slate-700 text-white rounded-lg">Cancelar</button><button type="submit" disabled={loading || selectedEditTimes.length === 0} className="flex-1 py-3 bg-neon-blue hover:bg-blue-500 text-white rounded-lg font-bold">{loading ? <Loader2 className="animate-spin" /> : 'Salvar Detalhes'}</button></div>
                 </form>
             )}
           </div>
