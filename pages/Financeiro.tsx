@@ -137,50 +137,66 @@ const Financeiro: React.FC = () => {
       setAuditFilters(prev => ({ ...prev, startDate: s, endDate: e }));
   };
 
-  // --- CÁLCULOS DE MÉTRICAS ---
-  const totalRevenue = reservations
-    .filter(r => r.status !== ReservationStatus.PENDENTE)
-    .reduce((acc, curr) => acc + curr.totalValue, 0);
+  // --- CÁLCULOS DE MÉTRICAS (CORRIGIDO PARA RESERVAS POR HORA) ---
   
-  const pendingRevenue = reservations
-    .filter(r => r.status === ReservationStatus.PENDENTE)
-    .reduce((acc, curr) => acc + curr.totalValue, 0);
+  // Helper para calcular slots de uma reserva (Pistas * Horas)
+  const calculateSlots = (r: Reservation) => (r.laneCount || 1) * (r.duration || 1);
 
-  const confirmedCount = reservations.filter(r => r.status !== ReservationStatus.PENDENTE && r.status !== ReservationStatus.NO_SHOW).length;
+  // 1. Definição do que é "Realizado": CONFIRMADA ou CHECK-IN.
+  const realizedReservations = reservations.filter(r => 
+      r.status === ReservationStatus.CONFIRMADA || 
+      r.status === ReservationStatus.CHECK_IN
+  );
+
+  const pendingReservations = reservations.filter(r => 
+      r.status === ReservationStatus.PENDENTE
+  );
+
+  // Faturamento Realizado
+  const totalRevenue = realizedReservations.reduce((acc, curr) => acc + curr.totalValue, 0);
   
-  const avgTicket = confirmedCount > 0 ? totalRevenue / confirmedCount : 0;
+  // Faturamento Pendente
+  const pendingRevenue = pendingReservations.reduce((acc, curr) => acc + curr.totalValue, 0);
+
+  // Quantidade Realizada (EM SLOTS: Pistas * Horas)
+  const confirmedSlotsCount = realizedReservations.reduce((acc, r) => acc + calculateSlots(r), 0);
   
+  // Ticket Médio (Agora divide pela quantidade de horas vendidas)
+  const avgTicket = confirmedSlotsCount > 0 ? totalRevenue / confirmedSlotsCount : 0;
+  
+  // Média Diária
   const startD = new Date(dateRange.start);
   const endD = new Date(dateRange.end);
   const diffTime = Math.abs(endD.getTime() - startD.getTime());
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; 
-  
-  const dailyAverage = diffDays > 0 ? (confirmedCount / diffDays) : 0;
+  const dailyAverage = diffDays > 0 ? (confirmedSlotsCount / diffDays) : 0;
 
-  const totalBookingsIncludingCancelled = rawReservations.length;
-  const cancelledCount = rawReservations.filter(r => r.status === ReservationStatus.CANCELADA).length;
-  const cancellationRate = totalBookingsIncludingCancelled > 0 
-      ? (cancelledCount / totalBookingsIncludingCancelled) * 100 
+  // Taxa de Cancelamento (Baseada em Slots Totais vs Slots Cancelados)
+  const cancelledReservations = rawReservations.filter(r => r.status === ReservationStatus.CANCELADA);
+  
+  const totalSlotsIncludingCancelled = rawReservations.reduce((acc, r) => acc + calculateSlots(r), 0);
+  const cancelledSlotsCount = cancelledReservations.reduce((acc, r) => acc + calculateSlots(r), 0);
+
+  const cancellationRate = totalSlotsIncludingCancelled > 0 
+      ? (cancelledSlotsCount / totalSlotsIncludingCancelled) * 100 
       : 0;
 
+  // Gráfico (Usando apenas Realizado)
   const revenueByDayMap = new Map<string, number>();
-  reservations
-    .filter(r => r.status !== ReservationStatus.PENDENTE)
-    .forEach(r => {
-        const val = revenueByDayMap.get(r.date) || 0;
-        revenueByDayMap.set(r.date, val + r.totalValue);
+  realizedReservations.forEach(r => {
+      const val = revenueByDayMap.get(r.date) || 0;
+      revenueByDayMap.set(r.date, val + r.totalValue);
   });
   const revenueChartData = Array.from(revenueByDayMap.entries())
     .map(([date, value]) => ({ date: date.split('-').slice(1).reverse().join('/'), value }))
     .sort((a,b) => a.date.localeCompare(b.date));
 
+  // Top Clientes (Usando Slots Realizados)
   const clientSpendMap = new Map<string, {name: string, total: number, slots: number}>();
-  reservations.forEach(r => {
+  realizedReservations.forEach(r => {
       const current = clientSpendMap.get(r.clientId) || { name: r.clientName, total: 0, slots: 0 };
-      if (r.status !== ReservationStatus.PENDENTE) {
-        current.total += r.totalValue;
-      }
-      current.slots += 1;
+      current.total += r.totalValue;
+      current.slots += calculateSlots(r); // Soma slots (horas*pistas)
       clientSpendMap.set(r.clientId, current);
   });
   
@@ -299,6 +315,7 @@ const Financeiro: React.FC = () => {
                              <div>
                                  <p className="text-xs text-green-500 font-bold uppercase tracking-wide mb-1">Faturamento Realizado</p>
                                  <h3 className="text-2xl font-bold text-white">{totalRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3>
+                                 <p className="text-[10px] text-slate-500 mt-1">Confirmados & Check-ins</p>
                              </div>
                              <div className="p-2 bg-green-500/10 rounded-lg text-green-500"><DollarSign size={24}/></div>
                          </div>
@@ -319,19 +336,20 @@ const Financeiro: React.FC = () => {
                      <div className="bg-slate-800 p-4 rounded-xl border border-neon-blue/30 shadow-lg hover:border-neon-blue transition xl:col-span-2">
                          <div className="flex justify-between items-start">
                              <div>
-                                 <p className="text-xs text-neon-blue font-bold uppercase tracking-wide mb-1">Ticket Médio</p>
+                                 <p className="text-xs text-neon-blue font-bold uppercase tracking-wide mb-1">Ticket Médio (p/ Reserva)</p>
                                  <h3 className="text-2xl font-bold text-white">{avgTicket.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3>
                              </div>
                              <div className="p-2 bg-neon-blue/10 rounded-lg text-neon-blue"><TrendingUp size={24}/></div>
                          </div>
                     </div>
 
-                    {/* Reservas Totais */}
+                    {/* Reservas Totais (Slots) */}
                     <div className="bg-slate-800 p-4 rounded-xl border border-slate-600 shadow-lg xl:col-span-2">
                          <div className="flex justify-between items-start">
                              <div>
-                                 <p className="text-xs text-slate-400 font-bold uppercase tracking-wide mb-1">Reservas Confirmadas</p>
-                                 <h3 className="text-2xl font-bold text-white">{confirmedCount}</h3>
+                                 <p className="text-xs text-slate-400 font-bold uppercase tracking-wide mb-1">Reservas (Horas Vendidas)</p>
+                                 <h3 className="text-2xl font-bold text-white">{confirmedSlotsCount}</h3>
+                                 <p className="text-[10px] text-slate-500 mt-1">Soma de Pistas x Horas</p>
                              </div>
                              <div className="p-2 bg-slate-700 rounded-lg text-slate-300"><ListChecks size={24}/></div>
                          </div>
@@ -341,8 +359,8 @@ const Financeiro: React.FC = () => {
                     <div className="bg-slate-800 p-4 rounded-xl border border-purple-500/30 shadow-lg hover:border-purple-500 transition xl:col-span-2">
                          <div className="flex justify-between items-start">
                              <div>
-                                 <p className="text-xs text-purple-400 font-bold uppercase tracking-wide mb-1">Média Diária de Reservas</p>
-                                 <h3 className="text-2xl font-bold text-white">{dailyAverage.toFixed(1)} <span className="text-sm font-normal text-slate-400">/ dia</span></h3>
+                                 <p className="text-xs text-purple-400 font-bold uppercase tracking-wide mb-1">Média Diária de Vendas</p>
+                                 <h3 className="text-2xl font-bold text-white">{dailyAverage.toFixed(1)} <span className="text-sm font-normal text-slate-400">reservas/dia</span></h3>
                              </div>
                              <div className="p-2 bg-purple-500/10 rounded-lg text-purple-500"><Calculator size={24}/></div>
                          </div>
@@ -354,6 +372,7 @@ const Financeiro: React.FC = () => {
                              <div>
                                  <p className="text-xs text-red-400 font-bold uppercase tracking-wide mb-1">Taxa de Cancelamento</p>
                                  <h3 className="text-2xl font-bold text-white">{cancellationRate.toFixed(1)}%</h3>
+                                 <p className="text-[10px] text-slate-500 mt-1">Baseado em reservas perdidas</p>
                              </div>
                              <div className="p-2 bg-red-500/10 rounded-lg text-red-500"><Percent size={24}/></div>
                          </div>
@@ -379,7 +398,7 @@ const Financeiro: React.FC = () => {
                         <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Users size={20} className="text-neon-blue"/> Top 5 Clientes</h3>
                         <div className="flex-1 overflow-auto">
                             <table className="w-full text-left text-sm">
-                                <thead className="text-slate-400 border-b border-slate-700"><tr><th className="pb-2">Cliente</th><th className="pb-2 text-right">Qtd</th><th className="pb-2 text-right">Total</th></tr></thead>
+                                <thead className="text-slate-400 border-b border-slate-700"><tr><th className="pb-2">Cliente</th><th className="pb-2 text-right">Qtd Reservas</th><th className="pb-2 text-right">Total</th></tr></thead>
                                 <tbody className="divide-y divide-slate-700">
                                     {topClients.map((c, i) => (<tr key={i} className="group hover:bg-slate-700/50"><td className="py-3 font-medium text-white">{c.name}</td><td className="py-3 text-right text-slate-400">{c.slots}</td><td className="py-3 text-right text-neon-green font-bold">{c.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td></tr>))}
                                     {topClients.length === 0 && (<tr><td colSpan={3} className="py-8 text-center text-slate-500">Sem dados no período</td></tr>)}
