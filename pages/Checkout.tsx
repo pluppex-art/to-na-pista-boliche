@@ -25,7 +25,10 @@ const Checkout: React.FC = () => {
 
   const [imgError, setImgError] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  
+  // Settings Loading State
   const [settings, setSettings] = useState<any>(null);
+  const [isLoadingSettings, setIsLoadingSettings] = useState(true);
   
   // Armazena os IDs das reservas criadas para monitoramento
   const [trackedReservationIds, setTrackedReservationIds] = useState<string[]>([]);
@@ -42,7 +45,19 @@ const Checkout: React.FC = () => {
         try { setCurrentUser(JSON.parse(storedUser)); } catch(e) {}
     }
     
-    db.settings.get().then(s => setSettings(s));
+    // Fetch Settings and handle loading state
+    const loadSettings = async () => {
+        setIsLoadingSettings(true);
+        try {
+            const s = await db.settings.get();
+            setSettings(s);
+        } catch (e) {
+            console.error("Erro ao carregar settings", e);
+        } finally {
+            setIsLoadingSettings(false);
+        }
+    };
+    loadSettings();
     
     // Se já vier com IDs (fluxo de pagamento posterior), monitora eles
     if (reservationData.reservationIds && reservationData.reservationIds.length > 0) {
@@ -103,6 +118,18 @@ const Checkout: React.FC = () => {
   };
 
   if (!reservationData) return null;
+  
+  // Show Loader while settings are being fetched to prevent "Simulation Mode" flash
+  if (isLoadingSettings) {
+      return (
+          <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+              <div className="text-center">
+                  <Loader2 className="animate-spin text-neon-blue mx-auto mb-4" size={48} />
+                  <p className="text-slate-400">Preparando checkout...</p>
+              </div>
+          </div>
+      );
+  }
 
   // --- PROCESSAMENTO ---
   const processPayment = async (mode: 'CLIENT_ONLINE' | 'STAFF_CONFIRM' | 'STAFF_LATER') => {

@@ -318,6 +318,24 @@ const ClientDashboard: React.FC = () => {
                             const isPaid = res.paymentStatus === PaymentStatus.PAGO;
                             const uniqueCheckedInId = res.checkedInIds && res.checkedInIds.length > 0;
                             
+                            // Determine Status Badge & Color
+                            let statusText = res.status;
+                            let statusClass = 'bg-slate-800 text-slate-400';
+                            
+                            if (uniqueCheckedInId) {
+                                statusText = 'Check-in';
+                                statusClass = 'bg-green-500/20 text-green-400 border border-green-500/30';
+                            } else if (isConfirmed) {
+                                statusText = 'Reserva Confirmada';
+                                statusClass = 'bg-neon-green/20 text-neon-green border border-neon-green/30 shadow-[0_0_10px_rgba(34,197,94,0.1)]';
+                            } else if (isPending && isPayOnSite) {
+                                statusText = 'Confirmado (Local)';
+                                statusClass = 'bg-blue-900/30 text-blue-400 border border-blue-500/20';
+                            } else if (isPending) {
+                                statusText = 'Pendente';
+                                statusClass = 'bg-yellow-900/30 text-yellow-500';
+                            }
+
                             return (
                                 <div key={res.id} className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-sm">
                                     {/* Header Date/Status */}
@@ -326,13 +344,9 @@ const ClientDashboard: React.FC = () => {
                                             <p className="text-white font-bold text-lg">{new Date(res.date).toLocaleDateString('pt-BR')}</p>
                                             <p className="text-sm text-slate-400 flex items-center gap-1"><Clock size={14}/> {res.time} ({res.duration}h)</p>
                                         </div>
-                                        <div className={`text-[10px] font-bold px-2 py-1 rounded uppercase flex items-center gap-1 ${
-                                            uniqueCheckedInId ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
-                                            isConfirmed ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 
-                                            (isPending && isPayOnSite) ? 'bg-blue-900/30 text-blue-400 border border-blue-500/20' :
-                                            isPending ? 'bg-yellow-900/30 text-yellow-500' : 'bg-slate-800 text-slate-400'
-                                        }`}>
-                                            {uniqueCheckedInId ? <><CheckCircle2 size={12}/> Check-in</> : isPending && isPayOnSite ? 'Confirmado (Local)' : res.status}
+                                        <div className={`text-[10px] font-bold px-2 py-1 rounded uppercase flex items-center gap-1 ${statusClass}`}>
+                                            {uniqueCheckedInId ? <CheckCircle2 size={12}/> : null}
+                                            {statusText}
                                         </div>
                                     </div>
                                     
@@ -384,8 +398,8 @@ const ClientDashboard: React.FC = () => {
                                                 </div>
                                             </div>
                                             
-                                            {/* Observations (if any) */}
-                                            {res.observations && res.observations.length > 5 && (
+                                            {/* Observations (Filtered) */}
+                                            {res.observations && res.observations.length > 5 && !res.observations.includes("confirmado via MP") && (
                                                 <div>
                                                     <p className="text-xs text-slate-500 uppercase font-bold mb-1">Obs</p>
                                                     <div className="flex items-start gap-2 bg-slate-800/50 p-2 rounded border border-slate-800">
@@ -413,27 +427,32 @@ const ClientDashboard: React.FC = () => {
                                         )}
                                     </div>
 
-                                    {/* Footer Actions */}
+                                    {/* Footer Actions - DISCREET BUTTONS */}
                                     {res.status !== ReservationStatus.CANCELADA && (
-                                        <div className="bg-slate-800/50 p-3 flex gap-2 border-t border-slate-800">
-                                            {isPending && !isPaid && !isPayOnSite && (
-                                                <button 
-                                                    onClick={() => handlePayNow(res)}
-                                                    className="flex-1 bg-green-600 hover:bg-green-500 text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center justify-center gap-2 shadow-lg transition"
-                                                >
-                                                    <CreditCard size={14}/> Pagar Agora
+                                        <div className="bg-slate-800/50 px-4 py-3 border-t border-slate-800 flex items-center justify-between">
+                                            {/* Left side: Discreet actions */}
+                                            <div className="flex gap-4">
+                                                <button onClick={() => handleEditRequest(res)} className="text-xs text-slate-500 hover:text-white transition flex items-center gap-1">
+                                                    <Edit size={12}/> Alterar
                                                 </button>
-                                            )}
+                                                {allowCancel && (
+                                                    <button onClick={() => handleCancelRedirect(res)} className="text-xs text-red-900 hover:text-red-500 transition flex items-center gap-1">
+                                                        <Trash2 size={12}/> Cancelar
+                                                    </button>
+                                                )}
+                                            </div>
 
-                                            <button onClick={() => handleEditRequest(res)} className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold px-3 py-2 rounded-lg border border-slate-700 transition flex items-center justify-center gap-2">
-                                                <Edit size={14}/> Alterar
-                                            </button>
-                                            
-                                            {allowCancel && (
-                                                <button onClick={() => handleCancelRedirect(res)} className="flex-1 bg-red-900/20 hover:bg-red-900/40 text-red-400 text-xs font-bold px-3 py-2 rounded-lg border border-red-500/20 transition flex items-center justify-center gap-2">
-                                                    <Trash2 size={14}/> Cancelar
-                                                </button>
-                                            )}
+                                            {/* Right side: Prominent Actions */}
+                                            <div>
+                                                {isPending && !isPaid && !isPayOnSite && (
+                                                    <button 
+                                                        onClick={() => handlePayNow(res)}
+                                                        className="bg-green-600 hover:bg-green-500 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center justify-center gap-2 shadow-lg transition"
+                                                    >
+                                                        <CreditCard size={14}/> Pagar Agora
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
                                     )}
                                     

@@ -1,3 +1,4 @@
+
 // Declare Deno to avoid TypeScript errors in non-Deno environments
 declare const Deno: any;
 
@@ -104,8 +105,9 @@ Deno.serve(async (req: Request) => {
             .from('reservas')
             .update({
                 status: 'Confirmada',
-                payment_status: 'Pago',
-                observations: `Pagamento PIX/Cartão confirmado via MP (ID: ${resourceId})`
+                payment_status: 'Pago'
+                // REMOVIDO: observations: `Pagamento PIX/Cartão confirmado via MP (ID: ${resourceId})`
+                // Mantém a UI limpa sem dados técnicos. O status "Confirmada" já é suficiente.
             })
             .eq('id', externalReference);
 
@@ -115,8 +117,6 @@ Deno.serve(async (req: Request) => {
         }
         
         console.log(`[Webhook] Reserva ${externalReference} confirmada com sucesso!`);
-        
-        // (Opcional) Trigger para pontos de fidelidade poderia ser adicionado aqui
     }
 
     return new Response(JSON.stringify({ message: "Success" }), {
@@ -127,7 +127,6 @@ Deno.serve(async (req: Request) => {
   } catch (error: any) {
     console.error("[Webhook] Exception:", error.message);
     // Retorna 500 se for erro de servidor, ou 400 se for erro de lógica
-    // Para o Mercado Pago, erros 5xx fazem ele tentar de novo. Erros 4xx (exceto 429) geralmente param.
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
