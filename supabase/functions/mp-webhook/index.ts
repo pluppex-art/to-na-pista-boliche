@@ -1,104 +1,136 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+// Declare Deno to avoid TypeScript errors in non-Deno environments
+declare const Deno: any;
+
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-// Declare Deno global to fix TypeScript errors in environments where Deno types are not automatically loaded
-declare const Deno: {
-  env: {
-    get(key: string): string | undefined;
-  };
-};
+// Definição de tipos básicos para evitar erros de TS no Deno
+interface WebhookBody {
+  action?: string;
+  type?: string;
+  data?: { id: string };
+  id?: number | string;
+}
 
-// Configuração do CORS para aceitar requisições do Mercado Pago
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-serve(async (req) => {
+Deno.serve(async (req: Request) => {
+  // 1. Tratamento de CORS
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    // 1. Recebe a notificação do Mercado Pago
     const url = new URL(req.url)
-    const body = await req.json()
-    const { action, data } = body
-
-    // Log para debug no painel do Supabase
-    console.log("Webhook recebido:", action, data?.id)
-
-    // Só nos interessa quando um pagamento é criado ou atualizado
-    if (action !== 'payment.created' && action !== 'payment.updated') {
-      return new Response(JSON.stringify({ message: "Ignored event" }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200,
-      })
+    
+    // 2. Parse do Body com segurança
+    let body: WebhookBody;
+    try {
+        body = await req.json();
+    } catch (e) {
+        console.error("Erro ao fazer parse do JSON:", e);
+        return new Response(JSON.stringify({ error: "Invalid JSON" }), { status: 400, headers: corsHeaders });
     }
 
-    // 2. Cria conexão com o banco (Supabase Admin)
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    )
+    const { action, type, data } = body;
+    const resourceId = data?.id || body.id; // Fallback para ID na raiz se necessário
 
-    // 3. Busca configurações para pegar o Access Token do MP do banco de dados
-    const { data: settings } = await supabaseClient
+    console.log(`[Webhook] Evento recebido: ${action || type} | ID: ${resourceId}`);
+
+    // 3. Filtro de Eventos: Apenas pagamentos criados ou atualizados
+    // O Mercado Pago envia 'payment.created' ou 'payment.updated' no campo action
+    // Ou type='payment'
+    if (action !== 'payment.created' && action !== 'payment.updated') {
+       if (type !== 'payment') {
+           console.log("[Webhook] Evento ignorado (não é pagamento).");
+           return new Response(JSON.stringify({ message: "Ignored event" }), { status: 200, headers: corsHeaders });
+       }
+    }
+
+    if (!resourceId) {
+        console.error("[Webhook] ID do pagamento não encontrado no corpo.");
+        return new Response(JSON.stringify({ error: "Payment ID missing" }), { status: 200, headers: corsHeaders }); // Retorna 200 para parar retentativas de bad request
+    }
+
+    // 4. Inicializa Supabase Client
+    // IMPORTANTE: As variáveis de ambiente devem estar configuradas no Painel do Supabase > Edge Functions > Secrets
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+
+    if (!supabaseUrl || !supabaseKey) {
+        console.error("[Webhook] Erro Crítico: Variáveis de ambiente SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não definidas.");
+        throw new Error("Server Configuration Error");
+    }
+
+    const supabaseClient = createClient(supabaseUrl, supabaseKey);
+
+    // 5. Busca Token do Mercado Pago no Banco
+    const { data: settings, error: settingsError } = await supabaseClient
       .from('configuracoes')
       .select('mercadopago_access_token')
-      .single()
+      .limit(1)
+      .single();
 
-    if (!settings?.mercadopago_access_token) {
-      throw new Error("Token do Mercado Pago não configurado no banco.")
+    if (settingsError || !settings?.mercadopago_access_token) {
+      console.error("[Webhook] Token MP não encontrado no banco:", settingsError);
+      throw new Error("Token do Mercado Pago não configurado.");
     }
 
-    // 4. Valida o pagamento diretamente na API do Mercado Pago (Segurança)
-    // Não confiamos apenas no body do webhook, perguntamos ao MP o status real
-    const mpResponse = await fetch(`https://api.mercadopago.com/v1/payments/${data.id}`, {
+    // 6. Consulta API do Mercado Pago para confirmar status real
+    console.log(`[Webhook] Consultando Mercado Pago para ID: ${resourceId}`);
+    const mpResponse = await fetch(`https://api.mercadopago.com/v1/payments/${resourceId}`, {
       headers: {
         'Authorization': `Bearer ${settings.mercadopago_access_token}`
       }
-    })
+    });
 
     if (!mpResponse.ok) {
-      throw new Error("Falha ao consultar pagamento no Mercado Pago")
+      const errorText = await mpResponse.text();
+      console.error(`[Webhook] Erro MP API (${mpResponse.status}):`, errorText);
+      throw new Error("Falha ao consultar API do Mercado Pago");
     }
 
-    const paymentData = await mpResponse.json()
-    const paymentStatus = paymentData.status // approved, pending, rejected
-    const externalReference = paymentData.external_reference // ID da Reserva
+    const paymentData = await mpResponse.json();
+    const status = paymentData.status; // approved, pending, rejected, etc.
+    const externalReference = paymentData.external_reference; // ID da Reserva
 
-    console.log(`Pagamento ${data.id} para Reserva ${externalReference}: Status ${paymentStatus}`)
+    console.log(`[Webhook] Status Real MP: ${status} | Referência: ${externalReference}`);
 
-    // 5. Atualiza a Reserva no Banco de Dados
-    if (externalReference && paymentStatus === 'approved') {
-        // Atualiza status para CONFIRMADA e PAGO
+    // 7. Atualiza Reserva se Aprovado
+    if (externalReference && status === 'approved') {
         const { error: updateError } = await supabaseClient
             .from('reservas')
             .update({
                 status: 'Confirmada',
                 payment_status: 'Pago',
-                // Adicionamos observação automática
-                observations: `Pagamento PIX/Cartão confirmado via MP (ID: ${data.id})`
+                observations: `Pagamento PIX/Cartão confirmado via MP (ID: ${resourceId})`
             })
-            .eq('id', externalReference)
+            .eq('id', externalReference);
 
-        if (updateError) throw updateError
-
-        // (Opcional) Adicionar Pontos de Fidelidade
-        // Se desejar, você pode calcular pontos e inserir na tabela loyalty_transactions aqui
+        if (updateError) {
+            console.error("[Webhook] Erro ao atualizar reserva:", updateError);
+            throw updateError;
+        }
+        
+        console.log(`[Webhook] Reserva ${externalReference} confirmada com sucesso!`);
+        
+        // (Opcional) Trigger para pontos de fidelidade poderia ser adicionado aqui
     }
 
     return new Response(JSON.stringify({ message: "Success" }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
-    })
+    });
 
   } catch (error: any) {
-    console.error("Erro no Webhook:", error)
+    console.error("[Webhook] Exception:", error.message);
+    // Retorna 500 se for erro de servidor, ou 400 se for erro de lógica
+    // Para o Mercado Pago, erros 5xx fazem ele tentar de novo. Erros 4xx (exceto 429) geralmente param.
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 400, // Retorna erro para o MP tentar de novo se for falha nossa
-    })
+      status: 500,
+    });
   }
 })
