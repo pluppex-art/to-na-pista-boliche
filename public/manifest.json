@@ -1,16 +1,15 @@
-
 {
   "short_name": "Tô Na Pista",
   "name": "Tô Na Pista - Agenda & CRM",
   "icons": [
     {
-      "src": "/logo.png?v=3",
+      "src": "/logo.png",
       "type": "image/png",
       "sizes": "192x192",
       "purpose": "any maskable"
     },
     {
-      "src": "/logo.png?v=3",
+      "src": "/logo.png",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "any maskable"
