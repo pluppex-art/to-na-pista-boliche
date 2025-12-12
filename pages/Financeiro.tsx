@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
 import { Reservation, ReservationStatus, AuditLog, User } from '../types';
@@ -137,10 +136,11 @@ const Financeiro: React.FC = () => {
       setAuditFilters(prev => ({ ...prev, startDate: s, endDate: e }));
   };
 
-  // --- CÁLCULOS DE MÉTRICAS (CORRIGIDO PARA RESERVAS POR HORA) ---
+  // --- CÁLCULOS DE MÉTRICAS (CORRIGIDO PARA RESERVAS POR HORA ARREDONDADA) ---
   
-  // Helper para calcular slots de uma reserva (Pistas * Horas)
-  const calculateSlots = (r: Reservation) => (r.laneCount || 1) * (r.duration || 1);
+  // Helper para calcular slots de uma reserva (Pistas * Horas arredondadas para cima)
+  // Ex: 0.5h = 1 reserva, 1.5h = 2 reservas
+  const calculateSlots = (r: Reservation) => (r.laneCount || 1) * Math.ceil(r.duration || 1);
 
   // 1. Definição do que é "Realizado": CONFIRMADA ou CHECK-IN.
   const realizedReservations = reservations.filter(r => 
