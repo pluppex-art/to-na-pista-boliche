@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Client, Reservation, LoyaltyTransaction, ReservationStatus, PaymentStatus } from '../types';
 import { db } from '../services/mockBackend';
 import { useApp } from '../contexts/AppContext';
-import { LogOut, User, Gift, Clock, Calendar, Coins, Loader2, MessageCircle, Edit, Save, X, Camera, CreditCard, Trash2, CheckCircle2, DollarSign, Utensils, Hash, LayoutGrid, AlertCircle, FileText } from 'lucide-react';
+import { LogOut, User, Users, Gift, Clock, Calendar, Coins, Loader2, MessageCircle, Edit, Save, X, Camera, CreditCard, Trash2, CheckCircle2, DollarSign, Utensils, Hash, LayoutGrid, AlertCircle, FileText, Store, Tag } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
 const ClientDashboard: React.FC = () => {
@@ -191,6 +191,29 @@ const ClientDashboard: React.FC = () => {
       return `${mins} min`;
   };
 
+  // Lógica inteligente para extrair o motivo real do cancelamento
+  const getCleanCancellationReason = (obs: string | undefined) => {
+      if (!obs) return 'Cancelado pelo estabelecimento.';
+      
+      // 1. Prioridade: Motivo Automático de Tempo
+      if (obs.includes('Tempo de confirmação excedido')) return 'Tempo limite de pagamento excedido (30 min).';
+      
+      // 2. Prioridade: Motivo Manual Específico
+      if (obs.includes('Motivo:')) {
+          const parts = obs.split('Motivo:');
+          if (parts.length > 1 && parts[1].trim()) return parts[1].trim();
+      }
+
+      // 3. Filtragem: Ignorar mensagens de sucesso de pagamento antigo
+      // Se a observação contém dados de pagamento (MP ID) mas está cancelada, não mostra isso como "Motivo"
+      if (obs.includes('Pagamento PIX') || obs.includes('confirmado via MP')) {
+          return 'Cancelado pela equipe.';
+      }
+
+      // 4. Fallback: Retorna a observação se não for técnica demais, ou msg padrão
+      return obs.length < 50 ? obs : 'Cancelamento administrativo.';
+  };
+
   if (loading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="animate-spin text-neon-blue" size={48}/></div>;
   if (!client) return null;
 
@@ -311,155 +334,147 @@ const ClientDashboard: React.FC = () => {
                             const expiresIn = getExpiresIn(res);
                             const allowCancel = canCancel(res);
                             
-                            // Visual State Logic
-                            const isConfirmed = res.status === ReservationStatus.CONFIRMADA;
-                            const isPayOnSite = res.payOnSite;
-                            const isPending = res.status === ReservationStatus.PENDENTE;
-                            const isPaid = res.paymentStatus === PaymentStatus.PAGO;
-                            const uniqueCheckedInId = res.checkedInIds && res.checkedInIds.length > 0;
-                            
                             // Determine Status Badge & Color
-                            let statusText = res.status;
-                            let statusClass = 'bg-slate-800 text-slate-400';
-                            
-                            if (uniqueCheckedInId) {
-                                statusText = 'Check-in';
-                                statusClass = 'bg-green-500/20 text-green-400 border border-green-500/30';
-                            } else if (isConfirmed) {
-                                statusText = 'Reserva Confirmada';
-                                statusClass = 'bg-neon-green/20 text-neon-green border border-neon-green/30 shadow-[0_0_10px_rgba(34,197,94,0.1)]';
-                            } else if (isPending && isPayOnSite) {
-                                statusText = 'Confirmado (Local)';
-                                statusClass = 'bg-blue-900/30 text-blue-400 border border-blue-500/20';
-                            } else if (isPending) {
-                                statusText = 'Pendente';
-                                statusClass = 'bg-yellow-900/30 text-yellow-500';
+                            let statusColor = 'bg-slate-800 text-slate-400 border-slate-700';
+                            let statusLabel = res.status;
+
+                            if (res.status === ReservationStatus.CONFIRMADA) {
+                                statusColor = 'bg-green-500/20 text-green-400 border-green-500/30';
+                                statusLabel = 'CONFIRMADA';
+                            } else if (res.status === ReservationStatus.PENDENTE) {
+                                if (res.payOnSite) {
+                                    statusColor = 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+                                    statusLabel = 'PENDENTE';
+                                } else {
+                                    statusColor = 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
+                                    statusLabel = 'PENDENTE';
+                                }
+                            } else if (res.status === ReservationStatus.CANCELADA) {
+                                statusColor = 'bg-red-500/20 text-red-400 border-red-500/30';
+                                statusLabel = 'CANCELADA';
                             }
 
+                            // Extract Clean Reason
+                            const cancellationReason = res.status === ReservationStatus.CANCELADA 
+                                ? getCleanCancellationReason(res.observations) 
+                                : null;
+
                             return (
-                                <div key={res.id} className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-sm">
-                                    {/* Header Date/Status */}
-                                    <div className="p-4 border-b border-slate-800 flex justify-between items-start bg-slate-900/50">
+                                <div key={res.id} className={`relative p-4 rounded-xl border mb-4 shadow-sm ${statusColor.replace('bg-', 'bg-opacity-10 ')} border-opacity-50`}>
+                                    {/* Header: Date, Time (NO STATUS HERE, NO EVENT TYPE HERE) */}
+                                    <div className="flex justify-between items-start mb-3 border-b border-white/5 pb-2">
+                                        <div className="text-lg font-bold text-white flex items-center gap-2">
+                                            <Calendar size={18} className="text-slate-400"/>
+                                            {new Date(res.date).toLocaleDateString('pt-BR')}
+                                            <span className="text-slate-600">|</span>
+                                            <Clock size={18} className="text-slate-400"/>
+                                            {res.time} <span className="text-xs text-slate-500">({res.duration}h)</span>
+                                        </div>
+                                    </div>
+
+                                    {/* Body: Info Grid - EVENT TYPE MOVED HERE */}
+                                    <div className="grid grid-cols-2 gap-4 text-sm text-slate-300 mb-4 bg-slate-900/50 p-3 rounded-lg border border-slate-800">
+                                        
+                                        {/* EVENT TYPE */}
+                                        <div className="col-span-2 sm:col-span-1">
+                                            <span className="block text-xs text-slate-500 font-bold uppercase">Tipo</span>
+                                            <span className="font-bold text-white flex items-center gap-2">
+                                                <Tag size={14} className="text-neon-orange"/>
+                                                {res.eventType}
+                                            </span>
+                                        </div>
+
                                         <div>
-                                            <p className="text-white font-bold text-lg">{new Date(res.date).toLocaleDateString('pt-BR')}</p>
-                                            <p className="text-sm text-slate-400 flex items-center gap-1"><Clock size={14}/> {res.time} ({res.duration}h)</p>
+                                            <span className="block text-xs text-slate-500 font-bold uppercase">Pistas</span>
+                                            <span className="font-bold text-white flex items-center gap-2">
+                                                <LayoutGrid size={14} className="text-neon-blue"/>
+                                                {res.lanesAssigned && res.lanesAssigned.length > 0 
+                                                    ? res.lanesAssigned.join(', ')
+                                                    : "A definir"
+                                                }
+                                            </span>
                                         </div>
-                                        <div className={`text-[10px] font-bold px-2 py-1 rounded uppercase flex items-center gap-1 ${statusClass}`}>
-                                            {uniqueCheckedInId ? <CheckCircle2 size={12}/> : null}
-                                            {statusText}
+                                        <div>
+                                            <span className="block text-xs text-slate-500 font-bold uppercase">Pessoas</span>
+                                            <span className="font-bold text-white flex items-center gap-2">
+                                                <Users size={14} className="text-neon-blue"/>
+                                                {res.peopleCount}
+                                            </span>
                                         </div>
-                                    </div>
-                                    
-                                    {/* Detailed Body Grid */}
-                                    <div className="p-4 grid grid-cols-2 gap-4">
-                                        {/* Operational Details */}
-                                        <div className="col-span-2 sm:col-span-1 space-y-3">
+                                        <div>
+                                            <span className="block text-xs text-slate-500 font-bold uppercase">Valor</span>
+                                            <span className="font-bold text-white flex items-center gap-2">
+                                                <DollarSign size={14} className="text-green-400"/>
+                                                {res.totalValue.toLocaleString('pt-BR', {style:'currency', currency: 'BRL'})}
+                                            </span>
+                                        </div>
+                                        {res.hasTableReservation && (
                                             <div>
-                                                <p className="text-xs text-slate-500 uppercase font-bold mb-1">Pistas & Jogo</p>
-                                                <div className="flex items-center gap-2">
-                                                    <div className="bg-slate-800 p-2 rounded text-slate-300"><LayoutGrid size={16}/></div>
-                                                    <div>
-                                                        <p className="text-sm text-white font-bold">
-                                                            {res.lanesAssigned && res.lanesAssigned.length > 0 
-                                                                ? `Pista(s): ${res.lanesAssigned.join(', ')}`
-                                                                : `${res.laneCount} Pista(s)`}
-                                                        </p>
-                                                        <p className="text-xs text-slate-500">{res.peopleCount} Pessoas</p>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {res.hasTableReservation && (
-                                                <div>
-                                                    <p className="text-xs text-slate-500 uppercase font-bold mb-1">Reserva de Mesa</p>
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="bg-slate-800 p-2 rounded text-neon-orange"><Utensils size={16}/></div>
-                                                        <div>
-                                                            <p className="text-sm text-white font-bold">{res.tableSeatCount} Lugares</p>
-                                                            {res.birthdayName && <p className="text-xs text-slate-500 truncate max-w-[120px]">Aniv: {res.birthdayName}</p>}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Financial Details */}
-                                        <div className="col-span-2 sm:col-span-1 space-y-3">
-                                            <div>
-                                                <p className="text-xs text-slate-500 uppercase font-bold mb-1">Financeiro</p>
-                                                <div className="flex items-center gap-2">
-                                                    <div className="bg-slate-800 p-2 rounded text-green-400"><DollarSign size={16}/></div>
-                                                    <div>
-                                                        <p className="text-sm text-white font-bold">{res.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
-                                                        <p className={`text-xs font-bold ${isPaid ? 'text-green-500' : 'text-yellow-500'}`}>
-                                                            {isPaid ? 'Pago' : 'Pendente / Local'}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            
-                                            {/* Observations (Filtered) */}
-                                            {res.observations && res.observations.length > 5 && !res.observations.includes("confirmado via MP") && (
-                                                <div>
-                                                    <p className="text-xs text-slate-500 uppercase font-bold mb-1">Obs</p>
-                                                    <div className="flex items-start gap-2 bg-slate-800/50 p-2 rounded border border-slate-800">
-                                                        <FileText size={12} className="text-slate-400 mt-0.5 flex-shrink-0"/>
-                                                        <p className="text-xs text-slate-400 italic line-clamp-2">{res.observations}</p>
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    {/* Warnings & Alerts */}
-                                    <div className="px-4 pb-2">
-                                        {isPending && !isPaid && !isPayOnSite && expiresIn && (
-                                            <div className="bg-yellow-900/20 text-yellow-500 text-xs p-2 rounded border border-yellow-500/20 flex items-center gap-2 animate-pulse mb-2">
-                                                <Clock size={14}/> 
-                                                <span className="font-bold">Atenção:</span> Sua pré-reserva expira em {expiresIn}.
-                                            </div>
-                                        )}
-                                        {isPending && isPayOnSite && (
-                                            <div className="bg-blue-900/20 text-blue-400 text-xs p-2 rounded border border-blue-500/20 flex items-center gap-2 mb-2">
-                                                <CheckCircle2 size={14}/> 
-                                                <span className="font-bold">Confirmado:</span> Pagamento agendado para o local.
+                                                <span className="block text-xs text-slate-500 font-bold uppercase">Mesa</span>
+                                                <span className="font-bold text-white flex items-center gap-2">
+                                                    <Utensils size={14} className="text-neon-orange"/>
+                                                    {res.tableSeatCount} lug.
+                                                </span>
                                             </div>
                                         )}
                                     </div>
 
-                                    {/* Footer Actions - DISCREET BUTTONS */}
+                                    {/* Alerts Section (Countdown / PayOnSite) */}
+                                    {res.status === ReservationStatus.PENDENTE && !res.payOnSite && expiresIn && (
+                                        <div className="mb-4 bg-yellow-900/20 border border-yellow-500/30 p-2 rounded text-yellow-500 text-xs flex items-center gap-2 animate-pulse">
+                                            <Clock size={14} />
+                                            <span className="font-bold">Expira em: {expiresIn}</span>
+                                            <span className="ml-auto text-[10px] opacity-75">Pague para confirmar</span>
+                                        </div>
+                                    )}
+
+                                    {res.status === ReservationStatus.PENDENTE && res.payOnSite && (
+                                        <div className="mb-4 bg-blue-900/20 border border-blue-500/30 p-2 rounded text-blue-400 text-xs flex items-center gap-2">
+                                            <Store size={14} />
+                                            <span className="font-bold">Pagamento no Local</span>
+                                            <span className="ml-auto text-[10px] opacity-75">Reserva Garantida</span>
+                                        </div>
+                                    )}
+
+                                    {res.status === ReservationStatus.CANCELADA && (
+                                        <div className="mb-4 bg-red-900/20 border border-red-500/30 p-3 rounded text-red-400 text-xs">
+                                            <div className="font-bold flex items-center gap-2 mb-1"><AlertCircle size={14}/> Motivo do Cancelamento:</div>
+                                            <div className="opacity-90 italic">
+                                                {cancellationReason}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* STATUS BADGE - MOVED TO BOTTOM */}
+                                    <div className={`mb-3 py-2 px-3 rounded text-center text-xs font-bold uppercase border tracking-wider ${statusColor}`}>
+                                        {statusLabel}
+                                    </div>
+
+                                    {/* Footer Actions */}
                                     {res.status !== ReservationStatus.CANCELADA && (
-                                        <div className="bg-slate-800/50 px-4 py-3 border-t border-slate-800 flex items-center justify-between">
-                                            {/* Left side: Discreet actions */}
+                                        <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-800">
+                                            {/* Discreet Actions */}
                                             <div className="flex gap-4">
                                                 <button onClick={() => handleEditRequest(res)} className="text-xs text-slate-500 hover:text-white transition flex items-center gap-1">
                                                     <Edit size={12}/> Alterar
                                                 </button>
                                                 {allowCancel && (
-                                                    <button onClick={() => handleCancelRedirect(res)} className="text-xs text-red-900 hover:text-red-500 transition flex items-center gap-1">
+                                                    <button onClick={() => handleCancelRedirect(res)} className="text-xs text-slate-500 hover:text-red-400 transition flex items-center gap-1">
                                                         <Trash2 size={12}/> Cancelar
                                                     </button>
                                                 )}
                                             </div>
 
-                                            {/* Right side: Prominent Actions */}
-                                            <div>
-                                                {isPending && !isPaid && !isPayOnSite && (
-                                                    <button 
-                                                        onClick={() => handlePayNow(res)}
-                                                        className="bg-green-600 hover:bg-green-500 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center justify-center gap-2 shadow-lg transition"
-                                                    >
-                                                        <CreditCard size={14}/> Pagar Agora
-                                                    </button>
-                                                )}
-                                            </div>
+                                            {/* Prominent Pay Button */}
+                                            {res.status === ReservationStatus.PENDENTE && !res.payOnSite && res.paymentStatus !== PaymentStatus.PAGO && (
+                                                <button 
+                                                    onClick={() => handlePayNow(res)}
+                                                    className="bg-green-600 hover:bg-green-500 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 transition transform hover:scale-105"
+                                                >
+                                                    <CreditCard size={14}/> Pagar Agora
+                                                </button>
+                                            )}
                                         </div>
-                                    )}
-                                    
-                                    {!allowCancel && res.status !== ReservationStatus.CANCELADA && (
-                                         <div className="bg-slate-900 p-2 text-center text-[10px] text-slate-600 italic">
-                                             Alterações não permitidas menos de 2h antes.
-                                         </div>
                                     )}
                                 </div>
                             );
@@ -476,7 +491,8 @@ const ClientDashboard: React.FC = () => {
                 href={settings.whatsappLink || `https://wa.me/55${settings.phone?.replace(/\D/g, '')}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="fixed bottom-6 right-6 z-50 bg-[#25D366] hover:bg-[#128c7e] text-white p-3 md:p-4 rounded-full shadow-[0_4px_20px_rgba(37,211,102,0.4)] transition-all transform hover:scale-110 flex items-center justify-center border-2 border-white/10"
+                // Adjusted Position for Mobile: bottom-24 to avoid overlapping bottom buttons
+                className="fixed bottom-24 md:bottom-6 right-6 z-50 bg-[#25D366] hover:bg-[#128c7e] text-white p-3 md:p-4 rounded-full shadow-[0_4px_20px_rgba(37,211,102,0.4)] transition-all transform hover:scale-110 flex items-center justify-center border-2 border-white/10"
                 aria-label="Fale conosco no WhatsApp"
             >
                 <MessageCircle size={28} className="md:w-8 md:h-8" />
