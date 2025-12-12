@@ -1,3 +1,4 @@
+
 import React, { useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { AppProvider, useApp } from './contexts/AppContext'; 
@@ -53,7 +54,8 @@ const AppContent: React.FC = () => {
         const link = (document.querySelector("link[rel*='icon']") || document.createElement('link')) as HTMLLinkElement;
         link.type = 'image/x-icon';
         link.rel = 'shortcut icon';
-        link.href = settings.logoUrl || '/vite.svg'; // Fallback para vite.svg se sem logo
+        // Alterado: Fallback para /logo.png em vez de /vite.svg
+        link.href = settings.logoUrl || '/logo.png'; 
         document.getElementsByTagName('head')[0].appendChild(link);
     }, [settings.logoUrl]);
 
