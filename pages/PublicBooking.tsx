@@ -15,13 +15,11 @@ const steps = ['Data', 'Configuração & Horário', 'Seus Dados', 'Resumo', 'Pag
 
 const PublicBooking: React.FC = () => {
   const navigate = useNavigate();
-  const location = useLocation(); // Hook para acessar state da navegação
+  const location = useLocation(); 
   const { settings, user: staffUser, loading: appLoading } = useApp();
   
-  // Client Authentication State
   const [clientUser, setClientUser] = useState<any>(null);
   
-  // Inline Auth State (Login inside Booking)
   const [authMode, setAuthMode] = useState<'REGISTER' | 'LOGIN'>('REGISTER');
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPass, setLoginPass] = useState('');
@@ -31,7 +29,7 @@ const PublicBooking: React.FC = () => {
   const [imgError, setImgError] = useState(false);
   
   const [existingReservations, setExistingReservations] = useState<any[]>([]);
-  const [isDataLoading, setIsDataLoading] = useState(true);
+  const [isDataLoading, setIsDataLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
   const [errors, setErrors] = useState<Record<string, boolean>>({});
@@ -41,13 +39,11 @@ const PublicBooking: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedTimes, setSelectedTimes] = useState<string[]>([]);
   
-  // Manual Mode State (Staff Only)
   const [isManualMode, setIsManualMode] = useState(false);
   const [manualStartTime, setManualStartTime] = useState('18:00');
   const [manualEndTime, setManualEndTime] = useState('19:00');
   const [manualPrice, setManualPrice] = useState<string>('');
 
-  // State for Inputs (Allow empty string for typing)
   const [peopleInput, setPeopleInput] = useState<string>('6');
   const [lanesInput, setLanesInput] = useState<string>('1');
   const [seatInput, setSeatInput] = useState<string>('');
@@ -64,7 +60,6 @@ const PublicBooking: React.FC = () => {
     whatsapp: '',
     email: '',
     password: '', 
-    // Option to create account or continue as guest (default true for loyalty unless staff)
     createAccount: true, 
     hasSecondResponsible: false,
     secondName: '',
@@ -74,7 +69,6 @@ const PublicBooking: React.FC = () => {
 
   const [viewDate, setViewDate] = useState(new Date());
 
-  // Check for logged in client on mount
   useEffect(() => {
       const storedClient = localStorage.getItem('tonapista_client_auth');
       if (storedClient) {
@@ -86,21 +80,19 @@ const PublicBooking: React.FC = () => {
                   name: parsedClient.name,
                   email: parsedClient.email,
                   whatsapp: parsedClient.phone,
-                  createAccount: false // Already has account
+                  createAccount: false 
               }));
               setClientId(parsedClient.id);
           } catch (e) {
               console.error("Error parsing client auth", e);
           }
       } else {
-          // If staff is booking for someone else, default createAccount to false (guest mode default)
           if (staffUser) {
               setFormData(prev => ({ ...prev, createAccount: false }));
           }
       }
   }, [staffUser]);
 
-  // Check for prefilled client data from CRM
   useEffect(() => {
       if (location.state?.prefilledClient) {
           const c = location.state.prefilledClient;
@@ -109,17 +101,15 @@ const PublicBooking: React.FC = () => {
               name: c.name,
               email: c.email || '',
               whatsapp: c.phone,
-              createAccount: false // Client already exists
+              createAccount: false 
           }));
           setClientId(c.id);
       }
   }, [location.state]);
 
-  // Sync seatInput with formData.tableSeatCount (for when it's updated automatically)
   useEffect(() => {
       const currentVal = parseInt(seatInput) || 0;
       if (currentVal !== formData.tableSeatCount) {
-          // Only update if different to avoid cursor jumping, or if empty and data is 0
           setSeatInput(formData.tableSeatCount === 0 ? '' : formData.tableSeatCount.toString());
       }
   }, [formData.tableSeatCount]);
@@ -137,49 +127,52 @@ const PublicBooking: React.FC = () => {
 
   const currentPrice = getPricePerHour();
   const totalDuration = selectedTimes.length;
-  // Use Manual Price if mode is active and price is set, otherwise calc standard
   const totalValue = isManualMode && manualPrice ? parseFloat(manualPrice) : (currentPrice * formData.lanes * (totalDuration || 0));
 
-  useEffect(() => {
-    let isMounted = true;
-    const fetchData = async () => {
+  // --- FETCHING OPTIMIZADO: BUSCAR APENAS RESERVAS DO MÊS/DIA ---
+  const fetchAvailability = async (targetDateStr: string) => {
         setIsDataLoading(true);
         try {
-            // Timeout de segurança para evitar loading infinito
-            const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error("Timeout")), 8000)
-            );
+            // Se tiver data selecionada, busca do dia. Se não, busca do mês atual da view.
+            let start, end;
+            
+            if (targetDateStr) {
+                // Busca apenas para o dia selecionado (para gerar slots rápidos)
+                start = targetDateStr;
+                end = targetDateStr;
+            } else {
+                // Busca para o mês visualizado no calendário (para indicadores de dia cheio, se houver)
+                const y = viewDate.getFullYear();
+                const m = viewDate.getMonth();
+                start = new Date(y, m, 1).toISOString().split('T')[0];
+                end = new Date(y, m + 1, 0).toISOString().split('T')[0];
+            }
 
-            const dataPromise = db.reservations.getAll();
-            
-            // Corrida entre dados e timeout
-            const all = await Promise.race([dataPromise, timeoutPromise]) as any[];
-            
-            if (isMounted) setExistingReservations(all);
-        } catch (e) { 
-            console.error("Erro ao carregar reservas:", e);
+            const data = await db.reservations.getByDateRange(start, end);
+            setExistingReservations(data);
+        } catch (e) {
+            console.error("Erro ao carregar disponibilidade:", e);
         } finally {
-            if (isMounted) setIsDataLoading(false);
+            setIsDataLoading(false);
         }
-    };
-    fetchData();
+  };
 
-    // --- REALTIME UPDATE FOR BOOKING ---
-    // Update availability in real-time to avoid conflicts
+  // Carrega ao montar (mês atual) e quando muda a data selecionada
+  useEffect(() => {
+      fetchAvailability(selectedDate);
+  }, [selectedDate, viewDate]);
+
+  // Realtime updates
+  useEffect(() => {
     const channel = supabase.channel('public_booking_updates')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, async () => {
-             // Re-fetch since local cache in mockBackend is cleared by global listener
-             console.log('Realtime update detected in Booking, refreshing data...');
-             const data = await db.reservations.getAll();
-             if (isMounted) setExistingReservations(data);
+             // Refresh current view
+             fetchAvailability(selectedDate);
         })
         .subscribe();
 
-    return () => { 
-        isMounted = false; 
-        supabase.removeChannel(channel);
-    };
-  }, []);
+    return () => { supabase.removeChannel(channel); };
+  }, [selectedDate, viewDate]);
 
   const formatPhone = (value: string) => {
     const numbers = value.replace(/\D/g, '');
@@ -195,17 +188,11 @@ const PublicBooking: React.FC = () => {
   };
 
   const handleInputChange = (field: string, value: any) => {
-      // Limite de cadeiras
       if (field === 'tableSeatCount' && typeof value === 'number') {
-          // Regra base: Limite total de 25 cadeiras por reserva
           let maxAllowed = 25;
-          
-          // Exceção: Se o nº pessoas for maior que 25, o limite é o nº de pessoas (até 36)
           if (formData.people > 25) {
              maxAllowed = formData.people;
           }
-          
-          // Teto absoluto do sistema
           if (maxAllowed > 36) maxAllowed = 36;
 
           if (value > maxAllowed) {
@@ -218,9 +205,8 @@ const PublicBooking: React.FC = () => {
       if (errors[field]) setErrors(prev => ({ ...prev, [field]: false }));
   };
 
-  // --- INPUT HANDLERS (PEOPLE & LANES & SEATS) ---
   const handlePeopleChange = (val: string) => {
-      setPeopleInput(val); // Atualiza o estado visual imediatamente
+      setPeopleInput(val); 
       if (val === '') return;
       
       const num = parseInt(val);
@@ -228,13 +214,10 @@ const PublicBooking: React.FC = () => {
           const suggestedLanes = Math.ceil(num / 6);
           setFormData(prev => {
               let newSeatCount = prev.tableSeatCount;
-              // Se numero de pessoas muda, verificar se as cadeiras excedem a nova regra
-              // Regra: Base 25, ou igual a Num Pessoas se > 25.
               let maxAllowed = 25;
               if (num > 25) maxAllowed = num;
               if (maxAllowed > 36) maxAllowed = 36;
 
-              // Ajusta cadeiras se exceder o novo maximo permitido
               if (prev.tableSeatCount > maxAllowed) {
                   newSeatCount = maxAllowed;
               }
@@ -253,7 +236,6 @@ const PublicBooking: React.FC = () => {
       let num = parseInt(peopleInput);
       if (isNaN(num) || num < 1) num = 1;
       
-      // Limite de 36 pessoas por reserva
       if (num > 36) {
           num = 36; 
           alert("Máximo de 36 pessoas por reserva.");
@@ -293,10 +275,6 @@ const PublicBooking: React.FC = () => {
   };
 
   const handleSeatBlur = () => {
-      // Opcional: Forçar valor mínimo se estiver vazio, ou deixar 0
-      if (seatInput === '') {
-          // setSeatInput('0');
-      }
   };
 
   const handleLanesChange = (val: string) => {
@@ -319,7 +297,6 @@ const PublicBooking: React.FC = () => {
       setFormData(prev => ({ ...prev, lanes: num }));
       setSelectedTimes([]);
   };
-  // ----------------------------------------
 
   const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   const isValidPhone = (phone: string) => {
@@ -327,7 +304,6 @@ const PublicBooking: React.FC = () => {
       return clean.length >= 10 && clean.length <= 11;
   };
 
-  // --- AUTH HANDLERS ---
   const handleInlineLogin = async (e: React.FormEvent) => {
       e.preventDefault();
       setIsLoggingIn(true);
@@ -336,7 +312,6 @@ const PublicBooking: React.FC = () => {
           if (error || !client) {
               alert(error || "Erro ao entrar.");
           } else {
-              // Sucesso
               localStorage.setItem('tonapista_client_auth', JSON.stringify(client));
               setClientUser(client);
               setFormData(prev => ({
@@ -347,7 +322,6 @@ const PublicBooking: React.FC = () => {
                   createAccount: false
               }));
               setClientId(client.id);
-              // Avança automaticamente para o resumo
               setCurrentStep(3);
           }
       } catch (err) {
@@ -358,7 +332,6 @@ const PublicBooking: React.FC = () => {
       }
   };
 
-  // CHECK PERMISSIONS FOR OPTIONAL CONTACT
   const isContactOptional = staffUser && (
       staffUser.role === UserRole.ADMIN || 
       staffUser.role === UserRole.GESTOR || 
@@ -395,18 +368,14 @@ const PublicBooking: React.FC = () => {
           if (authMode === 'REGISTER') {
             if (!formData.name.trim()) newErrors.name = true;
             
-            // EMAIL & PHONE VALIDATION LOGIC
-            // If contact is optional (Admin/Gestor/Permitted), only validate format IF they typed something
             if (isContactOptional) {
                 if (formData.email.trim() && !isValidEmail(formData.email)) newErrors.email = true;
                 if (formData.whatsapp.trim() && !isValidPhone(formData.whatsapp)) newErrors.whatsapp = true;
             } else {
-                // Mandatory for public and restricted staff
                 if (!formData.email.trim() || !isValidEmail(formData.email)) newErrors.email = true;
                 if (!formData.whatsapp.trim() || !isValidPhone(formData.whatsapp)) newErrors.whatsapp = true;
             }
             
-            // Validate password ONLY if creating account AND NOT Staff
             if (!clientUser && !staffUser && formData.createAccount && !formData.password.trim()) {
                 newErrors.password = true;
             }
@@ -436,10 +405,8 @@ const PublicBooking: React.FC = () => {
         }
 
         if (clientUser) {
-            // Logged in client -> Skip Data Step
             setCurrentStep(3); 
         } else {
-            // Not logged in (or Staff) -> Go to Data Step
             setCurrentStep(c => c + 1);
         }
     } else if (currentStep === 2) {
@@ -456,8 +423,6 @@ const PublicBooking: React.FC = () => {
                 funnelStage: FunnelStage.NOVO
             };
 
-            // Logic Split: Create Account vs Guest
-            // If clientId is already set (prefilled from CRM), skip creation
             if (clientId && staffUser) {
                  setCurrentStep(c => c + 1);
                  setIsSaving(false);
@@ -465,7 +430,6 @@ const PublicBooking: React.FC = () => {
             }
 
             if (formData.createAccount && !staffUser) {
-                // Register with password (Client Mode - Public)
                 const { client, error } = await db.clients.register(newClientData, formData.password);
                 if (error) {
                     const errorMsg = typeof error === 'string' ? error : 'Erro desconhecido ao criar conta.';
@@ -480,22 +444,14 @@ const PublicBooking: React.FC = () => {
                     setCurrentStep(c => c + 1);
                 }
             } else {
-                // Guest OR Staff Mode
-                // Verifica se tem contato preenchido (Telefone ou Email)
                 const phoneClean = formData.whatsapp.replace(/\D/g, '');
                 const hasContact = phoneClean.length > 0 || formData.email.trim().length > 0;
 
                 if (staffUser && !hasContact) {
-                    // CASO: Staff criando reserva sem nenhum contato (Cliente Balcão/Rápido)
-                    // NÃO cria registro na tabela de clientes para não sujar o banco
                     console.log("Criando reserva sem cadastro de cliente (Sem contato)");
-                    // IMPORTANTE: Define ID como VAZIO para que o backend envie NULL para o banco
                     setClientId(''); 
                     setCurrentStep(c => c + 1);
                 } else {
-                    // CASO NORMAL: Tem contato, cria ou atualiza cliente no banco
-                    // Staff mode ensures we create/update the client in DB based on phone/email
-                    // Logic in mockBackend.ts: create() updates existing client by phone if found.
                     const client = await db.clients.create(newClientData, staffUser?.id); 
                     setClientId(client.id);
                     setCurrentStep(c => c + 1);
@@ -529,7 +485,6 @@ const PublicBooking: React.FC = () => {
     today.setHours(0, 0, 0, 0);
     if (date < today) return false;
     
-    // Check specific blocked dates
     const dateStr = [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
     if (settings.blockedDates && settings.blockedDates.includes(dateStr)) return false;
 
@@ -599,7 +554,6 @@ const PublicBooking: React.FC = () => {
     );
   };
 
-  // PASS STAFF STATUS TO GENERATOR FOR 5-MIN TOLERANCE
   const timeSlots = generateDailySlots(selectedDate, settings, existingReservations, undefined, !!staffUser);
 
   const toggleTimeSelection = (time: string) => {
@@ -614,7 +568,6 @@ const PublicBooking: React.FC = () => {
 
   const getReservationBlocks = () => {
     if (isManualMode) {
-        // Approximate Duration Calculation for Manual Mode (Just for display/save, not for slots logic)
         const [h1, m1] = manualStartTime.split(':').map(Number);
         const [h2, m2] = manualEndTime.split(':').map(Number);
         const diffHours = (h2 + m2/60) - (h1 + m1/60);
@@ -650,12 +603,10 @@ const PublicBooking: React.FC = () => {
       setIsSaving(true);
       try {
           const blocks = getReservationBlocks();
-          // Force fresh fetch for validation just in case
-          const allRes = await db.reservations.getAll();
+          // Check capacity again just in case (using just day data)
+          const allRes = await db.reservations.getByDateRange(selectedDate, selectedDate);
           
           if (isManualMode) {
-              // --- MANUAL CONFLICT CHECK (SIMPLE) ---
-              // Convert manual time to minutes for comparison
               const [hStart, mStart] = manualStartTime.split(':').map(Number);
               const [hEnd, mEnd] = manualEndTime.split(':').map(Number);
               const newStartMins = hStart * 60 + mStart;
@@ -666,16 +617,13 @@ const PublicBooking: React.FC = () => {
                   setIsSaving(false); return;
               }
 
-              // Count conflicting lanes
               const conflictingLanes = allRes.filter(r => {
                   if (r.date !== selectedDate || r.status === ReservationStatus.CANCELADA) return false;
                   
-                  // Convert existing res to minutes
                   const [rH, rM] = r.time.split(':').map(Number);
                   const resStartMins = rH * 60 + rM;
                   const resEndMins = resStartMins + (r.duration * 60);
 
-                  // Check Overlap: (StartA < EndB) and (EndA > StartB)
                   return (newStartMins < resEndMins) && (newEndMins > resStartMins);
               }).reduce((acc, curr) => acc + curr.laneCount, 0);
 
@@ -686,18 +634,15 @@ const PublicBooking: React.FC = () => {
               }
 
           } else {
-              // --- STANDARD SLOT CHECK ---
               for (const block of blocks) {
                  const startH = parseInt(block.time.split(':')[0]);
                  
-                 // 1. Check Reservation Count Limit (Max 2 per slot)
                  const reservationsAtStart = allRes.filter(r => 
                      r.date === selectedDate && 
                      r.time === block.time && 
                      r.status !== ReservationStatus.CANCELADA
                  );
                  
-                 // 2. Check Total People Limit (Max 50 total per slot)
                  const totalPeopleAtStart = reservationsAtStart.reduce((sum, r) => sum + r.peopleCount, 0);
 
                  if (reservationsAtStart.length >= 2) {
@@ -724,20 +669,15 @@ const PublicBooking: React.FC = () => {
               }
           }
 
-          // Nota: clientId pode ser VAZIO se for reserva de balcão sem cadastro (Staff Mode)
-          // Isso é intencional. O banco aceita null agora.
-          // if (!clientId) throw new Error("ID do cliente não encontrado");
-
           const newIds: string[] = [];
           for (const block of blocks) {
-             // If manual, value is already set in totalValue variable
              const blockTotalValue = isManualMode 
                 ? parseFloat(manualPrice) 
                 : (totalValue / (blocks.reduce((acc, b) => acc + b.duration, 0))) * block.duration;
 
              const res: Reservation = {
                  id: uuidv4(),
-                 clientId: clientId || '', // Envia string vazia se null, o backend trata
+                 clientId: clientId || '', 
                  clientName: formData.name,
                  date: selectedDate,
                  time: block.time,
@@ -758,19 +698,17 @@ const PublicBooking: React.FC = () => {
                  birthdayName: formData.wantsTable ? formData.birthdayName : undefined,
                  tableSeatCount: formData.wantsTable ? formData.tableSeatCount : undefined
              };
-             // Pass staffUser.id if staff is creating the reservation
              await db.reservations.create(res, staffUser?.id);
              newIds.push(res.id);
           }
 
           setCreatedReservationIds(newIds);
-          // Update local state with fresh data including the new one
-          setExistingReservations(await db.reservations.getAll());
+          // Refresh availability for current date
+          fetchAvailability(selectedDate);
           setCurrentStep(4);
 
       } catch (e: any) {
           console.error(e);
-          // Melhoria na mensagem de erro para debug
           alert(`Erro ao criar agendamento: ${e.message || 'Erro de conexão ou dados inválidos.'}`);
       } finally {
           setIsSaving(false);
@@ -781,13 +719,9 @@ const PublicBooking: React.FC = () => {
       setIsSaving(true);
       try {
           if (type === 'CONFIRM_NOW') {
-              // Staff confirmou pagamento total agora
               navigate('/checkout', { state: { ...formData, date: selectedDate, time: isManualMode ? manualStartTime : selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
           } else if (type === 'PAY_ON_SITE') {
-              // Staff marcou para pagar no local (Mantém Pendente, adiciona obs, flag payOnSite)
-              
-              // 1. Atualizar as reservas criadas para ter a flag payOnSite = true
-              const allRes = await db.reservations.getAll();
+              const allRes = await db.reservations.getByDateRange(selectedDate, selectedDate);
               for (const id of createdReservationIds) {
                   const res = allRes.find(r => r.id === id);
                   if (res) {
@@ -799,12 +733,10 @@ const PublicBooking: React.FC = () => {
                       await db.reservations.update(updatedRes, staffUser?.id, 'Marcou para pagar no local');
                   }
               }
-              // Redireciona para Agenda com sucesso
               alert("Reserva marcada para pagamento no local. O horário não será cancelado automaticamente.");
               navigate('/agenda');
 
           } else {
-             // Fluxo Cliente (Online) -> Vai para checkout interno sempre, não redireciona MP direto
              navigate('/checkout', { state: { ...formData, date: selectedDate, time: isManualMode ? manualStartTime : selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
           }
       } catch (e) {
@@ -818,7 +750,7 @@ const PublicBooking: React.FC = () => {
   const formattedDateDisplay = selectedDate ? selectedDate.split('-').reverse().join('/') : '';
   const reservationBlocks = getReservationBlocks();
 
-  if (appLoading || isDataLoading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="animate-spin text-neon-orange" size={48} /></div>;
+  if (appLoading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="animate-spin text-neon-orange" size={48} /></div>;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 flex flex-col">
@@ -857,7 +789,6 @@ const PublicBooking: React.FC = () => {
             <div className="mb-8">
                 <div className="flex justify-between mb-2">
                 {steps.map((step, i) => {
-                    // Hide 'Seus Dados' step if skipped (client logged in)
                     if (clientUser && i === 2) return null;
                     return (
                         <div key={i} className={`text-[10px] md:text-sm font-medium ${i <= currentStep ? 'text-neon-blue' : 'text-slate-600'}`}>{step}</div>
@@ -891,7 +822,6 @@ const PublicBooking: React.FC = () => {
                 <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 mb-6">
                     <h3 className="text-sm font-bold text-slate-300 uppercase mb-3">Detalhes do Evento</h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {/* INPUTS CORRIGIDOS: AGORA USAM peopleInput E lanesInput COM ONBLUR */}
                         <div>
                             <label className="block text-xs font-medium text-slate-500 mb-1">Nº Pessoas</label>
                             <input 
@@ -946,7 +876,6 @@ const PublicBooking: React.FC = () => {
                     </div>
                 </div>
 
-                {/* STAFF: MANUAL MODE TOGGLE */}
                 {staffUser && (
                     <div className="mb-6 p-4 bg-slate-800 border border-neon-blue/30 rounded-lg animate-fade-in">
                         <label className="flex items-center gap-3 cursor-pointer mb-4">
@@ -956,7 +885,7 @@ const PublicBooking: React.FC = () => {
                                 checked={isManualMode} 
                                 onChange={(e) => {
                                     setIsManualMode(e.target.checked);
-                                    if (e.target.checked) setSelectedTimes([]); // Clear standard selection
+                                    if (e.target.checked) setSelectedTimes([]);
                                 }} 
                             />
                             <span className="text-neon-blue font-bold flex items-center gap-2"><PenTool size={18}/> Definir manualmente horário da reserva</span>
@@ -986,7 +915,7 @@ const PublicBooking: React.FC = () => {
 
                 {!isManualMode && (
                     <div className="mb-6">
-                        <h3 className="text-sm font-bold text-slate-300 uppercase mb-3">Horários Disponíveis</h3>
+                        <h3 className="text-sm font-bold text-slate-300 uppercase mb-3 flex items-center gap-2">Horários Disponíveis {isDataLoading && <Loader2 className="animate-spin" size={14}/>}</h3>
                         <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
                             {timeSlots.map(slot => (
                                 <button
@@ -1028,7 +957,6 @@ const PublicBooking: React.FC = () => {
                 <div className="animate-fade-in">
                     <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><UserIcon className="text-neon-orange" /> Seus Dados</h2>
                     
-                    {/* Public Login vs Register Tabs */}
                     {!staffUser && !clientUser && (
                         <div className="flex border-b border-slate-700 mb-6">
                             <button 
@@ -1063,7 +991,6 @@ const PublicBooking: React.FC = () => {
                         </form>
                     ) : (
                         <div className="space-y-4">
-                            {/* Staff Mode Banner */}
                             {staffUser && (
                                 <div className="bg-slate-800/50 p-3 rounded border border-slate-700 flex items-center gap-2 text-sm text-slate-300 mb-4">
                                     <ShieldCheck size={16} className="text-neon-blue"/>
@@ -1079,9 +1006,7 @@ const PublicBooking: React.FC = () => {
                                 <div>
                                     <label className="block text-xs font-medium text-slate-500 mb-1">
                                         WhatsApp 
-                                        {/* Asterisco Vermelho se for Obrigatório */}
                                         {!isContactOptional && <span className="text-red-500"> *</span>}
-                                        {/* Aviso Opcional se for permitido */}
                                         {isContactOptional && <span className="text-xs text-slate-500 font-normal italic ml-1">(Opcional para Equipe)</span>}
                                     </label>
                                     <input type="tel" placeholder="(00) 00000-0000" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.whatsapp ? 'border-red-500' : 'border-slate-600'}`} value={formData.whatsapp} onChange={e => handlePhoneChange(e, 'whatsapp')} />
@@ -1096,7 +1021,6 @@ const PublicBooking: React.FC = () => {
                                 </div>
                             </div>
 
-                            {/* Password Field - Only for Public Users creating account */}
                             {!clientUser && !staffUser && (
                                 <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 mt-4">
                                     <label className="flex items-center gap-2 cursor-pointer mb-3">
@@ -1128,7 +1052,6 @@ const PublicBooking: React.FC = () => {
                 <div className="animate-fade-in">
                     <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><CheckCircle className="text-neon-orange" /> Resumo do Agendamento</h2>
                     
-                    {/* ALERT: 30 MIN RULE */}
                     <div className="mb-6 p-4 bg-yellow-900/20 border border-yellow-500/50 rounded-lg flex items-start gap-3">
                          <Clock className="text-yellow-500 flex-shrink-0" size={20} />
                          <div>
@@ -1215,13 +1138,11 @@ const PublicBooking: React.FC = () => {
           </div>
         </div>
         
-        {/* Floating WhatsApp Button */}
         {settings && (
             <a
                 href={settings.whatsappLink || `https://wa.me/55${settings.phone?.replace(/\D/g, '')}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                // Alterado: bottom-24 no mobile para não cobrir o botão 'Próximo'
                 className="fixed bottom-24 md:bottom-6 right-6 z-50 bg-[#25D366] hover:bg-[#128c7e] text-white p-3 md:p-4 rounded-full shadow-[0_4px_20px_rgba(37,211,102,0.4)] transition-all transform hover:scale-110 flex items-center justify-center border-2 border-white/10"
                 aria-label="Fale conosco no WhatsApp"
             >

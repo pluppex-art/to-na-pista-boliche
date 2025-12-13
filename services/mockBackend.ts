@@ -36,28 +36,13 @@ export const db = {
                   for (const u of users) {
                       onProgress(`Processando Staff: ${u.nome}...`);
                       
-                      // Tenta criar/obter usuário no Auth
                       const { data: authData, error: authError } = await (tempSupabase.auth as any).signUp({
                           email: u.email,
                           password: '123456', 
                           options: { data: { name: u.nome, role: u.role } }
                       });
 
-                      // Se falhar o cadastro (ex: já existe), tentamos pegar o usuário existente se o erro permitir, 
-                      // ou assumimos que o login abaixo resolveria. Mas aqui precisamos do ID.
-                      // Se signUp falhar pq existe, não retorna o ID. Precisamos de outra estratégia se for admin.
-                      
-                      // Melhor abordagem: Tentar login simulado ou confiar que se já existe, vamos pegar pelo ID na próxima etapa? 
-                      // Não, se já existe no Auth mas não syncou, precisamos do ID do Auth.
-                      // O Auth do Supabase não deixa listar usuários via cliente público.
-                      
-                      // SOLUÇÃO: O Admin roda isso. O Admin roda SQL.
-                      // Aqui, tentamos chamar a RPC. Se a RPC existir, ela resolve.
-                      
                       let authId = authData?.user?.id;
-                      
-                      // Se não conseguimos o AuthID (ex: usuário já existe), não podemos fazer muito via Client-Side sem Admin API.
-                      // Mas se o usuário acabou de ser criado, temos o ID.
                       
                       if (authId && authId !== u.id) {
                           onProgress(`🔄 Tentando corrigir ID de ${u.nome}...`);
@@ -69,7 +54,6 @@ export const db = {
                               });
 
                               if (rpcError) {
-                                  // Se erro for "function not found", lançamos para ser pego no UI
                                   if (rpcError.message.includes('function') && rpcError.message.includes('does not exist')) {
                                       throw new Error("RPC_MISSING");
                                   }
@@ -91,7 +75,7 @@ export const db = {
 
           } catch (e: any) {
               if (e.message === 'RPC_MISSING') {
-                  throw e; // Repassa para a UI mostrar o código SQL
+                  throw e; 
               }
               onProgress(`ERRO: ${e.message}`);
               console.error(e);
@@ -156,7 +140,6 @@ export const db = {
   users: {
     login: async (email: string, password: string): Promise<{ user?: User; isFirstAccess?: boolean; error?: string; errorCode?: string }> => {
       try {
-        // 1. Auth Real do Supabase
         const { data: authData, error: authError } = await (supabase.auth as any).signInWithPassword({
             email,
             password
@@ -165,7 +148,6 @@ export const db = {
         if (authError) return { error: 'E-mail ou senha incorretos.' };
         if (!authData.user) return { error: 'Erro ao recuperar usuário.' };
 
-        // 2. Busca perfil na tabela 'usuarios' usando o ID do Auth
         let { data: profileData, error: profileError } = await supabase
           .from('usuarios')
           .select('*')
@@ -176,20 +158,15 @@ export const db = {
             return { error: 'Erro crítico de configuração (Loop no Banco de Dados). Contate o suporte.' };
         }
 
-        // 3. AUTO-CURA (Self-Healing) para Admin Master
         if ((!profileData) && email === 'admin@tonapista.com') {
             console.warn("Perfil Admin não encontrado. Tentando Auto-Cura...");
-            
-            // Tenta achar o registro antigo pelo email para pegar os dados antes de recriar
             const { data: oldProfile } = await supabase.from('usuarios').select('*').eq('email', email).maybeSingle();
-            
-            // Se achou perfil antigo, deleta (para liberar o email unique) e recria com ID novo
             if (oldProfile) {
                 await supabase.from('usuarios').delete().eq('id', oldProfile.id);
             }
 
             const adminPayload = {
-                id: authData.user.id, // ID NOVO
+                id: authData.user.id,
                 nome: 'Admin Master',
                 email: email,
                 role: 'ADMIN',
@@ -206,7 +183,6 @@ export const db = {
             };
 
             const { error: insertError } = await supabase.from('usuarios').upsert(adminPayload);
-            
             if (!insertError) {
                 const retry = await supabase.from('usuarios').select('*').eq('id', authData.user.id).maybeSingle();
                 profileData = retry.data;
@@ -215,37 +191,17 @@ export const db = {
             }
         }
 
-        // 4. Detecção de Dessincronização para Usuários Comuns
         if (!profileData) {
-            // Tenta achar por email para confirmar se é caso de ID errado
-            const { data: mismatchData } = await supabase
-                .from('usuarios')
-                .select('id')
-                .eq('email', email)
-                .maybeSingle();
-
+            const { data: mismatchData } = await supabase.from('usuarios').select('id').eq('email', email).maybeSingle();
             if (mismatchData) {
-                // Existe no banco, mas com ID diferente!
                 await (supabase.auth as any).signOut();
-                return { 
-                    error: 'Sua conta precisa de sincronização de ID.', 
-                    errorCode: 'ID_MISMATCH' 
-                };
+                return { error: 'Sua conta precisa de sincronização de ID.', errorCode: 'ID_MISMATCH' };
             }
-
-            // Verifica se é cliente
-            const { data: clientData } = await supabase
-                .from('clientes')
-                .select('client_id')
-                .eq('client_id', authData.user.id)
-                .maybeSingle();
-            
+            const { data: clientData } = await supabase.from('clientes').select('client_id').eq('client_id', authData.user.id).maybeSingle();
             await (supabase.auth as any).signOut();
-
             if (clientData) {
                 return { error: 'Esta conta é de Cliente. Por favor, use a aba "Sou Cliente".' };
             }
-
             return { error: 'Acesso negado. Perfil de equipe não encontrado.' };
         }
 
@@ -286,7 +242,6 @@ export const db = {
       }
     },
     
-    // ... restante das funções user (create, getAll, etc) mantidas igual ...
     create: async (user: User) => {
       const tempSupabase = createClient(
           (supabase as any).supabaseUrl,
@@ -429,7 +384,7 @@ export const db = {
         }
     }
   },
-  // ... (Clients, Loyalty, Reservations, Funnel, Interactions, Settings mantidos iguais) ...
+  
   clients: {
     login: async (email: string, password: string): Promise<{ client?: Client; error?: string }> => {
       try {
@@ -437,6 +392,7 @@ export const db = {
         if (authError) return { error: 'E-mail ou senha incorretos.' };
         if (!authData.user) return { error: 'Erro de autenticação.' };
 
+        // Ao logar, pegamos o perfil completo (incluindo foto) pois é para o próprio usuário
         const { data: clientProfile, error: profileError } = await supabase.from('clientes').select('*').eq('client_id', authData.user.id).maybeSingle();
 
         if (profileError || !clientProfile) {
@@ -494,7 +450,9 @@ export const db = {
         } catch (e: any) { return { error: String(e) }; }
     },
     getAll: async (): Promise<Client[]> => {
-      const { data, error } = await supabase.from('clientes').select('*');
+      // PERFORMANCE FIX: NÃO BUSCAR 'photo_url' NA LISTAGEM GERAL
+      // Isso previne que o download de imagens pesadas trave o carregamento inicial
+      const { data, error } = await supabase.from('clientes').select('client_id, name, phone, email, tags, created_at, last_contact_at, funnel_stage, loyalty_balance');
       if (error) return [];
       return data.map((c: any) => {
         const tags = safeTags(c.tags);
@@ -505,7 +463,7 @@ export const db = {
           name: c.name || 'Sem Nome', 
           phone: c.phone || '',
           email: c.email,
-          photoUrl: c.photo_url,
+          photoUrl: '', // Deixa vazio na listagem para performance. GetById busca a foto se precisar.
           tags: tags,
           createdAt: c.created_at || new Date().toISOString(),
           lastContactAt: c.last_contact_at || new Date().toISOString(),
@@ -517,6 +475,7 @@ export const db = {
     getByPhone: async (phone: string): Promise<Client | null> => {
       const cleanedPhone = cleanPhone(phone);
       if (!cleanedPhone) return null;
+      // Get by phone can bring photo_url since it's a specific record
       const { data, error } = await supabase.from('clientes').select('*').or(`phone.eq.${phone},phone.eq.${cleanedPhone}`).maybeSingle();
       if (error || !data) return null;
       return {
@@ -524,6 +483,7 @@ export const db = {
       };
     },
     getById: async (id: string): Promise<Client | null> => {
+      // Get by ID is specific, so we bring the photo
       const { data, error } = await supabase.from('clientes').select('*').eq('client_id', id).maybeSingle();
       if (error || !data) return null;
       return { id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url, tags: safeTags(data.tags), createdAt: data.created_at, lastContactAt: data.last_contact_at, funnelStage: data.funnel_stage || FunnelStage.NOVO, loyaltyBalance: data.loyalty_balance || 0 };
@@ -612,6 +572,7 @@ export const db = {
         return db.reservations._mapReservations(data);
     },
     getAll: async (): Promise<Reservation[]> => {
+      // WARNING: This fetches EVERYTHING. Use sparingly or for admin tasks only.
       const { data, error } = await supabase.from('reservas').select('*');
       if (error) return [];
       return db.reservations._mapReservations(data);
