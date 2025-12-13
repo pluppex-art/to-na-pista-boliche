@@ -10,17 +10,25 @@ const Financeiro: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'LOGS'>('OVERVIEW');
   const [loading, setLoading] = useState(true);
   
-  // Otimização: Não usar Reservation[] completo aqui, apenas o subset financeiro
-  const [financeData, setFinanceData] = useState<Reservation[]>([]);
+  // ESTADOS DE MÉTRICAS (Agora vêm prontos do banco)
+  const [metrics, setMetrics] = useState({
+      realized_revenue: 0,
+      pending_revenue: 0,
+      confirmed_slots: 0, // Horas vendidas
+      total_count: 0,
+      cancelled_count: 0
+  });
+
+  // Gráficos
+  const [revenueChartData, setRevenueChartData] = useState<{date: string, value: number}[]>([]);
+  const [topClients, setTopClients] = useState<{name: string, total: number, slots: number}[]>([]);
   
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
-  
-  // Estado visual do preset selecionado (para o Select do Mobile)
   const [currentPreset, setCurrentPreset] = useState<string>('MONTH');
 
+  // Logs
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
-
   const [auditFilters, setAuditFilters] = useState({
       userId: 'ALL',
       actionType: 'ALL',
@@ -51,15 +59,48 @@ const Financeiro: React.FC = () => {
     if (!dateRange.start || !dateRange.end) return;
     if (!isBackground) setLoading(true);
     try {
-        // OTIMIZAÇÃO: Busca apenas colunas necessárias via getFinanceData
-        const data = await db.reservations.getFinanceData(dateRange.start, dateRange.end);
-        setFinanceData(data);
+        // BUSCA OTIMIZADA: Chama 3 RPCs do banco em paralelo
+        // Isso substitui baixar 5000 linhas e calcular no JS
+        const [kpis, dailyData, tops] = await Promise.all([
+            db.analytics.getFinanceMetrics(dateRange.start, dateRange.end),
+            db.analytics.getDailyRevenue(dateRange.start, dateRange.end),
+            db.analytics.getTopClients(dateRange.start, dateRange.end)
+        ]);
+
+        if (kpis) {
+            setMetrics({
+                realized_revenue: Number(kpis.realized_revenue),
+                pending_revenue: Number(kpis.pending_revenue),
+                confirmed_slots: Number(kpis.confirmed_slots),
+                total_count: Number(kpis.total_count),
+                cancelled_count: Number(kpis.cancelled_count)
+            });
+        }
+
+        if (dailyData) {
+            const chart = dailyData.map((d: any) => ({
+                date: d.day.split('-').slice(1).reverse().join('/'),
+                value: Number(d.value)
+            }));
+            setRevenueChartData(chart);
+        }
+
+        if (tops) {
+            const clients = tops.map((c: any) => ({
+                name: c.client_name || 'Desconhecido',
+                total: Number(c.total_spent),
+                slots: Number(c.reservations_count) // RPC retorna count, ajustado no tipo
+            }));
+            setTopClients(clients);
+        }
         
-        // Logs ainda são necessários na aba de auditoria
+        // Carrega logs e usuários apenas se necessário (na aba logs ou primeira carga)
         const usersList = await db.users.getAll();
         setAllUsers(usersList);
-        
         await refreshAuditLogs();
+
+    } catch (e) {
+        console.error("Erro ao carregar financeiro:", e);
     } finally {
         if (!isBackground) setLoading(false);
     }
@@ -140,61 +181,18 @@ const Financeiro: React.FC = () => {
       setAuditFilters(prev => ({ ...prev, startDate: s, endDate: e }));
   };
 
-  // --- CÁLCULOS DE MÉTRICAS ---
-  
-  const calculateSlots = (r: Reservation) => (r.laneCount || 1) * Math.ceil(r.duration || 1);
-
-  const realizedReservations = financeData.filter(r => 
-      r.status === ReservationStatus.CONFIRMADA || 
-      r.status === ReservationStatus.CHECK_IN
-  );
-
-  const pendingReservations = financeData.filter(r => 
-      r.status === ReservationStatus.PENDENTE
-  );
-
-  const totalRevenue = realizedReservations.reduce((acc, curr) => acc + curr.totalValue, 0);
-  const pendingRevenue = pendingReservations.reduce((acc, curr) => acc + curr.totalValue, 0);
-  const confirmedSlotsCount = realizedReservations.reduce((acc, r) => acc + calculateSlots(r), 0);
-  
-  const avgTicket = confirmedSlotsCount > 0 ? totalRevenue / confirmedSlotsCount : 0;
+  // Cálculos Derivados (leves, feitos com os totais já prontos)
+  const avgTicket = metrics.confirmed_slots > 0 ? metrics.realized_revenue / metrics.confirmed_slots : 0;
   
   const startD = new Date(dateRange.start);
   const endD = new Date(dateRange.end);
   const diffTime = Math.abs(endD.getTime() - startD.getTime());
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; 
-  const dailyAverage = diffDays > 0 ? (confirmedSlotsCount / diffDays) : 0;
+  const dailyAverage = diffDays > 0 ? (metrics.confirmed_slots / diffDays) : 0;
 
-  const cancelledReservations = financeData.filter(r => r.status === ReservationStatus.CANCELADA);
-  const totalSlotsIncludingCancelled = financeData.reduce((acc, r) => acc + calculateSlots(r), 0);
-  const cancelledSlotsCount = cancelledReservations.reduce((acc, r) => acc + calculateSlots(r), 0);
-
-  const cancellationRate = totalSlotsIncludingCancelled > 0 
-      ? (cancelledSlotsCount / totalSlotsIncludingCancelled) * 100 
+  const cancellationRate = metrics.total_count > 0 
+      ? (metrics.cancelled_count / metrics.total_count) * 100 
       : 0;
-
-  // Gráfico
-  const revenueByDayMap = new Map<string, number>();
-  realizedReservations.forEach(r => {
-      const val = revenueByDayMap.get(r.date) || 0;
-      revenueByDayMap.set(r.date, val + r.totalValue);
-  });
-  const revenueChartData = Array.from(revenueByDayMap.entries())
-    .map(([date, value]) => ({ date: date.split('-').slice(1).reverse().join('/'), value }))
-    .sort((a,b) => a.date.localeCompare(b.date));
-
-  // Top Clientes
-  const clientSpendMap = new Map<string, {name: string, total: number, slots: number}>();
-  realizedReservations.forEach(r => {
-      const current = clientSpendMap.get(r.clientId) || { name: r.clientName, total: 0, slots: 0 };
-      current.total += r.totalValue;
-      current.slots += calculateSlots(r);
-      clientSpendMap.set(r.clientId, current);
-  });
-  
-  const topClients = Array.from(clientSpendMap.values())
-    .sort((a,b) => b.total - a.total)
-    .slice(0, 5);
 
   if (loading) return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin text-neon-blue" size={48} /></div>;
 
@@ -296,7 +294,7 @@ const Financeiro: React.FC = () => {
                          <div className="flex justify-between items-start">
                              <div>
                                  <p className="text-xs text-green-500 font-bold uppercase tracking-wide mb-1">Faturamento Realizado</p>
-                                 <h3 className="text-2xl font-bold text-white">{totalRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3>
+                                 <h3 className="text-2xl font-bold text-white">{metrics.realized_revenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3>
                                  <p className="text-[10px] text-slate-500 mt-1">Confirmados & Check-ins</p>
                              </div>
                              <div className="p-2 bg-green-500/10 rounded-lg text-green-500"><DollarSign size={24}/></div>
@@ -307,7 +305,7 @@ const Financeiro: React.FC = () => {
                          <div className="flex justify-between items-start">
                              <div>
                                  <p className="text-xs text-yellow-500 font-bold uppercase tracking-wide mb-1">A Receber / Pendente</p>
-                                 <h3 className="text-2xl font-bold text-white">{pendingRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3>
+                                 <h3 className="text-2xl font-bold text-white">{metrics.pending_revenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3>
                              </div>
                              <div className="p-2 bg-yellow-500/10 rounded-lg text-yellow-500"><AlertCircle size={24}/></div>
                          </div>
@@ -327,7 +325,7 @@ const Financeiro: React.FC = () => {
                          <div className="flex justify-between items-start">
                              <div>
                                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wide mb-1">Reservas (Horas Vendidas)</p>
-                                 <h3 className="text-2xl font-bold text-white">{confirmedSlotsCount}</h3>
+                                 <h3 className="text-2xl font-bold text-white">{metrics.confirmed_slots}</h3>
                                  <p className="text-[10px] text-slate-500 mt-1">Soma de Pistas x Horas</p>
                              </div>
                              <div className="p-2 bg-slate-700 rounded-lg text-slate-300"><ListChecks size={24}/></div>

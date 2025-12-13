@@ -83,6 +83,49 @@ export const db = {
       }
   },
 
+  // --- SERVIÇO DE ANALYTICS (Novo - Otimizado) ---
+  analytics: {
+      // Busca KPIs financeiros (Somas e Contagens) direto do banco
+      getFinanceMetrics: async (startDate: string, endDate: string) => {
+          const { data, error } = await supabase.rpc('get_financial_metrics', {
+              start_date: startDate,
+              end_date: endDate
+          });
+          if (error) { console.error("RPC Error (Finance):", error); return null; }
+          return data;
+      },
+      
+      // Busca dados do gráfico direto do banco
+      getDailyRevenue: async (startDate: string, endDate: string) => {
+          const { data, error } = await supabase.rpc('get_daily_revenue', {
+              start_date: startDate,
+              end_date: endDate
+          });
+          if (error) { console.error("RPC Error (Daily Revenue):", error); return []; }
+          return data;
+      },
+
+      // Busca Top Clientes direto do banco
+      getTopClients: async (startDate: string, endDate: string) => {
+          const { data, error } = await supabase.rpc('get_top_clients_metrics', {
+              start_date: startDate,
+              end_date: endDate,
+              limit_count: 5
+          });
+          if (error) { console.error("RPC Error (Top Clients):", error); return []; }
+          return data;
+      },
+
+      // Busca KPIs da Agenda (Contadores do topo)
+      getAgendaKPIs: async (date: string) => {
+          const { data, error } = await supabase.rpc('get_agenda_kpis', {
+              target_date: date
+          });
+          if (error) { console.error("RPC Error (Agenda KPIs):", error); return null; }
+          return data;
+      }
+  },
+
   // --- SERVIÇO DE AUDITORIA ---
   audit: {
       log: async (userId: string, userName: string, actionType: string, details: string, entityId?: string) => {
@@ -604,35 +647,9 @@ export const db = {
       }
   },
   reservations: {
-    // --- NOVO: BUSCA LEVE PARA FINANCEIRO ---
+    // --- NOVO: BUSCA LEVE PARA FINANCEIRO (Deprecated - Usar db.analytics) ---
     getFinanceData: async (startDate: string, endDate: string) => {
-        const { data, error } = await supabase
-            .from('reservas')
-            .select('date, total_value, status, payment_status, lane_count, duration, client_name, client_id')
-            .gte('date', startDate)
-            .lte('date', endDate);
-            
-        if (error) {
-            console.error("Erro financeiro:", error);
-            return [];
-        }
-        
-        // Mapeia para um formato mínimo necessário
-        return data.map((r: any) => ({
-            id: 'n/a', // Não precisamos do ID completo
-            clientId: r.client_id,
-            clientName: r.client_name,
-            date: r.date,
-            time: '',
-            peopleCount: 0,
-            laneCount: r.lane_count || 1,
-            duration: r.duration || 1,
-            totalValue: r.total_value || 0,
-            status: r.status,
-            paymentStatus: r.payment_status,
-            eventType: 'Outro',
-            createdAt: ''
-        })) as Reservation[];
+        return []; // Stub - Movido para db.analytics
     },
 
     // --- NOVO: BUSCA OTIMIZADA POR CLIENTE ---
