@@ -1,8 +1,4 @@
 
-
-
-
-
 import React, { useEffect, useState, useRef } from 'react';
 import { db } from '../services/mockBackend';
 import { AppSettings, UserRole, User, DayConfig } from '../types';
@@ -175,8 +171,9 @@ const Settings: React.FC = () => {
     fileInputRef.current?.click();
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     localStorage.removeItem('tonapista_auth');
+    await db.users.logout();
     navigate('/login', { replace: true });
   };
 
@@ -258,12 +255,13 @@ const Settings: React.FC = () => {
             await db.users.update(payload);
         } else {
             await db.users.create(payload);
+            alert("AVISO: Usuário criado no banco de dados. Para que o login funcione, você DEVE criar este usuário no painel 'Authentication' do Supabase com o mesmo email.");
         }
         
         // REFRESH LIST FROM DB
         setUsers(await db.users.getAll());
         setShowUserModal(false);
-        alert(isEditingUser ? 'Usuário atualizado!' : 'Usuário criado!');
+        // alert(isEditingUser ? 'Usuário atualizado!' : 'Usuário criado!');
     } catch (e: any) {
         console.error(e);
         alert(`Erro ao salvar usuário: ${e.message || 'Erro desconhecido'}`);

@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Client, Reservation, LoyaltyTransaction, ReservationStatus, PaymentStatus } from '../types';
@@ -114,8 +115,9 @@ const ClientDashboard: React.FC = () => {
     return () => { supabase.removeChannel(channel); };
   }, [navigate]); 
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
       localStorage.removeItem('tonapista_client_auth');
+      await db.clients.logout(); // Logout Supabase
       navigate('/login');
   };
 

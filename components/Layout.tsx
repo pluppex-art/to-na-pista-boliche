@@ -53,8 +53,9 @@ const Layout = ({ children }: LayoutProps) => {
     return <div className="min-h-screen bg-neon-bg">{children}</div>;
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     localStorage.removeItem('tonapista_auth');
+    await db.users.logout(); // Logout do Supabase
     navigate('/login', { replace: true });
   };
 

@@ -75,49 +75,62 @@ export const db = {
   users: {
     login: async (email: string, password: string): Promise<{ user?: User; isFirstAccess?: boolean; error?: string }> => {
       try {
+        // 1. Autenticação no Supabase Auth
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email: email,
+            password: password
+        });
+
+        if (authError) return { error: 'Credenciais inválidas (Supabase Auth).' };
+        if (!authData.user) return { error: 'Usuário não encontrado.' };
+
+        // 2. Busca Perfil na tabela pública 'usuarios' pelo EMAIL
+        // Nota: Idealmente usaríamos o ID, mas como o sistema foi migrado, usamos email para vincular
         const { data, error } = await supabase
           .from('usuarios')
           .select('*')
           .eq('email', email) 
           .maybeSingle();
 
-        if (error) return { error: `Erro técnico: ${error.message}` };
-        if (!data) return { error: 'E-mail não encontrado.' };
+        if (error) return { error: `Erro ao buscar perfil: ${error.message}` };
+        if (!data) return { error: 'Perfil de usuário não encontrado no sistema.' };
+        
+        if (data.ativo === false) return { error: 'Conta desativada pelo administrador.' };
 
-        if (String(data.senha) === password) {
-          if (data.ativo === false) return { error: 'Conta desativada.' };
+        const roleNormalized = (data.role || '').toUpperCase() as UserRole;
+        const isAdmin = roleNormalized === UserRole.ADMIN;
+        
+        // Mantemos a lógica de primeiro acesso se a senha ainda for a padrão no banco (legado)
+        // ou podemos remover isso se quiser confiar 100% no Supabase.
+        const isFirstAccess = false; 
 
-          const roleNormalized = (data.role || '').toUpperCase() as UserRole;
-          const isAdmin = roleNormalized === UserRole.ADMIN;
-          const isFirstAccess = password === '123456';
+        db.audit.log(data.id, data.nome, 'LOGIN', 'Usuário realizou login via Auth');
 
-          db.audit.log(data.id, data.nome, 'LOGIN', 'Usuário realizou login');
-
-          return {
-            isFirstAccess, 
-            user: {
-              id: data.id,
-              name: data.nome,
-              email: data.email,
-              role: roleNormalized,
-              passwordHash: '',
-              perm_view_agenda: isAdmin ? true : (data.perm_view_agenda ?? false),
-              perm_view_financial: isAdmin ? true : (data.perm_view_financial ?? false),
-              perm_view_crm: isAdmin ? true : (data.perm_view_crm ?? false),
-              perm_create_reservation: isAdmin ? true : (data.perm_create_reservation ?? false),
-              perm_edit_reservation: isAdmin ? true : (data.perm_edit_reservation ?? false),
-              perm_delete_reservation: isAdmin ? true : (data.perm_delete_reservation ?? false),
-              perm_edit_client: isAdmin ? true : (data.perm_edit_client ?? false),
-              perm_receive_payment: isAdmin ? true : (data.perm_receive_payment ?? false),
-              perm_create_reservation_no_contact: isAdmin ? true : (data.perm_create_reservation_no_contact ?? false)
-            }
-          };
-        } else {
-          return { error: 'Senha incorreta.' };
-        }
-      } catch (err) {
-        return { error: 'Erro inesperado.' };
+        return {
+          isFirstAccess, 
+          user: {
+            id: data.id, // Mantemos o ID da tabela pública para relacionamentos
+            name: data.nome,
+            email: data.email,
+            role: roleNormalized,
+            passwordHash: '', // Não expor hash
+            perm_view_agenda: isAdmin ? true : (data.perm_view_agenda ?? false),
+            perm_view_financial: isAdmin ? true : (data.perm_view_financial ?? false),
+            perm_view_crm: isAdmin ? true : (data.perm_view_crm ?? false),
+            perm_create_reservation: isAdmin ? true : (data.perm_create_reservation ?? false),
+            perm_edit_reservation: isAdmin ? true : (data.perm_edit_reservation ?? false),
+            perm_delete_reservation: isAdmin ? true : (data.perm_delete_reservation ?? false),
+            perm_edit_client: isAdmin ? true : (data.perm_edit_client ?? false),
+            perm_receive_payment: isAdmin ? true : (data.perm_receive_payment ?? false),
+            perm_create_reservation_no_contact: isAdmin ? true : (data.perm_create_reservation_no_contact ?? false)
+          }
+        };
+      } catch (err: any) {
+        return { error: err.message || 'Erro inesperado.' };
       }
+    },
+    logout: async () => {
+        await supabase.auth.signOut();
     },
     getAll: async (): Promise<User[]> => {
       const { data, error } = await supabase.from('usuarios').select('*');
@@ -169,12 +182,14 @@ export const db = {
       };
     },
     create: async (user: User) => {
+      // NOTA: Criar usuário aqui cria apenas no BANCO DE DADOS PÚBLICO.
+      // O Admin deve criar o Login também no Painel Auth do Supabase ou implementar signUp admin.
       const { error } = await supabase.from('usuarios').insert({
         id: user.id,
         nome: user.name,
         email: user.email,
         role: user.role,
-        senha: user.passwordHash,
+        senha: 'USE_AUTH', // Placeholder pois agora usamos Auth
         ativo: true,
         perm_view_agenda: user.perm_view_agenda,
         perm_view_financial: user.perm_view_financial,
@@ -203,7 +218,7 @@ export const db = {
         perm_receive_payment: user.perm_receive_payment,
         perm_create_reservation_no_contact: user.perm_create_reservation_no_contact
       };
-      if (user.passwordHash && user.passwordHash.length > 0) payload.senha = user.passwordHash;
+      // Senha é gerenciada pelo Auth agora, ignoramos update de senha aqui
       const { error } = await supabase.from('usuarios').update(payload).eq('id', user.id);
       if (error) throw new Error(error.message);
     },
@@ -213,7 +228,6 @@ export const db = {
     },
     getPerformance: async (startDate: string, endDate: string): Promise<StaffPerformance[]> => {
         try {
-            // Otimização: Buscar apenas reservas do período
             const { data: periodReservations, error } = await supabase
                 .from('reservas')
                 .select('created_by, total_value, status, payment_status')
@@ -248,6 +262,15 @@ export const db = {
   clients: {
     login: async (email: string, password: string): Promise<{ client?: Client; error?: string }> => {
       try {
+        // 1. Auth no Supabase
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email, password
+        });
+
+        if (authError) return { error: 'E-mail ou senha incorretos.' };
+        if (!authData.user) return { error: 'Usuário não encontrado.' };
+
+        // 2. Busca dados na tabela clientes pelo email
         const { data, error } = await supabase
           .from('clientes')
           .select('*')
@@ -255,50 +278,70 @@ export const db = {
           .maybeSingle();
 
         if (error) return { error: `Erro técnico: ${error.message}` };
-        if (!data) return { error: 'E-mail não encontrado.' };
+        if (!data) return { error: 'Cadastro de cliente incompleto no sistema.' };
 
-        if (data.password === password) {
-           return {
-             client: {
-               id: data.client_id,
-               name: data.name,
-               phone: data.phone,
-               email: data.email,
-               photoUrl: data.photo_url,
-               tags: safeTags(data.tags),
-               createdAt: data.created_at,
-               lastContactAt: data.last_contact_at,
-               funnelStage: data.funnel_stage,
-               loyaltyBalance: data.loyalty_balance || 0
-             }
-           };
-        } else {
-          return { error: 'Senha incorreta.' };
-        }
+        return {
+            client: {
+            id: data.client_id,
+            name: data.name,
+            phone: data.phone,
+            email: data.email,
+            photoUrl: data.photo_url,
+            tags: safeTags(data.tags),
+            createdAt: data.created_at,
+            lastContactAt: data.last_contact_at,
+            funnelStage: data.funnel_stage,
+            loyaltyBalance: data.loyalty_balance || 0
+            }
+        };
+
       } catch (err) {
         return { error: 'Erro inesperado.' };
       }
     },
+    logout: async () => {
+        await supabase.auth.signOut();
+    },
     register: async (client: Client, password: string): Promise<{ client?: Client; error?: string }> => {
         try {
+            // 1. Cria usuário no Auth
+            const { data: authData, error: authError } = await supabase.auth.signUp({
+                email: client.email || '',
+                password: password,
+                options: {
+                    data: { name: client.name, phone: client.phone }
+                }
+            });
+
+            if (authError) return { error: authError.message };
+            const authId = authData.user?.id;
+
+            if (!authId) return { error: 'Erro ao gerar ID de autenticação.' };
+
+            // 2. Insere na tabela pública
             const phoneClean = cleanPhone(client.phone);
-            const { data: existing } = await supabase.from('clientes').select('*').or(`phone.eq.${phoneClean},email.eq.${client.email}`).maybeSingle();
+
+            // Verifica se já existe por telefone (para não duplicar)
+            const { data: existing } = await supabase.from('clientes').select('*').eq('phone', phoneClean).maybeSingle();
 
             if (existing) {
-                if (!existing.password) {
-                    await supabase.from('clientes').update({ password: password }).eq('client_id', existing.client_id);
-                    return { client: { ...client, id: existing.client_id, loyaltyBalance: existing.loyalty_balance, photoUrl: existing.photo_url } };
-                } else {
-                    return { error: 'Cliente já cadastrado com senha. Faça login.' };
-                }
+                // Se existe, atualiza com o email e vincula? 
+                // Num sistema simples, vamos apenas atualizar.
+                await supabase.from('clientes').update({ 
+                    email: client.email,
+                    // client_id: authId // Em teoria deveríamos atualizar o ID, mas isso quebraria FKs. 
+                    // Vamos manter o ID antigo e confiar no email para login.
+                }).eq('client_id', existing.client_id);
+                
+                return { client: { ...client, id: existing.client_id } };
             }
 
             const dbClient = {
-                client_id: client.id, 
+                client_id: authId, // Vincula o ID do Auth com a tabela pública
                 name: client.name,
                 phone: phoneClean,
-                email: (client.email && client.email.trim() !== '') ? client.email : null,
-                password: password,
+                email: client.email,
+                password: 'AUTH', // Placeholder
                 photo_url: client.photoUrl,
                 tags: ['Novo Cadastro'],
                 last_contact_at: new Date().toISOString(),
@@ -309,7 +352,9 @@ export const db = {
 
             const { error } = await supabase.from('clientes').insert(dbClient);
             if (error) return { error: error.message };
-            return { client };
+            
+            return { client: { ...client, id: authId } };
+
         } catch (e: any) {
             return { error: String(e) };
         }
