@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Client, Reservation, LoyaltyTransaction, ReservationStatus, PaymentStatus } from '../types';
@@ -25,9 +24,7 @@ import {
   LayoutGrid, 
   AlertCircle, 
   Store, 
-  Tag,
-  History,
-  Archive
+  Tag 
 } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
@@ -38,9 +35,6 @@ const ClientDashboard: React.FC = () => {
   const [history, setHistory] = useState<Reservation[]>([]);
   const [loyalty, setLoyalty] = useState<LoyaltyTransaction[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // Tab State: 'UPCOMING' (Ativos) vs 'HISTORY' (Finalizados/Cancelados)
-  const [activeTab, setActiveTab] = useState<'UPCOMING' | 'HISTORY'>('UPCOMING');
 
   // Edit Profile State
   const [isEditing, setIsEditing] = useState(false);
@@ -79,12 +73,14 @@ const ClientDashboard: React.FC = () => {
               photoUrl: activeClient.photoUrl || ''
           });
 
-          // Load History (OTIMIZADO)
-          // Em vez de baixar tudo, baixa só o deste cliente
-          const myRes = await db.reservations.getByClientId(activeClient.id);
-          const sorted = myRes.sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          // Load History
+          const allRes = await db.reservations.getAll();
+          // Ordena pela DATA DE CRIAÇÃO (createdAt) decrescente
+          const myRes = allRes
+              .filter(r => r.clientId === activeClient.id)
+              .sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
               
-          setHistory(sorted);
+          setHistory(myRes);
 
           // Load Loyalty
           const pts = await db.loyalty.getHistory(activeClient.id);
@@ -100,10 +96,8 @@ const ClientDashboard: React.FC = () => {
     // Subscribe to updates relevant to this client
     const channel = supabase
       .channel('client-dashboard-updates')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, (payload) => {
-          if (client && payload.new && (payload.new as any).client_id === client.id) {
-              loadData(true);
-          }
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => {
+          loadData(true);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, (payload) => {
           if (client && payload.new && (payload.new as any).client_id === client.id) {
@@ -231,42 +225,11 @@ const ClientDashboard: React.FC = () => {
       return obs.length < 50 ? obs : 'Cancelamento administrativo.';
   };
 
-  // --- FILTRAGEM DE RESERVAS ---
-  const { upcomingReservations, pastReservations } = React.useMemo(() => {
-      const upcoming: Reservation[] = [];
-      const past: Reservation[] = [];
-
-      history.forEach(res => {
-          // Status finalizados vão direto para histórico
-          const isFinishedStatus = [ReservationStatus.CANCELADA, ReservationStatus.NO_SHOW, ReservationStatus.CHECK_IN].includes(res.status);
-          
-          if (isFinishedStatus) {
-              past.push(res);
-              return;
-          }
-
-          // Para Pendentes e Confirmadas, verifica se a data já passou
-          const endDateTime = new Date(`${res.date}T${res.time}`);
-          endDateTime.setHours(endDateTime.getHours() + res.duration);
-          
-          if (endDateTime < now) {
-              // Se já passou do horário de término, considera histórico (mesmo se esqueceram de dar check-in)
-              past.push(res);
-          } else {
-              upcoming.push(res);
-          }
-      });
-
-      return { upcomingReservations: upcoming, pastReservations: past };
-  }, [history, now]);
-
-  const displayedReservations = activeTab === 'UPCOMING' ? upcomingReservations : pastReservations;
-
   if (loading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="animate-spin text-neon-blue" size={48}/></div>;
   if (!client) return null;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 pb-20">
+    <div className="min-h-screen bg-slate-950 text-slate-200">
         <header className="bg-slate-900 border-b border-slate-800 p-4 sticky top-0 z-20">
             <div className="max-w-md mx-auto flex justify-between items-center">
                 <h1 className="text-xl font-bold text-white">Minha Conta</h1>
@@ -364,46 +327,15 @@ const ClientDashboard: React.FC = () => {
             </div>
 
             <div>
-                <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                        <Clock size={18} className="text-slate-400"/> Meus Agendamentos
-                    </h3>
-                </div>
-
-                {/* TABS DE NAVEGAÇÃO */}
-                <div className="flex p-1 bg-slate-900 border border-slate-800 rounded-lg mb-4">
-                    <button 
-                        onClick={() => setActiveTab('UPCOMING')}
-                        className={`flex-1 py-2 text-sm font-bold rounded-md transition flex items-center justify-center gap-2 ${activeTab === 'UPCOMING' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
-                    >
-                        <Calendar size={14}/> Próximos
-                    </button>
-                    <button 
-                        onClick={() => setActiveTab('HISTORY')}
-                        className={`flex-1 py-2 text-sm font-bold rounded-md transition flex items-center justify-center gap-2 ${activeTab === 'HISTORY' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
-                    >
-                        <History size={14}/> Histórico
-                    </button>
-                </div>
+                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Clock size={18} className="text-slate-400"/> Meus Agendamentos</h3>
                 
-                {displayedReservations.length === 0 ? (
-                    <div className="text-center p-8 bg-slate-900 rounded-xl border border-slate-800 border-dashed text-slate-500 flex flex-col items-center gap-2 animate-fade-in">
-                        {activeTab === 'UPCOMING' ? (
-                            <>
-                                <Calendar size={32} className="opacity-20"/>
-                                <p>Nenhum agendamento ativo.</p>
-                                <button onClick={() => navigate('/agendamento')} className="text-neon-blue text-sm font-bold hover:underline mt-1">Fazer uma reserva</button>
-                            </>
-                        ) : (
-                            <>
-                                <Archive size={32} className="opacity-20"/>
-                                <p>Nenhum histórico encontrado.</p>
-                            </>
-                        )}
+                {history.length === 0 ? (
+                    <div className="text-center p-8 bg-slate-900 rounded-xl border border-slate-800 border-dashed text-slate-500">
+                        Nenhum agendamento ainda.
                     </div>
                 ) : (
-                    <div className="space-y-4 animate-fade-in">
-                        {displayedReservations.map(res => {
+                    <div className="space-y-4">
+                        {history.map(res => {
                             const expiresIn = getExpiresIn(res);
                             const allowCancel = canCancel(res);
                             
@@ -424,12 +356,6 @@ const ClientDashboard: React.FC = () => {
                             } else if (res.status === ReservationStatus.CANCELADA) {
                                 statusColor = 'bg-red-500/20 text-red-400 border-red-500/30';
                                 statusLabel = 'CANCELADA';
-                            } else if (res.status === ReservationStatus.CHECK_IN) {
-                                statusColor = 'bg-purple-500/20 text-purple-400 border-purple-500/30';
-                                statusLabel = 'FINALIZADA';
-                            } else if (res.status === ReservationStatus.NO_SHOW) {
-                                statusColor = 'bg-red-900/20 text-red-500 border-red-500/30';
-                                statusLabel = 'FALTA';
                             }
 
                             const cancellationReason = res.status === ReservationStatus.CANCELADA 
@@ -492,8 +418,7 @@ const ClientDashboard: React.FC = () => {
                                         )}
                                     </div>
 
-                                    {/* ALERTS FOR PENDING */}
-                                    {activeTab === 'UPCOMING' && res.status === ReservationStatus.PENDENTE && !res.payOnSite && expiresIn && (
+                                    {res.status === ReservationStatus.PENDENTE && !res.payOnSite && expiresIn && (
                                         <div className="mb-4 bg-yellow-900/20 border border-yellow-500/30 p-2 rounded text-yellow-500 text-xs flex items-center gap-2 animate-pulse">
                                             <Clock size={14} />
                                             <span className="font-bold">Expira em: {expiresIn}</span>
@@ -501,7 +426,7 @@ const ClientDashboard: React.FC = () => {
                                         </div>
                                     )}
 
-                                    {activeTab === 'UPCOMING' && res.status === ReservationStatus.PENDENTE && res.payOnSite && (
+                                    {res.status === ReservationStatus.PENDENTE && res.payOnSite && (
                                         <div className="mb-4 bg-blue-900/20 border border-blue-500/30 p-2 rounded text-blue-400 text-xs flex items-center gap-2">
                                             <Store size={14} />
                                             <span className="font-bold">Pagamento no Local</span>
@@ -509,7 +434,6 @@ const ClientDashboard: React.FC = () => {
                                         </div>
                                     )}
 
-                                    {/* CANCELLATION REASON */}
                                     {res.status === ReservationStatus.CANCELADA && (
                                         <div className="mb-4 bg-red-900/20 border border-red-500/30 p-3 rounded text-red-400 text-xs">
                                             <div className="font-bold flex items-center gap-2 mb-1"><AlertCircle size={14}/> Motivo do Cancelamento:</div>
@@ -523,8 +447,7 @@ const ClientDashboard: React.FC = () => {
                                         {statusLabel}
                                     </div>
 
-                                    {/* ACTIONS - Only for Active/Upcoming Reservations */}
-                                    {activeTab === 'UPCOMING' && res.status !== ReservationStatus.CANCELADA && (
+                                    {res.status !== ReservationStatus.CANCELADA && (
                                         <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-800">
                                             <div className="flex gap-4">
                                                 <button onClick={() => handleEditRequest(res)} className="text-xs text-slate-500 hover:text-white transition flex items-center gap-1">

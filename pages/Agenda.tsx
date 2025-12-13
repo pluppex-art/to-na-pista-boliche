@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
 import { supabase } from '../services/supabaseClient';
@@ -80,8 +81,7 @@ const Agenda: React.FC = () => {
 
       let total = 0, pending = 0, confirmed = 0, checkIn = 0, noShow = 0;
       dayReservations.forEach(r => {
-          // CORREÇÃO: Arredonda duração para cima (ex: 1.5h conta como 2 slots de tempo ocupados)
-          const slotCount = (r.laneCount || 1) * Math.ceil(r.duration || 1);
+          const slotCount = Math.ceil(r.laneCount * r.duration);
           total += slotCount;
           checkIn += r.checkedInIds?.length || 0;
           noShow += r.noShowIds?.length || 0;

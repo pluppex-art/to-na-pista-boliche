@@ -1,30 +1,23 @@
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { db, cleanPhone } from '../services/mockBackend';
 import { Client, Reservation, FunnelStage, User, UserRole, ReservationStatus, LoyaltyTransaction } from '../types';
 import { FUNNEL_STAGES } from '../constants';
-import { Search, MessageCircle, Calendar, Tag, Plus, Users, Loader2, LayoutList, Kanban as KanbanIcon, GripVertical, Pencil, Save, X, Crown, Star, Sparkles, Clock, LayoutGrid, Gift, Coins, History, ArrowDown, ArrowUp, CalendarPlus, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, MessageCircle, Calendar, Tag, Plus, Users, Loader2, LayoutList, Kanban as KanbanIcon, GripVertical, Pencil, Save, X, Crown, Star, Sparkles, Clock, LayoutGrid, Gift, Coins, History, ArrowDown, ArrowUp, CalendarPlus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabaseClient';
+
+// Tipos de Classificação
+type ClientTier = 'VIP' | 'FIEL' | 'NOVO';
 
 const CRM: React.FC = () => {
   const navigate = useNavigate();
   const [viewMode, setViewMode] = useState<'LIST' | 'KANBAN'>('LIST');
   const [clients, setClients] = useState<Client[]>([]);
-  
-  // Server-side Pagination & Search State
   const [searchTerm, setSearchTerm] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalCount, setTotalCount] = useState(0);
-  const [pageSize] = useState(50);
-  const searchTimeoutRef = useRef<any>(null);
-
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [clientHistory, setClientHistory] = useState<Reservation[]>([]);
-  
-  // Métricas simplificadas (apenas para o cliente selecionado)
-  const [selectedClientTier, setSelectedClientTier] = useState<'VIP' | 'FIEL' | 'NOVO'>('NOVO');
-  
+  const [clientMetrics, setClientMetrics] = useState<Record<string, { count: number, tier: ClientTier }>>({});
   const [loading, setLoading] = useState(true);
   
   // Loyalty State
@@ -50,52 +43,82 @@ const CRM: React.FC = () => {
   const canEditClient = currentUser?.role === UserRole.ADMIN || currentUser?.perm_edit_client;
   const canCreateReservation = currentUser?.role === UserRole.ADMIN || currentUser?.perm_create_reservation;
 
-  const fetchClients = async (page: number, search: string) => {
-    setLoading(true);
+  const fetchData = async (isBackground = false) => {
+    if (!isBackground) setLoading(true);
     try {
-        const { data, count } = await db.clients.list(page, pageSize, search);
-        setClients(data);
-        setTotalCount(count);
+        const [clientsData, reservationsData] = await Promise.all([
+            db.clients.getAll(),
+            db.reservations.getAll()
+        ]);
+
+        setClients(clientsData);
+
+        // --- LÓGICA DE CLASSIFICAÇÃO (Últimos 3 meses) ---
+        const metrics: Record<string, { count: number, tier: ClientTier }> = {};
+        const threeMonthsAgo = new Date();
+        threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+
+        clientsData.forEach(client => {
+            const recentReservations = reservationsData.filter(r => 
+                (r.clientId === client.id || (r.guests && r.guests.some(g => cleanPhone(g.phone) === cleanPhone(client.phone)))) &&
+                r.status !== ReservationStatus.CANCELADA &&
+                new Date(r.date) >= threeMonthsAgo
+            );
+
+            const totalSlots = recentReservations.reduce((acc, curr) => {
+                return acc + (curr.laneCount * curr.duration);
+            }, 0);
+
+            let tier: ClientTier = 'NOVO';
+            if (totalSlots >= 20) {
+                tier = 'VIP';
+            } else if (totalSlots >= 6) {
+                tier = 'FIEL';
+            }
+
+            metrics[client.id] = { count: totalSlots, tier };
+        });
+
+        setClientMetrics(metrics);
+
     } catch (e) {
         console.error(e);
     } finally {
-        setLoading(false);
+        if (!isBackground) setLoading(false);
     }
   };
 
   useEffect(() => {
-      fetchClients(currentPage, searchTerm);
-  }, [currentPage]);
+    fetchData();
 
-  // Debounced Search
-  const handleSearch = (val: string) => {
-      setSearchTerm(val);
-      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-      searchTimeoutRef.current = setTimeout(() => {
-          setCurrentPage(1); // Reset page on new search
-          fetchClients(1, val);
-      }, 600);
-  };
+    const channel = supabase
+      .channel('crm-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => {
+          console.log('[CRM] Cliente atualizado via Realtime');
+          fetchData(true);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => {
+          console.log('[CRM] Reserva atualizada via Realtime (Recalcular métricas)');
+          fetchData(true);
+      })
+      .subscribe();
 
-  // Load Client Details (History & Loyalty) ONLY when selected
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  // Load Client Details (History & Loyalty)
   useEffect(() => {
     const fetchDetails = async () => {
       if (selectedClient) {
-        // CORREÇÃO DE PERFORMANCE: Usar getByClientId em vez de getAll + filter
-        // Isso evita baixar milhares de reservas de outros clientes
-        const history = await db.reservations.getByClientId(selectedClient.id);
-        
+        // Reservation History
+        const allRes = await db.reservations.getAll();
+        const history = allRes.filter(r => {
+            const isMain = r.clientId === selectedClient.id;
+            const isGuest = r.guests?.some(g => cleanPhone(g.phone) === cleanPhone(selectedClient.phone));
+            return isMain || isGuest;
+        });
         const sortedHistory = history.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         setClientHistory(sortedHistory);
-
-        // Calculate Tier
-        const recentReservations = history.filter(r => r.status !== ReservationStatus.CANCELADA);
-        const totalSlots = recentReservations.reduce((acc, curr) => acc + (curr.laneCount * curr.duration), 0);
-        
-        let tier: 'VIP' | 'FIEL' | 'NOVO' = 'NOVO';
-        if (totalSlots >= 20) tier = 'VIP';
-        else if (totalSlots >= 6) tier = 'FIEL';
-        setSelectedClientTier(tier);
 
         // Loyalty History
         if (detailTab === 'LOYALTY') {
@@ -111,6 +134,17 @@ const CRM: React.FC = () => {
     fetchDetails();
   }, [selectedClient, detailTab]);
 
+  // Lista Filtrada e Ordenada (A-Z)
+  const filteredAndSortedClients = useMemo(() => {
+    const filtered = clients.filter(c => 
+        c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.phone.includes(searchTerm) ||
+        c.tags.some(t => t.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+
+    return filtered.sort((a, b) => a.name.localeCompare(b.name));
+  }, [clients, searchTerm]);
+
   const openWhatsApp = (phone: string) => {
     const clean = phone.replace(/\D/g, '');
     window.open(`https://wa.me/55${clean}`, '_blank');
@@ -123,20 +157,28 @@ const CRM: React.FC = () => {
 
   const handleDrop = async (e: React.DragEvent, newStage: FunnelStage) => {
     e.preventDefault();
-    if (!canEditClient) { alert("Sem permissão."); return; }
+    if (!canEditClient) {
+        alert("Sem permissão para editar status do cliente.");
+        return;
+    }
+
     const clientId = e.dataTransfer.getData('clientId');
     if (!clientId) return;
 
-    // Optimistic update
-    setClients(prev => prev.map(c => c.id === clientId ? { ...c, funnelStage: newStage } : c));
+    const updatedClients = clients.map(c => {
+        if (c.id === clientId) return { ...c, funnelStage: newStage };
+        return c;
+    });
+    setClients(updatedClients);
+
     await db.clients.updateStage(clientId, newStage);
+    fetchData(true);
   };
 
   const handleDragOver = (e: React.DragEvent) => e.preventDefault();
   
-  // Used only for Kanban view - Note: Kanban only shows loaded clients (current page)
   const getClientsByStage = (stage: FunnelStage) => {
-      return clients.filter(c => (c.funnelStage || FunnelStage.NOVO) === stage);
+      return filteredAndSortedClients.filter(c => (c.funnelStage || FunnelStage.NOVO) === stage);
   };
 
   const startEditing = () => {
@@ -155,32 +197,45 @@ const CRM: React.FC = () => {
       if (!canEditClient) return;
       if (!selectedClient || !editForm) return;
       
-      const updatedClient = { ...selectedClient, ...editForm };
+      const updatedClient = {
+          ...selectedClient,
+          ...editForm
+      };
+
       await db.clients.update(updatedClient);
       
       setSelectedClient(updatedClient);
-      // Update local list
-      setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+      fetchData(true);
       setIsEditing(false);
   };
 
   const handleAdjustPoints = async () => {
       if (!selectedClient || !adjustPoints || !adjustReason) return;
+      
       const amount = parseInt(adjustPoints);
       if (isNaN(amount) || amount === 0) return;
 
       try {
           await db.loyalty.addTransaction(selectedClient.id, amount, adjustReason, currentUser?.id);
+          
+          // Refresh details
           const updatedClient = await db.clients.getById(selectedClient.id);
           if (updatedClient) {
             setSelectedClient(updatedClient);
-            setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+          } else {
+             // Fallback refresh logic since we use phone mostly
+             const clientsData = await db.clients.getAll();
+             const freshClient = clientsData.find(c => c.id === selectedClient.id);
+             if (freshClient) setSelectedClient(freshClient);
           }
+          
+          // Refresh List
           const loyalty = await db.loyalty.getHistory(selectedClient.id);
           setLoyaltyHistory(loyalty);
+          
           setAdjustPoints('');
           setAdjustReason('');
-          alert("Pontos atualizados!");
+          alert("Pontos atualizados com sucesso!");
       } catch (e) {
           console.error(e);
           alert("Erro ao atualizar pontos.");
@@ -192,8 +247,34 @@ const CRM: React.FC = () => {
       navigate('/agendamento', { state: { prefilledClient: selectedClient } });
   };
 
+  const renderTierBadge = (clientId: string) => {
+      const metric = clientMetrics[clientId] || { count: 0, tier: 'NOVO' };
+      
+      switch (metric.tier) {
+          case 'VIP':
+              return (
+                  <div className="flex items-center gap-1 bg-yellow-500/10 text-yellow-500 px-2 py-1 rounded-md text-[10px] font-bold border border-yellow-500/20 shadow-[0_0_10px_rgba(234,179,8,0.1)]">
+                      <Crown size={12} fill="currentColor" />
+                      <span>VIP ({metric.count})</span>
+                  </div>
+              );
+          case 'FIEL':
+              return (
+                  <div className="flex items-center gap-1 bg-blue-500/10 text-blue-400 px-2 py-1 rounded-md text-[10px] font-bold border border-blue-500/20 shadow-[0_0_10px_rgba(59,130,246,0.1)]">
+                      <Star size={12} fill="currentColor" />
+                      <span>Fiel ({metric.count})</span>
+                  </div>
+              );
+          default:
+               return (
+                  <div className="flex items-center gap-1 bg-slate-800 text-slate-500 px-2 py-1 rounded-md text-[10px] font-bold border border-slate-700">
+                      <span>Novo</span>
+                  </div>
+               );
+      }
+  };
+
   const totalHistorySlots = clientHistory.reduce((acc, h) => acc + (h.laneCount * h.duration), 0);
-  const totalPages = Math.ceil(totalCount / pageSize);
 
   return (
     <div className="h-full flex flex-col pb-20 md:pb-0">
@@ -203,7 +284,7 @@ const CRM: React.FC = () => {
             <h1 className="text-2xl md:text-3xl font-bold text-white">Gestão de Clientes</h1>
             <span className="bg-slate-800 border border-slate-700 text-neon-blue px-3 py-1 rounded-full text-sm font-bold shadow-sm flex items-center gap-1">
                <Users size={14} />
-               {totalCount} total
+               {loading ? '...' : clients.length}
             </span>
           </div>
           
@@ -227,23 +308,21 @@ const CRM: React.FC = () => {
           <div className="flex-1 flex flex-col lg:flex-row gap-6 overflow-hidden min-h-0">
                 <div className={`${selectedClient ? 'hidden lg:flex' : 'flex'} flex-col w-full lg:w-1/3 bg-slate-800 border border-slate-700 rounded-xl shadow-lg overflow-hidden lg:max-h-[850px] max-h-[500px]`}>
                     <div className="p-4 border-b border-slate-700 bg-slate-900/50">
-                        <div className="relative">
-                            <Search className="absolute left-3 top-3 text-slate-400" size={18} />
-                            <input 
-                            type="text" 
-                            placeholder="Buscar por nome ou telefone..."
-                            className="w-full bg-slate-700 text-white pl-10 pr-4 py-2 rounded-lg focus:outline-none focus:ring-1 focus:ring-neon-blue"
-                            value={searchTerm}
-                            onChange={e => handleSearch(e.target.value)}
-                            />
-                        </div>
+                    <div className="relative">
+                        <Search className="absolute left-3 top-3 text-slate-400" size={18} />
+                        <input 
+                        type="text" 
+                        placeholder="Buscar cliente..."
+                        className="w-full bg-slate-700 text-white pl-10 pr-4 py-2 rounded-lg focus:outline-none focus:ring-1 focus:ring-neon-blue"
+                        value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
+                        />
+                    </div>
                     </div>
                     <div className="flex-1 overflow-y-auto max-h-[400px] lg:max-h-full">
                     {loading ? (
                         <div className="flex justify-center p-8"><Loader2 className="animate-spin text-neon-blue"/></div>
-                    ) : clients.length === 0 ? (
-                        <div className="p-8 text-center text-slate-500">Nenhum cliente encontrado.</div>
-                    ) : clients.map(client => (
+                    ) : filteredAndSortedClients.map(client => (
                         <div 
                         key={client.id}
                         onClick={() => { setSelectedClient(client); setIsEditing(false); setDetailTab('INFO'); }}
@@ -251,19 +330,13 @@ const CRM: React.FC = () => {
                         >
                         <div className="flex justify-between items-start">
                             <h3 className="font-bold text-white truncate pr-2 flex-1 text-sm md:text-base">{client.name}</h3>
-                            {client.loyaltyBalance ? <span className="text-[10px] bg-slate-900 px-1.5 py-0.5 rounded text-neon-orange border border-slate-700">{client.loyaltyBalance} pts</span> : null}
+                            {renderTierBadge(client.id)}
                         </div>
                         <div className="flex justify-between items-center mt-1">
                              <p className="text-xs md:text-sm text-slate-400">{client.phone}</p>
                         </div>
                         </div>
                     ))}
-                    </div>
-                    {/* PAGINATION CONTROLS */}
-                    <div className="p-3 border-t border-slate-700 bg-slate-900/50 flex justify-between items-center">
-                        <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => Math.max(1, p - 1))} className="p-2 bg-slate-700 rounded hover:bg-slate-600 disabled:opacity-50"><ChevronLeft size={16}/></button>
-                        <span className="text-xs text-slate-400">Pág {currentPage} de {totalPages || 1}</span>
-                        <button disabled={currentPage >= totalPages} onClick={() => setCurrentPage(p => p + 1)} className="p-2 bg-slate-700 rounded hover:bg-slate-600 disabled:opacity-50"><ChevronRight size={16}/></button>
                     </div>
                 </div>
 
@@ -279,12 +352,12 @@ const CRM: React.FC = () => {
                                             <h2 className="text-xl md:text-2xl font-bold text-white flex items-center gap-2">
                                                 {selectedClient.name}
                                             </h2>
-                                            {selectedClientTier === 'VIP' && (
+                                            {clientMetrics[selectedClient.id]?.tier === 'VIP' && (
                                                 <div className="flex items-center gap-1 bg-yellow-500/20 text-yellow-500 px-2 py-1 rounded-full text-xs font-bold border border-yellow-500/30">
                                                     <Crown size={12} fill="currentColor"/> VIP
                                                 </div>
                                             )}
-                                            {selectedClientTier === 'FIEL' && (
+                                            {clientMetrics[selectedClient.id]?.tier === 'FIEL' && (
                                                 <div className="flex items-center gap-1 bg-blue-500/20 text-blue-400 px-2 py-1 rounded-full text-xs font-bold border border-blue-500/30">
                                                     <Star size={12} fill="currentColor"/> Fiel
                                                 </div>
@@ -379,7 +452,7 @@ const CRM: React.FC = () => {
                                         <div className="bg-slate-900 p-4 rounded-lg border border-slate-700 relative overflow-hidden">
                                             <p className="text-slate-500 text-xs uppercase font-bold relative z-10">Classificação</p>
                                             <div className="relative z-10 mt-1 flex items-center gap-2">
-                                                {selectedClientTier === 'VIP' ? <span className="text-yellow-500 font-bold flex items-center gap-1 text-sm md:text-base"><Crown size={16} fill="currentColor"/> VIP</span> : selectedClientTier === 'FIEL' ? <span className="text-blue-400 font-bold flex items-center gap-1 text-sm md:text-base"><Star size={16} fill="currentColor"/> FIEL</span> : <span className="text-slate-400 font-bold flex items-center gap-1 text-sm md:text-base"><Sparkles size={16}/> NOVO / OCASIONAL</span>}
+                                                {clientMetrics[selectedClient.id]?.tier === 'VIP' ? <span className="text-yellow-500 font-bold flex items-center gap-1 text-sm md:text-base"><Crown size={16} fill="currentColor"/> VIP ({clientMetrics[selectedClient.id].count})</span> : clientMetrics[selectedClient.id]?.tier === 'FIEL' ? <span className="text-blue-400 font-bold flex items-center gap-1 text-sm md:text-base"><Star size={16} fill="currentColor"/> FIEL ({clientMetrics[selectedClient.id].count})</span> : <span className="text-slate-400 font-bold flex items-center gap-1 text-sm md:text-base"><Sparkles size={16}/> NOVO / OCASIONAL</span>}
                                             </div>
                                         </div>
                                         <div className="bg-slate-900 p-4 rounded-lg border border-slate-700 sm:col-span-2 lg:col-span-1">
@@ -489,14 +562,10 @@ const CRM: React.FC = () => {
           </div>
       ) : (
           <div className="flex-1 overflow-x-auto overflow-y-hidden">
-                <div className="p-4 text-center text-slate-500 bg-slate-900/50 rounded-lg border border-slate-800 mx-4">
-                    <p className="mb-2">A visualização Kanban exibe apenas os clientes carregados na página atual.</p>
-                    <p className="text-xs">Use a visualização em Lista para buscar clientes específicos.</p>
-                </div>
                 {loading ? (
                     <div className="flex justify-center items-center h-full"><Loader2 className="animate-spin text-neon-blue" size={48} /></div>
                 ) : (
-                    <div className="flex gap-4 h-full min-w-[1200px] pb-4 px-4 lg:px-0 pt-4">
+                    <div className="flex gap-4 h-full min-w-[1200px] pb-4 px-4 lg:px-0">
                         {FUNNEL_STAGES.map((stage) => {
                             const stageClients = getClientsByStage(stage);
                             return (
@@ -507,6 +576,7 @@ const CRM: React.FC = () => {
                                         <div key={client.id} draggable onDragStart={(e) => handleDragStart(e, client.id)} className={`bg-slate-700 p-4 rounded-lg shadow-sm border border-slate-600 transition group relative ${canEditClient ? 'cursor-grab active:cursor-grabbing hover:border-neon-blue hover:shadow-md' : 'cursor-default'}`}>
                                             <div className="flex justify-between items-start mb-2"><h4 className="font-bold text-white text-sm md:text-base">{client.name}</h4>{canEditClient && (<GripVertical className="text-slate-500 opacity-0 group-hover:opacity-100 transition" size={16} />)}</div>
                                             <p className="text-xs text-slate-400">{client.phone}</p>
+                                            {clientMetrics[client.id]?.tier !== 'NOVO' && (<div className="mt-2">{clientMetrics[client.id]?.tier === 'VIP' ? <span className="text-[10px] bg-yellow-500/10 text-yellow-500 px-1.5 py-0.5 rounded border border-yellow-500/20 font-bold flex items-center gap-1 w-fit"><Crown size={8}/> VIP</span> : <span className="text-[10px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/20 font-bold flex items-center gap-1 w-fit"><Star size={8}/> FIEL</span>}</div>)}
                                             <p className="text-[10px] md:text-xs text-slate-500 mt-2">Último: {new Date(client.lastContactAt).toLocaleDateString('pt-BR')}</p>
                                         </div>
                                         ))}

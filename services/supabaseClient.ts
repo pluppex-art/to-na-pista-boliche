@@ -1,19 +1,15 @@
-
 import { createClient } from '@supabase/supabase-js';
 
-// Helper seguro para pegar variáveis de ambiente no Vite ou Vercel
+// Helper to get environment variables safely in Vite or Next.js/Node environments
 const getEnv = (key: string) => {
-  // 1. Tenta Vite (import.meta.env)
-  if (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env[key]) {
-    return (import.meta as any).env[key];
+  // Check for Vite's import.meta.env
+  // Casting to any to avoid TS errors when Vite types are not explicitly loaded
+  if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
+    return (import.meta as any).env[key] || '';
   }
-  // 2. Tenta Process (Node/Vercel Serverless) - Verifica se process existe antes de acessar
-  try {
-    if (typeof process !== 'undefined' && process.env && process.env[key]) {
-      return process.env[key];
-    }
-  } catch (e) {
-    // Ignora erro de referência
+  // Check for Node/Next.js process.env
+  if (typeof process !== 'undefined' && process.env) {
+    return process.env[key] || '';
   }
   return '';
 };

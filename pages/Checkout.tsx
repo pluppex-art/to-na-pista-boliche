@@ -197,9 +197,7 @@ const Checkout: React.FC = () => {
         let firstReservationId = '';
 
         if (existingIds && existingIds.length > 0) {
-            // CORREÇÃO DE PERFORMANCE: Usar getByIds em vez de getAll
-            const allRes = await db.reservations.getByIds(existingIds);
-            
+            const allRes = await db.reservations.getAll();
             for (const id of existingIds) {
                  currentTrackedIds.push(id);
                  const existingRes = allRes.find(r => r.id === id);
