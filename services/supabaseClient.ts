@@ -14,21 +14,15 @@ const getEnv = (key: string) => {
   return '';
 };
 
-// Prioritizes Vercel Integration keys (SUPABASE_URL) then Vite keys (VITE_) then Next.js (NEXT_PUBLIC_)
-const SUPABASE_URL = 
-  getEnv('VITE_SUPABASE_URL') || 
-  getEnv('NEXT_PUBLIC_SUPABASE_URL') || 
-  getEnv('SUPABASE_URL');
+// Use provided credentials as fallback if env vars are missing
+const DEFAULT_URL = 'https://rmirkhebjgvsqqenszts.supabase.co';
+const DEFAULT_KEY = 'sb_publishable_h9bKTMYVO5RvO5eBQZTsNQ_zyZBQCc3';
 
-const SUPABASE_KEY = 
-  getEnv('VITE_SUPABASE_KEY') || 
-  getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY') || 
-  getEnv('SUPABASE_ANON_KEY') || 
-  getEnv('SUPABASE_SERVICE_ROLE_KEY');
+const SUPABASE_URL = getEnv('VITE_SUPABASE_URL') || getEnv('NEXT_PUBLIC_SUPABASE_URL') || DEFAULT_URL;
+const SUPABASE_KEY = getEnv('VITE_SUPABASE_KEY') || getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY') || getEnv('SUPABASE_SERVICE_ROLE_KEY') || DEFAULT_KEY;
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.warn("⚠️ Supabase credentials missing. Please check your Vercel Environment Variables.");
+  console.warn("⚠️ Supabase credentials missing. Please check your configuration.");
 }
 
-// Create client only if keys exist, otherwise it might throw or create an invalid client
-export const supabase = createClient(SUPABASE_URL || '', SUPABASE_KEY || '');
+export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
