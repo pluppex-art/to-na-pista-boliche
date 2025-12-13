@@ -207,7 +207,7 @@ export const db = {
 
         if (profileData.ativo === false) {
              await (supabase.auth as any).signOut();
-             return { error: 'Conta desativada.' };
+             return { error: 'Conta desativada. Contate o administrador.' };
         }
 
         const roleNormalized = (profileData.role || '').toUpperCase() as UserRole;
@@ -232,7 +232,8 @@ export const db = {
               perm_delete_reservation: isAdmin ? true : (profileData.perm_delete_reservation ?? false),
               perm_edit_client: isAdmin ? true : (profileData.perm_edit_client ?? false),
               perm_receive_payment: isAdmin ? true : (profileData.perm_receive_payment ?? false),
-              perm_create_reservation_no_contact: isAdmin ? true : (profileData.perm_create_reservation_no_contact ?? false)
+              perm_create_reservation_no_contact: isAdmin ? true : (profileData.perm_create_reservation_no_contact ?? false),
+              active: profileData.ativo ?? true
             }
         };
 
@@ -275,7 +276,7 @@ export const db = {
     },
 
     getAll: async (): Promise<User[]> => {
-      const { data, error } = await supabase.from('usuarios').select('*');
+      const { data, error } = await supabase.from('usuarios').select('*').order('nome');
       if (error) return [];
       return data.map((u: any) => {
         const roleNormalized = (u.role || '').toUpperCase() as UserRole;
@@ -294,7 +295,8 @@ export const db = {
           perm_delete_reservation: isAdmin ? true : (u.perm_delete_reservation ?? false),
           perm_edit_client: isAdmin ? true : (u.perm_edit_client ?? false),
           perm_receive_payment: isAdmin ? true : (u.perm_receive_payment ?? false),
-          perm_create_reservation_no_contact: isAdmin ? true : (u.perm_create_reservation_no_contact ?? false)
+          perm_create_reservation_no_contact: isAdmin ? true : (u.perm_create_reservation_no_contact ?? false),
+          active: u.ativo ?? true
         };
       });
     },
@@ -320,7 +322,8 @@ export const db = {
         perm_delete_reservation: isAdmin ? true : (data.perm_delete_reservation ?? false),
         perm_edit_client: isAdmin ? true : (data.perm_edit_client ?? false),
         perm_receive_payment: isAdmin ? true : (data.perm_receive_payment ?? false),
-        perm_create_reservation_no_contact: isAdmin ? true : (data.perm_create_reservation_no_contact ?? false)
+        perm_create_reservation_no_contact: isAdmin ? true : (data.perm_create_reservation_no_contact ?? false),
+        active: data.ativo ?? true
       };
     },
 
@@ -337,7 +340,8 @@ export const db = {
         perm_delete_reservation: user.perm_delete_reservation,
         perm_edit_client: user.perm_edit_client,
         perm_receive_payment: user.perm_receive_payment,
-        perm_create_reservation_no_contact: user.perm_create_reservation_no_contact
+        perm_create_reservation_no_contact: user.perm_create_reservation_no_contact,
+        ativo: user.active ?? true
       };
       const { error } = await supabase.from('usuarios').update(payload).eq('id', user.id);
       if (error) throw new Error(error.message);

@@ -3,7 +3,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { db } from '../services/mockBackend';
 import { AppSettings, UserRole, User, DayConfig } from '../types';
 import { PERMISSION_KEYS } from '../constants';
-import { Save, UserPlus, Clock, LogOut, X, Trash2, CreditCard, Loader2, DollarSign, MapPin, Upload, Camera, CheckCircle, AlertTriangle, Key, Link2, ShieldCheck, ChevronDown, Lock, Pencil, Shield, CalendarOff, Plus, Crown, IdCard, Check, Settings as SettingsIcon, Database, RefreshCw, Copy, Terminal } from 'lucide-react';
+import { Save, UserPlus, Clock, LogOut, X, Trash2, CreditCard, Loader2, DollarSign, MapPin, Upload, Camera, CheckCircle, AlertTriangle, Key, Link2, ShieldCheck, ChevronDown, Lock, Pencil, Shield, CalendarOff, Plus, Crown, IdCard, Check, Settings as SettingsIcon, Database, RefreshCw, Copy, Terminal, Power } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -46,6 +46,7 @@ const Settings: React.FC = () => {
     email: '',
     passwordHash: '',
     role: UserRole.GESTOR,
+    active: true,
     // Permissões padrão
     perm_view_agenda: false,
     perm_view_financial: false,
@@ -250,6 +251,7 @@ $$;
         email: '',
         passwordHash: '',
         role: UserRole.GESTOR,
+        active: true,
         perm_view_agenda: true,
         perm_view_financial: false,
         perm_view_crm: false,
@@ -267,7 +269,8 @@ $$;
   const openEditUser = (user: User) => {
       setUserForm({
           ...user,
-          passwordHash: '' // Reset senha visual
+          passwordHash: '', // Reset senha visual
+          active: user.active ?? true
       });
       setIsEditingUser(true);
       setShowUserModal(true);
@@ -288,6 +291,7 @@ $$;
       email: userForm.email,
       role: userForm.role || UserRole.GESTOR,
       passwordHash: userForm.passwordHash || '',
+      active: userForm.active,
       perm_view_agenda: !!userForm.perm_view_agenda,
       perm_view_financial: !!userForm.perm_view_financial,
       perm_view_crm: !!userForm.perm_view_crm,
@@ -501,7 +505,7 @@ $$;
         {activeTab === 'team' && (
           <div className="space-y-6 animate-fade-in">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"><h3 className="text-xl font-bold text-white">Usuários do Sistema</h3><button onClick={openAddUser} className="w-full sm:w-auto text-sm bg-neon-blue hover:bg-blue-600 text-white px-4 py-3 sm:py-2 rounded flex items-center justify-center gap-2 font-bold"><UserPlus size={16} /> Adicionar Usuário</button></div>
-            <div className="border border-slate-700 rounded-lg overflow-x-auto"><table className="w-full text-left text-sm text-slate-300 min-w-[500px]"><thead className="bg-slate-900 text-slate-400"><tr><th className="p-3">Nome</th><th className="p-3">Email</th><th className="p-3">Função</th><th className="p-3 text-right">Ações</th></tr></thead><tbody className="divide-y divide-slate-700">{users.map(user => (<tr key={user.id} className="hover:bg-slate-700/30"><td className="p-3 text-white font-medium">{user.name}</td><td className="p-3">{user.email}</td><td className="p-3"><span className={`px-2 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1 ${user.role === UserRole.ADMIN ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'}`}>{user.role === UserRole.ADMIN ? <Crown size={12} fill="currentColor"/> : <IdCard size={12}/>}{user.role === UserRole.ADMIN ? 'Admin Master' : 'Colaborador'}</span></td><td className="p-3 text-right"><div className="flex justify-end gap-2"><button onClick={() => openEditUser(user)} className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition"><Pencil size={14} /></button><button onClick={() => handleRequestDelete(user)} className="p-2 bg-red-900/20 hover:bg-red-900/40 text-red-400 border border-red-500/20 rounded transition"><Trash2 size={14} /></button></div></td></tr>))}</tbody></table></div>
+            <div className="border border-slate-700 rounded-lg overflow-x-auto"><table className="w-full text-left text-sm text-slate-300 min-w-[500px]"><thead className="bg-slate-900 text-slate-400"><tr><th className="p-3">Nome</th><th className="p-3">Email</th><th className="p-3">Função</th><th className="p-3">Status</th><th className="p-3 text-right">Ações</th></tr></thead><tbody className="divide-y divide-slate-700">{users.map(user => (<tr key={user.id} className="hover:bg-slate-700/30"><td className="p-3 text-white font-medium">{user.name}</td><td className="p-3">{user.email}</td><td className="p-3"><span className={`px-2 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1 ${user.role === UserRole.ADMIN ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'}`}>{user.role === UserRole.ADMIN ? <Crown size={12} fill="currentColor"/> : <IdCard size={12}/>}{user.role === UserRole.ADMIN ? 'Admin Master' : 'Colaborador'}</span></td><td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold ${user.active !== false ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>{user.active !== false ? 'Ativo' : 'Inativo'}</span></td><td className="p-3 text-right"><div className="flex justify-end gap-2"><button onClick={() => openEditUser(user)} className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition"><Pencil size={14} /></button><button onClick={() => handleRequestDelete(user)} className="p-2 bg-red-900/20 hover:bg-red-900/40 text-red-400 border border-red-500/20 rounded transition"><Trash2 size={14} /></button></div></td></tr>))}</tbody></table></div>
           </div>
         )}
 
@@ -577,7 +581,7 @@ $$;
         )}
       </div>
 
-      {/* User Modal e Delete Modal mantidos iguais... */}
+      {/* User Modal */}
       {showUserModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
           <div className="bg-slate-800 border border-slate-600 w-full max-w-xl rounded-2xl shadow-2xl animate-scale-in my-auto">
@@ -585,6 +589,21 @@ $$;
              <form onSubmit={handleSaveUser} className="p-6 space-y-5">
                <div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className="block text-slate-400 mb-1 text-sm font-bold">Nome Completo</label><input required type="text" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:border-neon-blue outline-none" value={userForm.name} onChange={e => setUserForm({...userForm, name: e.target.value})} /></div><div><label className="block text-slate-400 mb-1 text-sm font-bold">E-mail de Login</label><input required type="email" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:border-neon-blue outline-none" value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} /></div></div>
                <div><label className="block text-slate-400 mb-1 text-sm font-bold">Senha {isEditingUser && <span className="text-xs text-slate-500 font-normal">(Deixe em branco para manter)</span>}</label><input required={!isEditingUser} type="password" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:border-neon-blue outline-none" value={userForm.passwordHash} onChange={e => setUserForm({...userForm, passwordHash: e.target.value})} /></div>
+               
+               {isEditingUser && (
+                   <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700 flex items-center justify-between">
+                       <span className="text-sm font-bold text-white flex items-center gap-2"><Power size={16}/> Acesso do Usuário</span>
+                       <label className="flex items-center cursor-pointer">
+                           <span className={`mr-3 text-xs font-bold ${userForm.active ? 'text-green-400' : 'text-red-400'}`}>{userForm.active ? 'ATIVO' : 'INATIVO'}</span>
+                           <div className="relative">
+                               <input type="checkbox" className="sr-only" checked={userForm.active} onChange={e => setUserForm({...userForm, active: e.target.checked})}/>
+                               <div className={`block w-10 h-6 rounded-full transition ${userForm.active ? 'bg-green-500' : 'bg-slate-600'}`}></div>
+                               <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition ${userForm.active ? 'transform translate-x-4' : ''}`}></div>
+                           </div>
+                       </label>
+                   </div>
+               )}
+
                <div><label className="block text-slate-400 mb-2 text-sm font-bold">Função do Usuário</label><div className="grid grid-cols-2 gap-4"><div onClick={() => setUserForm({...userForm, role: UserRole.ADMIN})} className={`cursor-pointer rounded-xl p-4 border-2 transition relative ${userForm.role === UserRole.ADMIN ? 'bg-purple-900/20 border-purple-500' : 'bg-slate-900 border-slate-700 hover:border-slate-500'}`}><div className="flex items-center gap-2 mb-2"><Crown size={20} className={userForm.role === UserRole.ADMIN ? 'text-purple-400' : 'text-slate-500'} fill={userForm.role === UserRole.ADMIN ? "currentColor" : "none"} /><span className={`font-bold ${userForm.role === UserRole.ADMIN ? 'text-white' : 'text-slate-400'}`}>Admin Master</span></div><p className="text-xs text-slate-500 leading-tight">Acesso irrestrito a todas as configurações, financeiro e usuários.</p>{userForm.role === UserRole.ADMIN && <div className="absolute top-2 right-2 text-purple-500"><CheckCircle size={16} /></div>}</div><div onClick={() => setUserForm({...userForm, role: UserRole.GESTOR})} className={`cursor-pointer rounded-xl p-4 border-2 transition relative ${userForm.role === UserRole.GESTOR ? 'bg-blue-900/20 border-blue-500' : 'bg-slate-900 border-slate-700 hover:border-slate-500'}`}><div className="flex items-center gap-2 mb-2"><IdCard size={20} className={userForm.role === UserRole.GESTOR ? 'text-blue-400' : 'text-slate-500'} /><span className={`font-bold ${userForm.role === UserRole.GESTOR ? 'text-white' : 'text-slate-400'}`}>Colaborador</span></div><p className="text-xs text-slate-500 leading-tight">Acesso limitado às funções operacionais definidas abaixo.</p>{userForm.role === UserRole.GESTOR && <div className="absolute top-2 right-2 text-blue-500"><CheckCircle size={16} /></div>}</div></div></div>
                <div className={`p-4 rounded-lg border transition-all ${userForm.role === UserRole.ADMIN ? 'bg-purple-900/10 border-purple-500/30' : 'bg-slate-900/50 border-slate-700'}`}><div className="flex justify-between items-center mb-3"><label className="text-sm font-bold text-slate-300">Permissões de Acesso</label></div>{userForm.role === UserRole.ADMIN ? (<div className="flex flex-col items-center justify-center py-4 text-center"><ShieldCheck size={32} className="text-purple-500 mb-2"/><p className="text-sm font-bold text-white">Acesso Total Habilitado</p><p className="text-xs text-purple-400 mt-1">Administradores possuem todas as permissões por padrão.</p></div>) : (<div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1 animate-fade-in">{PERMISSION_KEYS.map(perm => { const isSelected = !!userForm[perm.key]; return (<label key={perm.key} className="flex items-center gap-3 p-2 rounded border border-slate-700 cursor-pointer hover:bg-slate-800 transition"><div className={`w-5 h-5 rounded flex items-center justify-center border ${isSelected ? 'bg-neon-blue border-neon-blue' : 'bg-slate-900 border-slate-600'}`}>{isSelected && <Check size={14} className="text-white"/>}</div><input type="checkbox" className="hidden" checked={isSelected} onChange={() => togglePermission(perm.key)}/><span className={`text-xs ${isSelected ? 'text-white font-medium' : 'text-slate-400'}`}>{perm.label}</span></label>); })}</div>)}</div>
                <div className="pt-2"><button type="submit" className="w-full bg-neon-blue hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition shadow-lg">{isEditingUser ? 'Salvar Alterações' : 'Criar Usuário'}</button></div>
@@ -594,7 +613,7 @@ $$;
       )}
 
       {userToDelete && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"><div className="bg-slate-800 border border-slate-600 w-full max-w-sm rounded-xl shadow-2xl animate-scale-in p-6"><div className="flex flex-col items-center text-center mb-6"><div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mb-4"><AlertTriangle size={32} className="text-red-500"/></div><h3 className="text-xl font-bold text-white mb-2">Excluir Usuário?</h3><p className="text-slate-400 text-sm">Tem certeza que deseja remover <strong>{userToDelete.name}</strong>? Esta ação não pode ser desfeita.</p></div><div className="flex gap-3"><button onClick={() => setUserToDelete(null)} className="flex-1 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition font-medium">Cancelar</button><button onClick={confirmDeleteUser} disabled={isDeleting} className="flex-1 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg transition font-bold flex items-center justify-center gap-2">{isDeleting ? <Loader2 className="animate-spin" size={18}/> : 'Sim, Excluir'}</button></div></div></div>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"><div className="bg-slate-800 border border-slate-600 w-full max-w-sm rounded-xl shadow-2xl animate-scale-in p-6"><div className="flex flex-col items-center text-center mb-6"><div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mb-4"><AlertTriangle size={32} className="text-red-500"/></div><h3 className="text-xl font-bold text-white mb-2">Excluir Usuário?</h3><p className="text-slate-400 text-sm">Tem certeza que deseja remover <strong>{userToDelete.name}</strong>?</p><p className="text-xs text-slate-500 mt-2 bg-slate-900 p-2 rounded border border-slate-700">Dica: Se possível, prefira <strong>Desativar</strong> o usuário na edição para manter o histórico e evitar problemas de login.</p></div><div className="flex gap-3"><button onClick={() => setUserToDelete(null)} className="flex-1 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition font-medium">Cancelar</button><button onClick={confirmDeleteUser} disabled={isDeleting} className="flex-1 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg transition font-bold flex items-center justify-center gap-2">{isDeleting ? <Loader2 className="animate-spin" size={18}/> : 'Sim, Excluir'}</button></div></div></div>
       )}
     </div>
   );
