@@ -1,9 +1,8 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { db } from '../services/mockBackend';
-import { Loader2, Users, Briefcase, ChevronRight, Globe, Lock, Key } from 'lucide-react';
+import { Loader2, Users, Briefcase, ChevronRight, Globe, Lock, Key, AlertTriangle } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { useApp } from '../contexts/AppContext';
 
@@ -17,6 +16,7 @@ const Login: React.FC = () => {
   const [phone, setPhone] = useState(''); 
   
   const [error, setError] = useState('');
+  const [errorCode, setErrorCode] = useState(''); // Novo estado para código de erro
   const [isLoading, setIsLoading] = useState(false);
   const [imgError, setImgError] = useState(false);
   
@@ -57,13 +57,15 @@ const Login: React.FC = () => {
   const handleStaffLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setErrorCode('');
     setIsLoading(true);
 
     try {
-      const { user, isFirstAccess, error: loginError } = await db.users.login(email, password);
+      const { user, isFirstAccess, error: loginError, errorCode: code } = await db.users.login(email, password);
       
       if (loginError || !user) {
         setError(loginError || 'E-mail ou senha inválidos.');
+        if (code) setErrorCode(code);
         setIsLoading(false);
         return;
       }
@@ -230,7 +232,20 @@ const Login: React.FC = () => {
                 <form onSubmit={handleStaffLogin} className="space-y-5 animate-fade-in">
                     <div><label className="block text-xs font-bold text-slate-400 mb-1 uppercase">E-mail Corporativo</label><input type="email" required className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-neon-orange transition" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
                     <div><label className="block text-xs font-bold text-slate-400 mb-1 uppercase">Senha</label><input type="password" required className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-neon-orange transition" value={password} onChange={(e) => setPassword(e.target.value)} /></div>
-                    {error && <div className="p-3 bg-red-500/10 border border-red-500/50 text-red-400 text-sm rounded-lg text-center">{error}</div>}
+                    
+                    {errorCode === 'ID_MISMATCH' && (
+                        <div className="p-4 bg-yellow-900/30 border border-yellow-500/50 text-yellow-200 text-sm rounded-lg flex gap-3 items-start animate-pulse">
+                            <AlertTriangle className="flex-shrink-0 text-yellow-500" size={20}/>
+                            <div>
+                                <p className="font-bold mb-1">Ação Necessária</p>
+                                <p className="text-xs opacity-90 mb-2">Sua conta existe, mas precisa de sincronização técnica.</p>
+                                <p className="text-xs">Peça ao administrador para acessar: <br/> <strong>Configurações &gt; Sistema &gt; Sincronizar IDs</strong></p>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {error && !errorCode && <div className="p-3 bg-red-500/10 border border-red-500/50 text-red-400 text-sm rounded-lg text-center">{error}</div>}
+                    
                     <button type="submit" disabled={isLoading} className="w-full bg-neon-orange hover:bg-orange-600 text-white font-bold py-3 rounded-lg shadow-lg transition-all flex items-center justify-center gap-2">{isLoading ? <Loader2 className="animate-spin" /> : 'Acessar Sistema'}</button>
                 </form>
             ) : (

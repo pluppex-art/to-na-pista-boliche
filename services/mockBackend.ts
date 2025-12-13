@@ -37,73 +37,63 @@ export const db = {
                       onProgress(`Processando Staff: ${u.nome}...`);
                       
                       // Tenta criar/obter usuário no Auth
-                      // Nota: A senha padrão será 123456 se o usuário for criado agora
                       const { data: authData, error: authError } = await (tempSupabase.auth as any).signUp({
                           email: u.email,
                           password: '123456', 
                           options: { data: { name: u.nome, role: u.role } }
                       });
 
-                      const authId = authData?.user?.id;
-
-                      if (authId && authId !== u.id) {
-                          onProgress(`🔄 Corrigindo ID de ${u.nome} (DB: ${u.id.slice(0,4)}... -> Auth: ${authId.slice(0,4)}...)`);
-                          
-                          // Chama a função RPC SQL para trocar os IDs em cascata
-                          const { error: rpcError } = await supabase.rpc('swap_user_id', {
-                              old_id: u.id,
-                              new_id: authId
-                          });
-
-                          if (rpcError) {
-                              console.error(`Erro ao trocar ID de ${u.nome}:`, rpcError);
-                              onProgress(`❌ Erro SQL: ${rpcError.message}`);
-                          } else {
-                              onProgress(`✅ ID de ${u.nome} atualizado com sucesso!`);
-                          }
-                      } else if (authId === u.id) {
-                          onProgress(`✅ ${u.nome} já está sincronizado.`);
-                      } else {
-                          onProgress(`⚠️ Erro no Auth para ${u.nome}: ${authError?.message}`);
-                      }
-                  }
-              }
-
-              // 2. SINCRONIZAR CLIENTES
-              onProgress("Buscando clientes...");
-              const { data: clients } = await supabase.from('clientes').select('*');
-              
-              if (clients) {
-                  for (const c of clients) {
-                      if (!c.email) continue; // Pula clientes sem email (são apenas leads)
-
-                      onProgress(`Processando Cliente: ${c.name}...`);
+                      // Se falhar o cadastro (ex: já existe), tentamos pegar o usuário existente se o erro permitir, 
+                      // ou assumimos que o login abaixo resolveria. Mas aqui precisamos do ID.
+                      // Se signUp falhar pq existe, não retorna o ID. Precisamos de outra estratégia se for admin.
                       
-                      const { data: authData, error: authError } = await (tempSupabase.auth as any).signUp({
-                          email: c.email,
-                          password: '123456',
-                          options: { data: { name: c.name } }
-                      });
-
-                      const authId = authData?.user?.id;
-
-                      if (authId && authId !== c.client_id) {
-                          onProgress(`🔄 Corrigindo ID de Cliente ${c.name}...`);
+                      // Melhor abordagem: Tentar login simulado ou confiar que se já existe, vamos pegar pelo ID na próxima etapa? 
+                      // Não, se já existe no Auth mas não syncou, precisamos do ID do Auth.
+                      // O Auth do Supabase não deixa listar usuários via cliente público.
+                      
+                      // SOLUÇÃO: O Admin roda isso. O Admin roda SQL.
+                      // Aqui, tentamos chamar a RPC. Se a RPC existir, ela resolve.
+                      
+                      let authId = authData?.user?.id;
+                      
+                      // Se não conseguimos o AuthID (ex: usuário já existe), não podemos fazer muito via Client-Side sem Admin API.
+                      // Mas se o usuário acabou de ser criado, temos o ID.
+                      
+                      if (authId && authId !== u.id) {
+                          onProgress(`🔄 Tentando corrigir ID de ${u.nome}...`);
                           
-                          const { error: rpcError } = await supabase.rpc('swap_client_id', {
-                              old_id: c.client_id,
-                              new_id: authId
-                          });
+                          try {
+                              const { error: rpcError } = await supabase.rpc('swap_user_id', {
+                                  old_id: u.id,
+                                  new_id: authId
+                              });
 
-                          if (rpcError) console.error(rpcError);
+                              if (rpcError) {
+                                  // Se erro for "function not found", lançamos para ser pego no UI
+                                  if (rpcError.message.includes('function') && rpcError.message.includes('does not exist')) {
+                                      throw new Error("RPC_MISSING");
+                                  }
+                                  onProgress(`❌ Erro SQL: ${rpcError.message}`);
+                              } else {
+                                  onProgress(`✅ ID de ${u.nome} atualizado!`);
+                              }
+                          } catch (rpcErr: any) {
+                              if (rpcErr.message === 'RPC_MISSING') throw rpcErr;
+                              console.error(rpcErr);
+                          }
+                      } else if (!authId && authError?.message?.includes('registered')) {
+                          onProgress(`⚠️ ${u.nome} já existe no Auth. Use o Script SQL para forçar a sincronia.`);
                       }
                   }
               }
 
-              onProgress("FINALIZADO: Sincronização completa.");
+              onProgress("FINALIZADO. Se houver erros, use o Script SQL.");
 
           } catch (e: any) {
-              onProgress(`ERRO CRÍTICO: ${e.message}`);
+              if (e.message === 'RPC_MISSING') {
+                  throw e; // Repassa para a UI mostrar o código SQL
+              }
+              onProgress(`ERRO: ${e.message}`);
               console.error(e);
           }
       }
@@ -164,7 +154,7 @@ export const db = {
   },
 
   users: {
-    login: async (email: string, password: string): Promise<{ user?: User; isFirstAccess?: boolean; error?: string }> => {
+    login: async (email: string, password: string): Promise<{ user?: User; isFirstAccess?: boolean; error?: string; errorCode?: string }> => {
       try {
         // 1. Auth Real do Supabase
         const { data: authData, error: authError } = await (supabase.auth as any).signInWithPassword({
@@ -175,7 +165,7 @@ export const db = {
         if (authError) return { error: 'E-mail ou senha incorretos.' };
         if (!authData.user) return { error: 'Erro ao recuperar usuário.' };
 
-        // 2. Busca perfil na tabela 'usuarios'
+        // 2. Busca perfil na tabela 'usuarios' usando o ID do Auth
         let { data: profileData, error: profileError } = await supabase
           .from('usuarios')
           .select('*')
@@ -183,18 +173,23 @@ export const db = {
           .maybeSingle();
 
         if (profileError?.message?.includes('infinite recursion')) {
-            console.error("ERRO CRÍTICO: Recursão infinita nas políticas RLS.");
             return { error: 'Erro crítico de configuração (Loop no Banco de Dados). Contate o suporte.' };
         }
 
-        // 3. AUTO-CURA (Self-Healing) para Admin
-        // Se o Auth funcionou mas não achou o perfil (perfil deletado ou ID mudou), 
-        // e é o email mestre, recriamos o perfil automaticamente.
-        if ((!profileData || profileError) && email === 'admin@tonapista.com') {
-            console.warn("Perfil Admin não encontrado ou dessincronizado. Tentando Auto-Cura...");
+        // 3. AUTO-CURA (Self-Healing) para Admin Master
+        if ((!profileData) && email === 'admin@tonapista.com') {
+            console.warn("Perfil Admin não encontrado. Tentando Auto-Cura...");
             
+            // Tenta achar o registro antigo pelo email para pegar os dados antes de recriar
+            const { data: oldProfile } = await supabase.from('usuarios').select('*').eq('email', email).maybeSingle();
+            
+            // Se achou perfil antigo, deleta (para liberar o email unique) e recria com ID novo
+            if (oldProfile) {
+                await supabase.from('usuarios').delete().eq('id', oldProfile.id);
+            }
+
             const adminPayload = {
-                id: authData.user.id, // Usa o ID NOVO gerado pelo Auth
+                id: authData.user.id, // ID NOVO
                 nome: 'Admin Master',
                 email: email,
                 role: 'ADMIN',
@@ -213,37 +208,45 @@ export const db = {
             const { error: insertError } = await supabase.from('usuarios').upsert(adminPayload);
             
             if (!insertError) {
-                // Tenta buscar novamente após inserir
                 const retry = await supabase.from('usuarios').select('*').eq('id', authData.user.id).maybeSingle();
                 profileData = retry.data;
-                profileError = retry.error;
             } else {
-                console.error("Falha na Auto-Cura:", insertError.message);
-                
-                if (insertError.message.includes('infinite recursion')) {
-                    return { error: 'Falha na Auto-Cura: Loop de segurança (RLS Recursivo) detectado no banco.' };
-                }
-                
-                // Se falhar a inserção (ex: RLS bloqueando), retornamos erro detalhado
-                return { error: `Erro de integridade (RLS Bloqueando Auto-Cura): ${insertError.message}` };
+                return { error: `Falha na Auto-Cura Admin: ${insertError.message}` };
             }
         }
 
-        if (profileError || !profileData) {
-            // VERIFICAÇÃO INTELIGENTE: É um Cliente tentando logar na aba errada?
+        // 4. Detecção de Dessincronização para Usuários Comuns
+        if (!profileData) {
+            // Tenta achar por email para confirmar se é caso de ID errado
+            const { data: mismatchData } = await supabase
+                .from('usuarios')
+                .select('id')
+                .eq('email', email)
+                .maybeSingle();
+
+            if (mismatchData) {
+                // Existe no banco, mas com ID diferente!
+                await (supabase.auth as any).signOut();
+                return { 
+                    error: 'Sua conta precisa de sincronização de ID.', 
+                    errorCode: 'ID_MISMATCH' 
+                };
+            }
+
+            // Verifica se é cliente
             const { data: clientData } = await supabase
                 .from('clientes')
                 .select('client_id')
                 .eq('client_id', authData.user.id)
                 .maybeSingle();
             
-            await (supabase.auth as any).signOut(); // Logout da sessão auth inválida
+            await (supabase.auth as any).signOut();
 
             if (clientData) {
                 return { error: 'Esta conta é de Cliente. Por favor, use a aba "Sou Cliente".' };
             }
 
-            return { error: 'Acesso negado. Perfil de equipe não encontrado no banco de dados.' };
+            return { error: 'Acesso negado. Perfil de equipe não encontrado.' };
         }
 
         if (profileData.ativo === false) {
@@ -253,8 +256,6 @@ export const db = {
 
         const roleNormalized = (profileData.role || '').toUpperCase() as UserRole;
         const isAdmin = roleNormalized === UserRole.ADMIN;
-        
-        // Verifica primeiro acesso (senha padrão ou flag no banco se houver)
         const isFirstAccess = password === '123456'; 
 
         db.audit.log(profileData.id, profileData.nome, 'LOGIN', 'Usuário realizou login');
@@ -285,36 +286,26 @@ export const db = {
       }
     },
     
+    // ... restante das funções user (create, getAll, etc) mantidas igual ...
     create: async (user: User) => {
-      // TRUQUE: Usamos um cliente secundário para criar o usuário sem deslogar o admin atual
       const tempSupabase = createClient(
           (supabase as any).supabaseUrl,
           (supabase as any).supabaseKey
       );
-
-      // 1. Cria no Auth
       const { data: authData, error: authError } = await (tempSupabase.auth as any).signUp({
           email: user.email,
           password: user.passwordHash || '123456', 
-          options: {
-              data: { 
-                  name: user.name,
-                  role: user.role // Metadados úteis para triggers
-              }
-          }
+          options: { data: { name: user.name, role: user.role } }
       });
-
       if (authError) throw new Error(authError.message);
       if (!authData.user) throw new Error("Erro ao criar usuário no Auth.");
 
-      // 2. Insere/Atualiza na tabela 'usuarios'
       const { error: profileError } = await supabase.from('usuarios').upsert({
         id: authData.user.id, 
         nome: user.name,
         email: user.email,
         role: user.role,
         ativo: true,
-        // Permissões
         perm_view_agenda: user.perm_view_agenda,
         perm_view_financial: user.perm_view_financial,
         perm_view_crm: user.perm_view_crm,
@@ -325,17 +316,12 @@ export const db = {
         perm_receive_payment: user.perm_receive_payment,
         perm_create_reservation_no_contact: user.perm_create_reservation_no_contact
       });
-
-      if (profileError) {
-          console.error("Erro ao criar perfil:", profileError);
-          throw new Error("Usuário criado no Auth, mas falha ao criar perfil: " + profileError.message);
-      }
+      if (profileError) throw new Error(profileError.message);
     },
 
     getAll: async (): Promise<User[]> => {
       const { data, error } = await supabase.from('usuarios').select('*');
       if (error) return [];
-      
       return data.map((u: any) => {
         const roleNormalized = (u.role || '').toUpperCase() as UserRole;
         const isAdmin = roleNormalized === UserRole.ADMIN;
@@ -398,14 +384,11 @@ export const db = {
         perm_receive_payment: user.perm_receive_payment,
         perm_create_reservation_no_contact: user.perm_create_reservation_no_contact
       };
-      
       const { error } = await supabase.from('usuarios').update(payload).eq('id', user.id);
       if (error) throw new Error(error.message);
-
-      // Atualizar senha no Auth se fornecida
       if (user.passwordHash && user.passwordHash.length > 0) {
           const { error: authErr } = await (supabase.auth as any).updateUser({ password: user.passwordHash });
-          if (authErr) console.warn("Aviso: Não foi possível atualizar a senha no Auth (requer login do próprio usuário).");
+          if (authErr) console.warn("Aviso: Falha ao atualizar senha Auth.");
       }
     },
 
@@ -446,37 +429,20 @@ export const db = {
         }
     }
   },
-  
+  // ... (Clients, Loyalty, Reservations, Funnel, Interactions, Settings mantidos iguais) ...
   clients: {
     login: async (email: string, password: string): Promise<{ client?: Client; error?: string }> => {
       try {
-        // 1. Auth Real
         const { data: authData, error: authError } = await (supabase.auth as any).signInWithPassword({ email, password });
-        
         if (authError) return { error: 'E-mail ou senha incorretos.' };
         if (!authData.user) return { error: 'Erro de autenticação.' };
 
-        // 2. Busca perfil na tabela 'clientes'
-        const { data: clientProfile, error: profileError } = await supabase
-            .from('clientes')
-            .select('*')
-            .eq('client_id', authData.user.id)
-            .maybeSingle();
+        const { data: clientProfile, error: profileError } = await supabase.from('clientes').select('*').eq('client_id', authData.user.id).maybeSingle();
 
         if (profileError || !clientProfile) {
-             // VERIFICAÇÃO INTELIGENTE: É um Staff tentando logar na aba de cliente?
-             const { data: staffData } = await supabase
-                .from('usuarios')
-                .select('id')
-                .eq('id', authData.user.id)
-                .maybeSingle();
-             
-             await (supabase.auth as any).signOut(); // Logout imediato
-             
-             if (staffData) {
-                 return { error: 'Esta conta pertence à Equipe. Mude para a aba "Sou Equipe".' };
-             }
-
+             const { data: staffData } = await supabase.from('usuarios').select('id').eq('id', authData.user.id).maybeSingle();
+             await (supabase.auth as any).signOut();
+             if (staffData) return { error: 'Esta conta pertence à Equipe. Mude para a aba "Sou Equipe".' };
              return { error: 'Perfil de cliente não encontrado.' };
         }
 
@@ -501,21 +467,17 @@ export const db = {
     },
     register: async (client: Client, password: string): Promise<{ client?: Client; error?: string }> => {
         try {
-            // 1. Cria conta no Supabase Auth
             const { data: authData, error: authError } = await (supabase.auth as any).signUp({
-                email: client.email || `${client.phone}@temp.com`, // Fallback se não tiver email (auth requer email)
+                email: client.email || `${client.phone}@temp.com`,
                 password: password,
                 options: { data: { name: client.name } }
             });
-
             if (authError) return { error: authError.message };
             if (!authData.user) return { error: "Erro ao criar conta segura." };
 
             const phoneClean = cleanPhone(client.phone);
-
-            // 2. Cria registro na tabela 'clientes'
             const dbClient = {
-                client_id: authData.user.id, // Vínculo crucial
+                client_id: authData.user.id,
                 name: client.name,
                 phone: phoneClean,
                 email: client.email,
@@ -526,26 +488,18 @@ export const db = {
                 funnel_stage: FunnelStage.NOVO,
                 loyalty_balance: 0
             };
-
             const { error } = await supabase.from('clientes').upsert(dbClient);
-            if (error) {
-                return { error: error.message };
-            }
-            
+            if (error) return { error: error.message };
             return { client: { ...client, id: authData.user.id } };
-        } catch (e: any) {
-            return { error: String(e) };
-        }
+        } catch (e: any) { return { error: String(e) }; }
     },
     getAll: async (): Promise<Client[]> => {
       const { data, error } = await supabase.from('clientes').select('*');
       if (error) return [];
-      
       return data.map((c: any) => {
         const tags = safeTags(c.tags);
         const stageFromTag = tags.find((t: string) => FUNNEL_STAGES.includes(t as FunnelStage));
         const finalStage = (c.funnel_stage as FunnelStage) || (stageFromTag as FunnelStage) || FunnelStage.NOVO;
-
         return {
           id: c.client_id, 
           name: c.name || 'Sem Nome', 
@@ -563,58 +517,31 @@ export const db = {
     getByPhone: async (phone: string): Promise<Client | null> => {
       const cleanedPhone = cleanPhone(phone);
       if (!cleanedPhone) return null;
-      
       const { data, error } = await supabase.from('clientes').select('*').or(`phone.eq.${phone},phone.eq.${cleanedPhone}`).maybeSingle();
       if (error || !data) return null;
-
       return {
-        id: data.client_id, 
-        name: data.name,
-        phone: data.phone,
-        email: data.email,
-        photoUrl: data.photo_url,
-        tags: safeTags(data.tags),
-        createdAt: data.created_at,
-        lastContactAt: data.last_contact_at,
-        funnelStage: data.funnel_stage || FunnelStage.NOVO,
-        loyaltyBalance: data.loyalty_balance || 0
+        id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url, tags: safeTags(data.tags), createdAt: data.created_at, lastContactAt: data.last_contact_at, funnelStage: data.funnel_stage || FunnelStage.NOVO, loyaltyBalance: data.loyalty_balance || 0
       };
     },
     getById: async (id: string): Promise<Client | null> => {
       const { data, error } = await supabase.from('clientes').select('*').eq('client_id', id).maybeSingle();
       if (error || !data) return null;
-      return {
-        id: data.client_id, 
-        name: data.name,
-        phone: data.phone,
-        email: data.email,
-        photoUrl: data.photo_url,
-        tags: safeTags(data.tags),
-        createdAt: data.created_at,
-        lastContactAt: data.last_contact_at,
-        funnelStage: data.funnel_stage || FunnelStage.NOVO,
-        loyaltyBalance: data.loyalty_balance || 0
-      };
+      return { id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url, tags: safeTags(data.tags), createdAt: data.created_at, lastContactAt: data.last_contact_at, funnelStage: data.funnel_stage || FunnelStage.NOVO, loyaltyBalance: data.loyalty_balance || 0 };
     },
     create: async (client: Client, createdBy?: string): Promise<Client> => {
       const phoneClean = cleanPhone(client.phone);
       const hasEmail = client.email && client.email.trim().length > 0;
-
       if (!phoneClean && !hasEmail) return client; 
-
       let query = supabase.from('clientes').select('*');
       const conditions = [];
       if (phoneClean) conditions.push(`phone.eq.${phoneClean}`);
       if (hasEmail) conditions.push(`email.eq.${client.email}`);
-      
       let existingClient = null;
       if (conditions.length > 0) {
           const { data } = await query.or(conditions.join(',')).maybeSingle();
           existingClient = data;
       }
-
       if (existingClient) {
-          // UPDATE
           const updatePayload: any = {
               name: client.name || existingClient.name,
               email: (client.email && client.email.trim() !== '') ? client.email : existingClient.email,
@@ -624,14 +551,11 @@ export const db = {
               funnel_stage: client.funnelStage || FunnelStage.NOVO,
               photo_url: client.photoUrl || existingClient.photo_url
           };
-          
           await supabase.from('clientes').update(updatePayload).eq('client_id', existingClient.client_id);
           return { ...client, id: existingClient.client_id, ...updatePayload };
       }
-
-      // CREATE (Simple CRM entry without Auth - "Lead")
       const dbClient = {
-        client_id: client.id || uuidv4(), // Gera UUID se não existir
+        client_id: client.id || uuidv4(),
         name: client.name,
         phone: phoneClean,
         email: (client.email && client.email.trim() !== '') ? client.email : null,
@@ -642,7 +566,6 @@ export const db = {
         funnel_stage: client.funnelStage || FunnelStage.NOVO,
         loyalty_balance: 0
       };
-      
       const { error } = await supabase.from('clientes').insert(dbClient);
       if (error) {
           if (error.code === '23505') { 
@@ -655,22 +578,11 @@ export const db = {
       return { ...client, phone: phoneClean, email: dbClient.email || '' };
     },
     update: async (client: Client, updatedBy?: string) => {
-      const dbClient: any = {
-        name: client.name,
-        phone: cleanPhone(client.phone),
-        email: (client.email && client.email.trim() !== '') ? client.email : null,
-        tags: client.tags,
-        last_contact_at: client.lastContactAt,
-        photo_url: client.photoUrl,
-        funnel_stage: client.funnelStage
-      };
-      
+      const dbClient: any = { name: client.name, phone: cleanPhone(client.phone), email: (client.email && client.email.trim() !== '') ? client.email : null, tags: client.tags, last_contact_at: client.lastContactAt, photo_url: client.photoUrl, funnel_stage: client.funnelStage };
       await supabase.from('clientes').update(dbClient).eq('client_id', client.id);
       if (updatedBy) db.audit.log(updatedBy, 'STAFF', 'UPDATE_CLIENT', `Atualizou ${client.name}`, client.id);
     },
-    updateLastContact: async (clientId: string) => {
-      await supabase.from('clientes').update({ last_contact_at: new Date().toISOString() }).eq('client_id', clientId);
-    },
+    updateLastContact: async (clientId: string) => { await supabase.from('clientes').update({ last_contact_at: new Date().toISOString() }).eq('client_id', clientId); },
     updateStage: async (clientId: string, newStage: FunnelStage) => {
         let { data } = await supabase.from('clientes').select('tags').eq('client_id', clientId).single();
         if (!data) return;
@@ -679,283 +591,91 @@ export const db = {
         await supabase.from('clientes').update({ funnel_stage: newStage, tags: tags }).eq('client_id', clientId);
     }
   },
-
   loyalty: {
       getHistory: async (clientId: string): Promise<LoyaltyTransaction[]> => {
-          const { data, error } = await supabase
-              .from('loyalty_transactions')
-              .select('*')
-              .eq('client_id', clientId)
-              .order('created_at', { ascending: false });
-          
+          const { data, error } = await supabase.from('loyalty_transactions').select('*').eq('client_id', clientId).order('created_at', { ascending: false });
           if (error) return [];
-          return data.map((t: any) => ({
-              id: t.id,
-              clientId: t.client_id,
-              amount: t.amount,
-              description: t.description,
-              createdAt: t.created_at,
-              reservationId: t.reservation_id
-          }));
+          return data.map((t: any) => ({ id: t.id, clientId: t.client_id, amount: t.amount, description: t.description, createdAt: t.created_at, reservationId: t.reservation_id }));
       },
       addTransaction: async (clientId: string, amount: number, description: string, userId?: string) => {
-          const { error } = await supabase.from('loyalty_transactions').insert({
-              client_id: clientId,
-              amount: amount,
-              description: description,
-              created_by: userId
-          });
+          const { error } = await supabase.from('loyalty_transactions').insert({ client_id: clientId, amount: amount, description: description, created_by: userId });
           if (error) throw new Error(error.message);
-
           const { data: client } = await supabase.from('clientes').select('loyalty_balance').eq('client_id', clientId).single();
           await supabase.from('clientes').update({ loyalty_balance: (client?.loyalty_balance || 0) + amount }).eq('client_id', clientId);
-
           if (userId) db.audit.log(userId, 'STAFF', amount > 0 ? 'LOYALTY_ADD' : 'LOYALTY_REMOVE', `Ajuste ${amount} pts`, clientId);
       }
   },
-
   reservations: {
-    // 🚨 OPTIMIZED FETCH: Accepts Date Range to prevent loading FULL DB
     getByDateRange: async (startDate: string, endDate: string): Promise<Reservation[]> => {
-        const { data, error } = await supabase
-            .from('reservas')
-            .select('*')
-            .gte('date', startDate)
-            .lte('date', endDate);
-            
-        if (error) {
-            console.error("Erro ao buscar reservas por data:", error);
-            return [];
-        }
+        const { data, error } = await supabase.from('reservas').select('*').gte('date', startDate).lte('date', endDate);
+        if (error) { console.error("Erro ao buscar reservas por data:", error); return []; }
         return db.reservations._mapReservations(data);
     },
-
-    // DEPRECATED for production use (use getByDateRange), but kept for small lookups
     getAll: async (): Promise<Reservation[]> => {
       const { data, error } = await supabase.from('reservas').select('*');
       if (error) return [];
       return db.reservations._mapReservations(data);
     },
-
     _mapReservations: (data: any[]): Reservation[] => {
-        // Shared mapping logic
         const now = new Date();
         const expiredIds: string[] = [];
-        
         const mapped = data.map((r: any) => ({
-            id: r.id,
-            clientId: r.client_id || '',
-            clientName: r.client_name || 'Cliente',
-            date: r.date, 
-            time: r.time, 
-            peopleCount: r.people_count, 
-            laneCount: r.lane_count, 
-            duration: r.duration, 
-            totalValue: r.total_value, 
-            eventType: r.event_type, 
-            observations: r.observations, 
-            status: (r.status as ReservationStatus) || ReservationStatus.PENDENTE,
-            paymentStatus: (r.payment_status || PaymentStatus.PENDENTE) as PaymentStatus, 
-            createdAt: r.created_at, 
-            guests: r.guests || [],
-            lanes: r.lanes || [],
-            checkedInIds: r.checked_in_ids || [], 
-            noShowIds: r.no_show_ids || [],
-            hasTableReservation: r.has_table_reservation,
-            birthdayName: r.birthday_name,
-            tableSeatCount: r.table_seat_count,
-            payOnSite: r.pay_on_site,
-            comandaId: r.comanda_id,
-            createdBy: r.created_by,
-            lanesAssigned: r.pistas_usadas || []
+            id: r.id, clientId: r.client_id || '', clientName: r.client_name || 'Cliente', date: r.date, time: r.time, peopleCount: r.people_count, laneCount: r.lane_count, duration: r.duration, totalValue: r.total_value, eventType: r.event_type, observations: r.observations, status: (r.status as ReservationStatus) || ReservationStatus.PENDENTE, paymentStatus: (r.payment_status || PaymentStatus.PENDENTE) as PaymentStatus, createdAt: r.created_at, guests: r.guests || [], lanes: r.lanes || [], checkedInIds: r.checked_in_ids || [], noShowIds: r.no_show_ids || [], hasTableReservation: r.has_table_reservation, birthdayName: r.birthday_name, tableSeatCount: r.table_seat_count, payOnSite: r.pay_on_site, comandaId: r.comanda_id, createdBy: r.created_by, lanesAssigned: r.pistas_usadas || []
         }));
-
-        // Client-side auto-expire check (only for loaded data)
         mapped.forEach((r: Reservation) => {
             if (r.payOnSite) return;
             if (r.status === ReservationStatus.PENDENTE && r.createdAt) {
                 const created = new Date(r.createdAt);
                 const diffMinutes = (now.getTime() - created.getTime()) / (1000 * 60);
-                if (diffMinutes > 30) {
-                    expiredIds.push(r.id);
-                    r.status = ReservationStatus.CANCELADA;
-                    r.observations = (r.observations || '') + ' [Tempo excedido]';
-                }
+                if (diffMinutes > 30) { expiredIds.push(r.id); r.status = ReservationStatus.CANCELADA; r.observations = (r.observations || '') + ' [Tempo excedido]'; }
             }
         });
-
-        if (expiredIds.length > 0) {
-            // Async update to DB
-            supabase.from('reservas').update({ status: ReservationStatus.CANCELADA, observations: 'Cancelado: Tempo excedido' }).in('id', expiredIds).then();
-        }
-
+        if (expiredIds.length > 0) { supabase.from('reservas').update({ status: ReservationStatus.CANCELADA, observations: 'Cancelado: Tempo excedido' }).in('id', expiredIds).then(); }
         return mapped;
     },
-
     create: async (res: Reservation, createdByUserId?: string) => {
-      const dbRes = {
-        id: res.id,
-        client_id: (res.clientId && res.clientId.trim() !== '') ? res.clientId : null, 
-        client_name: res.clientName,
-        date: res.date,
-        time: res.time,
-        people_count: res.peopleCount,
-        lane_count: res.laneCount,
-        duration: res.duration,
-        total_value: res.totalValue,
-        event_type: res.eventType,
-        observations: res.observations,
-        status: res.status,                
-        payment_status: res.paymentStatus,
-        guests: res.guests,
-        lanes: res.lanes,
-        created_at: res.createdAt,
-        checked_in_ids: res.checkedInIds || [], 
-        no_show_ids: res.noShowIds || [],
-        has_table_reservation: res.hasTableReservation,
-        birthday_name: res.birthdayName,
-        table_seat_count: res.tableSeatCount,
-        pay_on_site: res.payOnSite,
-        comanda_id: res.comandaId,
-        created_by: createdByUserId,
-        pistas_usadas: res.lanesAssigned
-      };
-      
+      const dbRes = { id: res.id, client_id: (res.clientId && res.clientId.trim() !== '') ? res.clientId : null, client_name: res.clientName, date: res.date, time: res.time, people_count: res.peopleCount, lane_count: res.laneCount, duration: res.duration, total_value: res.totalValue, event_type: res.eventType, observations: res.observations, status: res.status, payment_status: res.paymentStatus, guests: res.guests, lanes: res.lanes, created_at: res.createdAt, checked_in_ids: res.checkedInIds || [], no_show_ids: res.noShowIds || [], has_table_reservation: res.hasTableReservation, birthday_name: res.birthdayName, table_seat_count: res.tableSeatCount, pay_on_site: res.payOnSite, comanda_id: res.comandaId, created_by: createdByUserId, pistas_usadas: res.lanesAssigned };
       const { error } = await supabase.from('reservas').insert(dbRes);
       if (error) throw new Error(error.message);
-      
       if (createdByUserId) db.audit.log(createdByUserId, 'STAFF', 'CREATE_RESERVATION', `Criou reserva ${res.clientName}`, res.id);
       return res;
     },
     update: async (res: Reservation, updatedByUserId?: string, actionDetail?: string) => {
-      const dbRes = {
-        date: res.date,
-        time: res.time,
-        people_count: res.peopleCount,
-        lane_count: res.laneCount,
-        duration: res.duration,
-        total_value: res.totalValue,
-        event_type: res.eventType,
-        observations: res.observations,
-        status: res.status,
-        payment_status: res.paymentStatus,
-        guests: res.guests,
-        checked_in_ids: res.checkedInIds || [], 
-        no_show_ids: res.noShowIds || [],
-        has_table_reservation: res.hasTableReservation,
-        birthday_name: res.birthdayName,
-        table_seat_count: res.tableSeatCount,
-        pay_on_site: res.payOnSite,
-        comanda_id: res.comandaId,
-        pistas_usadas: res.lanesAssigned
-      };
-      
+      const dbRes = { date: res.date, time: res.time, people_count: res.peopleCount, lane_count: res.laneCount, duration: res.duration, total_value: res.totalValue, event_type: res.eventType, observations: res.observations, status: res.status, payment_status: res.paymentStatus, guests: res.guests, checked_in_ids: res.checkedInIds || [], no_show_ids: res.noShowIds || [], has_table_reservation: res.hasTableReservation, birthday_name: res.birthdayName, table_seat_count: res.tableSeatCount, pay_on_site: res.payOnSite, comanda_id: res.comandaId, pistas_usadas: res.lanesAssigned };
       const { error } = await supabase.from('reservas').update(dbRes).eq('id', res.id);
       if (error) throw new Error(error.message);
-      
       if (updatedByUserId) db.audit.log(updatedByUserId, 'STAFF', 'UPDATE_RESERVATION', actionDetail || `Atualizou ${res.clientName}`, res.id);
     }
   },
-
   funnel: {
-    getAll: async (): Promise<FunnelCard[]> => {
-      const clients = await db.clients.getAll();
-      return clients.map(c => ({
-          id: c.id, 
-          clientId: c.id,
-          clientName: c.name,
-          stage: c.funnelStage || FunnelStage.NOVO,
-          eventType: 'Outro' as any, 
-          notes: `Tel: ${c.phone}`
-      }));
-    },
+    getAll: async (): Promise<FunnelCard[]> => { const clients = await db.clients.getAll(); return clients.map(c => ({ id: c.id, clientId: c.id, clientName: c.name, stage: c.funnelStage || FunnelStage.NOVO, eventType: 'Outro' as any, notes: `Tel: ${c.phone}` })); },
     update: async (cards: FunnelCard[]) => { },
     add: async (card: FunnelCard) => { await db.clients.updateStage(card.clientId, card.stage); }
   },
-
   interactions: {
-    getAll: async (): Promise<Interaction[]> => {
-      const { data } = await supabase.from('interacoes').select('*');
-      return (data || []).map((i: any) => ({
-        id: i.id, clientId: i.client_id, date: i.date, channel: i.channel, note: i.note
-      }));
-    },
-    add: async (interaction: Interaction) => {
-      await supabase.from('interacoes').insert({
-        id: interaction.id, client_id: interaction.clientId, date: interaction.date, channel: interaction.channel, note: interaction.note
-      });
-    }
+    getAll: async (): Promise<Interaction[]> => { const { data } = await supabase.from('interacoes').select('*'); return (data || []).map((i: any) => ({ id: i.id, clientId: i.client_id, date: i.date, channel: i.channel, note: i.note })); },
+    add: async (interaction: Interaction) => { await supabase.from('interacoes').insert({ id: interaction.id, client_id: interaction.clientId, date: interaction.date, channel: interaction.channel, note: interaction.note }); }
   },
-
   settings: {
     get: async (): Promise<AppSettings> => {
       const { data: configData } = await supabase.from('configuracoes').select('*').limit(1).maybeSingle();
       const { data: hoursData } = await supabase.from('configuracao_horarios').select('*').order('day_of_week', { ascending: true });
-
       let businessHours = [...INITIAL_SETTINGS.businessHours];
-      if (hoursData && hoursData.length > 0) {
-         hoursData.forEach((row: any) => {
-             if (row.day_of_week >= 0 && row.day_of_week <= 6) {
-                 businessHours[row.day_of_week] = { isOpen: row.is_open, start: row.start_hour, end: row.end_hour };
-             }
-         });
-      }
-
+      if (hoursData && hoursData.length > 0) { hoursData.forEach((row: any) => { if (row.day_of_week >= 0 && row.day_of_week <= 6) { businessHours[row.day_of_week] = { isOpen: row.is_open, start: row.start_hour, end: row.end_hour }; } }); }
       const data = configData || {};
-      return {
-        establishmentName: data.establishment_name || INITIAL_SETTINGS.establishmentName,
-        address: data.address || INITIAL_SETTINGS.address,
-        phone: data.phone || INITIAL_SETTINGS.phone,
-        whatsappLink: data.whatsapp_link || INITIAL_SETTINGS.whatsappLink,
-        logoUrl: data.logo_url || INITIAL_SETTINGS.logoUrl,
-        activeLanes: data.active_lanes || INITIAL_SETTINGS.activeLanes,
-        weekdayPrice: data.weekday_price || INITIAL_SETTINGS.weekdayPrice,
-        weekendPrice: data.weekend_price || INITIAL_SETTINGS.weekendPrice,
-        onlinePaymentEnabled: data.online_payment_enabled ?? INITIAL_SETTINGS.onlinePaymentEnabled,
-        mercadopagoPublicKey: data.mercadopago_public_key || INITIAL_SETTINGS.mercadopagoPublicKey,
-        mercadopagoAccessToken: data.mercadopago_access_token || INITIAL_SETTINGS.mercadopagoAccessToken,
-        mercadopagoClientId: data.mercadopago_client_id || INITIAL_SETTINGS.mercadopagoClientId,
-        mercadopagoClientSecret: data.mercadopago_client_secret || INITIAL_SETTINGS.mercadopagoClientSecret,
-        businessHours: businessHours,
-        blockedDates: data.blocked_dates || []
-      };
+      return { establishmentName: data.establishment_name || INITIAL_SETTINGS.establishmentName, address: data.address || INITIAL_SETTINGS.address, phone: data.phone || INITIAL_SETTINGS.phone, whatsappLink: data.whatsapp_link || INITIAL_SETTINGS.whatsappLink, logoUrl: data.logo_url || INITIAL_SETTINGS.logoUrl, activeLanes: data.active_lanes || INITIAL_SETTINGS.activeLanes, weekdayPrice: data.weekday_price || INITIAL_SETTINGS.weekdayPrice, weekendPrice: data.weekend_price || INITIAL_SETTINGS.weekendPrice, onlinePaymentEnabled: data.online_payment_enabled ?? INITIAL_SETTINGS.onlinePaymentEnabled, mercadopagoPublicKey: data.mercadopago_public_key || INITIAL_SETTINGS.mercadopagoPublicKey, mercadopagoAccessToken: data.mercadopago_access_token || INITIAL_SETTINGS.mercadopagoAccessToken, mercadopagoClientId: data.mercadopago_client_id || INITIAL_SETTINGS.mercadopagoClientId, mercadopagoClientSecret: data.mercadopago_client_secret || INITIAL_SETTINGS.mercadopagoClientSecret, businessHours: businessHours, blockedDates: data.blocked_dates || [] };
     },
-    
     saveGeneral: async (s: AppSettings) => {
-      const dbSettings = {
-        id: 1, 
-        establishment_name: s.establishmentName,
-        address: s.address,
-        phone: s.phone,
-        whatsapp_link: s.whatsappLink,
-        logo_url: s.logoUrl,
-        active_lanes: s.activeLanes,
-        weekday_price: s.weekdayPrice,
-        weekend_price: s.weekendPrice,
-        online_payment_enabled: s.onlinePaymentEnabled,
-        mercadopago_public_key: s.mercadopagoPublicKey,
-        mercadopago_access_token: s.mercadopagoAccessToken,
-        mercadopago_client_id: s.mercadopagoClientId,
-        mercadopago_client_secret: s.mercadopagoClientSecret,
-        blocked_dates: s.blockedDates
-      };
-      
+      const dbSettings = { id: 1, establishment_name: s.establishmentName, address: s.address, phone: s.phone, whatsapp_link: s.whatsappLink, logo_url: s.logoUrl, active_lanes: s.activeLanes, weekday_price: s.weekdayPrice, weekend_price: s.weekendPrice, online_payment_enabled: s.onlinePaymentEnabled, mercadopago_public_key: s.mercadopagoPublicKey, mercadopago_access_token: s.mercadopagoAccessToken, mercadopago_client_id: s.mercadopagoClientId, mercadopago_client_secret: s.mercadopagoClientSecret, blocked_dates: s.blockedDates };
       const { error } = await supabase.from('configuracoes').upsert(dbSettings);
       window.dispatchEvent(new Event('settings_updated'));
       if (error) throw error;
     },
-
     saveHours: async (s: AppSettings) => {
-      const hoursPayload = s.businessHours.map((h, index) => ({
-          config_id: 1, day_of_week: index, is_open: h.isOpen, start_hour: h.start, end_hour: h.end
-      }));
+      const hoursPayload = s.businessHours.map((h, index) => ({ config_id: 1, day_of_week: index, is_open: h.isOpen, start_hour: h.start, end_hour: h.end }));
       const { error } = await supabase.from('configuracao_horarios').upsert(hoursPayload, { onConflict: 'config_id,day_of_week' });
       if (error) throw error;
     },
-
-    save: async (s: AppSettings) => {
-        await db.settings.saveGeneral(s);
-        await db.settings.saveHours(s);
-    }
+    save: async (s: AppSettings) => { await db.settings.saveGeneral(s); await db.settings.saveHours(s); }
   }
 };
