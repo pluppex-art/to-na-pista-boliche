@@ -145,15 +145,14 @@ const PublicBooking: React.FC = () => {
     const fetchData = async () => {
         setIsDataLoading(true);
         try {
-            // PERFORMANCE FIX: Fetch only future reservations
-            // Instead of db.reservations.getAll(), use getFuture() which filters by date >= today
-            const dataPromise = db.reservations.getFuture();
-            
-            // Timeout safety
+            // Timeout de segurança para evitar loading infinito
             const timeoutPromise = new Promise((_, reject) => 
                 setTimeout(() => reject(new Error("Timeout")), 8000)
             );
 
+            const dataPromise = db.reservations.getAll();
+            
+            // Corrida entre dados e timeout
             const all = await Promise.race([dataPromise, timeoutPromise]) as any[];
             
             if (isMounted) setExistingReservations(all);
@@ -166,11 +165,12 @@ const PublicBooking: React.FC = () => {
     fetchData();
 
     // --- REALTIME UPDATE FOR BOOKING ---
+    // Update availability in real-time to avoid conflicts
     const channel = supabase.channel('public_booking_updates')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, async () => {
+             // Re-fetch since local cache in mockBackend is cleared by global listener
              console.log('Realtime update detected in Booking, refreshing data...');
-             // Fetch only future again
-             const data = await db.reservations.getFuture();
+             const data = await db.reservations.getAll();
              if (isMounted) setExistingReservations(data);
         })
         .subscribe();
@@ -494,6 +494,8 @@ const PublicBooking: React.FC = () => {
                     setCurrentStep(c => c + 1);
                 } else {
                     // CASO NORMAL: Tem contato, cria ou atualiza cliente no banco
+                    // Staff mode ensures we create/update the client in DB based on phone/email
+                    // Logic in mockBackend.ts: create() updates existing client by phone if found.
                     const client = await db.clients.create(newClientData, staffUser?.id); 
                     setClientId(client.id);
                     setCurrentStep(c => c + 1);
@@ -648,8 +650,8 @@ const PublicBooking: React.FC = () => {
       setIsSaving(true);
       try {
           const blocks = getReservationBlocks();
-          // Force fresh fetch for validation just in case - use getFuture for efficiency
-          const allRes = await db.reservations.getFuture();
+          // Force fresh fetch for validation just in case
+          const allRes = await db.reservations.getAll();
           
           if (isManualMode) {
               // --- MANUAL CONFLICT CHECK (SIMPLE) ---
@@ -722,6 +724,10 @@ const PublicBooking: React.FC = () => {
               }
           }
 
+          // Nota: clientId pode ser VAZIO se for reserva de balcão sem cadastro (Staff Mode)
+          // Isso é intencional. O banco aceita null agora.
+          // if (!clientId) throw new Error("ID do cliente não encontrado");
+
           const newIds: string[] = [];
           for (const block of blocks) {
              // If manual, value is already set in totalValue variable
@@ -759,7 +765,7 @@ const PublicBooking: React.FC = () => {
 
           setCreatedReservationIds(newIds);
           // Update local state with fresh data including the new one
-          setExistingReservations(await db.reservations.getFuture());
+          setExistingReservations(await db.reservations.getAll());
           setCurrentStep(4);
 
       } catch (e: any) {
@@ -781,8 +787,7 @@ const PublicBooking: React.FC = () => {
               // Staff marcou para pagar no local (Mantém Pendente, adiciona obs, flag payOnSite)
               
               // 1. Atualizar as reservas criadas para ter a flag payOnSite = true
-              // Como já criamos, buscamos do banco para garantir
-              const allRes = await db.reservations.getByDateRange(selectedDate, selectedDate);
+              const allRes = await db.reservations.getAll();
               for (const id of createdReservationIds) {
                   const res = allRes.find(r => r.id === id);
                   if (res) {

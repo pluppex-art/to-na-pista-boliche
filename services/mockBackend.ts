@@ -2,6 +2,7 @@
 import { AppSettings, Client, FunnelCard, Interaction, Reservation, User, ReservationStatus, PaymentStatus, UserRole, FunnelStage, LoyaltyTransaction, AuditLog, StaffPerformance } from '../types';
 import { supabase } from './supabaseClient';
 import { INITIAL_SETTINGS, FUNNEL_STAGES } from '../constants';
+import { v4 as uuidv4 } from 'uuid';
 
 export const cleanPhone = (phone: string) => {
   if (!phone) return '';
@@ -11,25 +12,24 @@ export const cleanPhone = (phone: string) => {
 const safeTags = (tags: any): string[] => {
   if (Array.isArray(tags)) return tags;
   if (typeof tags === 'string') {
-     // Handle Postgres array format {item1,item2} if raw string returned
-     const cleaned = tags.replace(/^{|}$/g, '');
-     if (!cleaned) return [];
-     return cleaned.includes(',') ? cleaned.split(',').map(t => t.replace(/"/g, '').trim()) : [cleaned.replace(/"/g, '')];
+     return tags.includes(',') ? tags.split(',').map(t => t.trim()) : [tags];
   }
   return [];
 };
 
 export const db = {
+  // --- SERVIÇO DE AUDITORIA ---
   audit: {
       log: async (userId: string, userName: string, actionType: string, details: string, entityId?: string) => {
           try {
-              await supabase.from('audit_logs').insert({
+              const { error } = await supabase.from('audit_logs').insert({
                   user_id: userId,
                   user_name: userName,
                   action_type: actionType,
                   details: details,
                   entity_id: entityId
               });
+              if (error) console.warn("[AUDIT LOG ERROR]", error.message);
           } catch (e) {
               console.warn("[AUDIT LOG EXCEPTION]", e);
           }
@@ -66,7 +66,7 @@ export const db = {
               userName: l.user_name || 'Sistema',
               actionType: l.action_type,
               entityId: l.entity_id,
-              details: l.details,
+              details: typeof l.details === 'object' ? JSON.stringify(l.details) : l.details,
               createdAt: l.created_at
           }));
       }
@@ -84,7 +84,6 @@ export const db = {
         if (error) return { error: `Erro técnico: ${error.message}` };
         if (!data) return { error: 'E-mail não encontrado.' };
 
-        // Simple password check (In production, use bcrypt/argon2 or Supabase Auth)
         if (String(data.senha) === password) {
           if (data.ativo === false) return { error: 'Conta desativada.' };
 
@@ -101,7 +100,7 @@ export const db = {
               name: data.nome,
               email: data.email,
               role: roleNormalized,
-              passwordHash: '', // Do not expose password
+              passwordHash: '',
               perm_view_agenda: isAdmin ? true : (data.perm_view_agenda ?? false),
               perm_view_financial: isAdmin ? true : (data.perm_view_financial ?? false),
               perm_view_crm: isAdmin ? true : (data.perm_view_crm ?? false),
@@ -211,6 +210,38 @@ export const db = {
     delete: async (id: string) => {
       const { error } = await supabase.from('usuarios').delete().eq('id', id);
       if (error) throw new Error(error.message || "Erro ao excluir usuário.");
+    },
+    getPerformance: async (startDate: string, endDate: string): Promise<StaffPerformance[]> => {
+        try {
+            // Otimização: Buscar apenas reservas do período
+            const { data: periodReservations, error } = await supabase
+                .from('reservas')
+                .select('created_by, total_value, status, payment_status')
+                .gte('date', startDate)
+                .lte('date', endDate)
+                .neq('status', ReservationStatus.CANCELADA);
+
+            if(error) throw error;
+
+            const users = await db.users.getAll();
+            const stats = users.map(u => {
+                const createdByMe = periodReservations?.filter((r: any) => r.created_by === u.id) || [];
+                const sales = createdByMe.reduce((acc: number, curr: any) => acc + (curr.payment_status === PaymentStatus.PAGO ? curr.total_value : 0), 0);
+                
+                return {
+                    userId: u.id,
+                    userName: u.name,
+                    reservationsCreated: createdByMe.length,
+                    totalSales: sales,
+                    reservationsConfirmed: createdByMe.filter((r: any) => r.status === ReservationStatus.CONFIRMADA).length,
+                    lastActivity: new Date().toISOString()
+                };
+            });
+            return stats.sort((a, b) => b.totalSales - a.totalSales);
+        } catch (e) {
+            console.error("Erro ao calcular performance:", e);
+            return [];
+        }
     }
   },
   
@@ -284,21 +315,28 @@ export const db = {
         }
     },
     getAll: async (): Promise<Client[]> => {
+      // NOTE: Clients table usually stays small enough for getAll, but for huge CRMs should use search
       const { data, error } = await supabase.from('clientes').select('*');
       if (error) return [];
       
-      return data.map((c: any) => ({
+      return data.map((c: any) => {
+        const tags = safeTags(c.tags);
+        const stageFromTag = tags.find((t: string) => FUNNEL_STAGES.includes(t as FunnelStage));
+        const finalStage = (c.funnel_stage as FunnelStage) || (stageFromTag as FunnelStage) || FunnelStage.NOVO;
+
+        return {
           id: c.client_id, 
           name: c.name || 'Sem Nome', 
           phone: c.phone || '',
           email: c.email,
           photoUrl: c.photo_url,
-          tags: safeTags(c.tags),
+          tags: tags,
           createdAt: c.created_at || new Date().toISOString(),
           lastContactAt: c.last_contact_at || new Date().toISOString(),
-          funnelStage: c.funnel_stage || FunnelStage.NOVO,
+          funnelStage: finalStage,
           loyaltyBalance: c.loyalty_balance || 0
-      }));
+        };
+      });
     },
     getByPhone: async (phone: string): Promise<Client | null> => {
       const cleanedPhone = cleanPhone(phone);
@@ -340,10 +378,8 @@ export const db = {
       const phoneClean = cleanPhone(client.phone);
       const hasEmail = client.email && client.email.trim().length > 0;
 
-      // Se não tem nem telefone nem email, não cria (salvo exceções tratadas na view)
       if (!phoneClean && !hasEmail) return client; 
 
-      // Check existing
       let query = supabase.from('clientes').select('*');
       const conditions = [];
       if (phoneClean) conditions.push(`phone.eq.${phoneClean}`);
@@ -411,12 +447,15 @@ export const db = {
       await supabase.from('clientes').update(dbClient).eq('client_id', client.id);
       if (updatedBy) db.audit.log(updatedBy, 'STAFF', 'UPDATE_CLIENT', `Atualizou ${client.name}`, client.id);
     },
+    updateLastContact: async (clientId: string) => {
+      await supabase.from('clientes').update({ last_contact_at: new Date().toISOString() }).eq('client_id', clientId);
+    },
     updateStage: async (clientId: string, newStage: FunnelStage) => {
         let { data } = await supabase.from('clientes').select('tags').eq('client_id', clientId).single();
         if (!data) return;
         let tags: string[] = safeTags(data.tags);
-        // Remove old stage tag if present in tags logic (optional)
-        await supabase.from('clientes').update({ funnel_stage: newStage }).eq('client_id', clientId);
+        tags = tags.filter(t => !FUNNEL_STAGES.includes(t as FunnelStage));
+        await supabase.from('clientes').update({ funnel_stage: newStage, tags: tags }).eq('client_id', clientId);
     }
   },
 
@@ -447,28 +486,15 @@ export const db = {
           });
           if (error) throw new Error(error.message);
 
-          // Update Balance
           const { data: client } = await supabase.from('clientes').select('loyalty_balance').eq('client_id', clientId).single();
-          const currentBalance = client?.loyalty_balance || 0;
-          await supabase.from('clientes').update({ loyalty_balance: currentBalance + amount }).eq('client_id', clientId);
+          await supabase.from('clientes').update({ loyalty_balance: (client?.loyalty_balance || 0) + amount }).eq('client_id', clientId);
 
           if (userId) db.audit.log(userId, 'STAFF', amount > 0 ? 'LOYALTY_ADD' : 'LOYALTY_REMOVE', `Ajuste ${amount} pts`, clientId);
       }
   },
 
   reservations: {
-    // 🚨 FETCH FUTURE ONLY for public booking efficiency
-    getFuture: async (): Promise<Reservation[]> => {
-        const todayStr = new Date().toISOString().split('T')[0];
-        const { data, error } = await supabase
-            .from('reservas')
-            .select('*')
-            .gte('date', todayStr);
-            
-        if (error) return [];
-        return db.reservations._mapReservations(data);
-    },
-
+    // 🚨 OPTIMIZED FETCH: Accepts Date Range to prevent loading FULL DB
     getByDateRange: async (startDate: string, endDate: string): Promise<Reservation[]> => {
         const { data, error } = await supabase
             .from('reservas')
@@ -483,6 +509,7 @@ export const db = {
         return db.reservations._mapReservations(data);
     },
 
+    // DEPRECATED for production use (use getByDateRange), but kept for small lookups
     getAll: async (): Promise<Reservation[]> => {
       const { data, error } = await supabase.from('reservas').select('*');
       if (error) return [];
@@ -490,6 +517,10 @@ export const db = {
     },
 
     _mapReservations: (data: any[]): Reservation[] => {
+        // Shared mapping logic
+        const now = new Date();
+        const expiredIds: string[] = [];
+        
         const mapped = data.map((r: any) => ({
             id: r.id,
             clientId: r.client_id || '',
@@ -517,6 +548,26 @@ export const db = {
             createdBy: r.created_by,
             lanesAssigned: r.pistas_usadas || []
         }));
+
+        // Client-side auto-expire check (only for loaded data)
+        mapped.forEach((r: Reservation) => {
+            if (r.payOnSite) return;
+            if (r.status === ReservationStatus.PENDENTE && r.createdAt) {
+                const created = new Date(r.createdAt);
+                const diffMinutes = (now.getTime() - created.getTime()) / (1000 * 60);
+                if (diffMinutes > 30) {
+                    expiredIds.push(r.id);
+                    r.status = ReservationStatus.CANCELADA;
+                    r.observations = (r.observations || '') + ' [Tempo excedido]';
+                }
+            }
+        });
+
+        if (expiredIds.length > 0) {
+            // Async update to DB
+            supabase.from('reservas').update({ status: ReservationStatus.CANCELADA, observations: 'Cancelado: Tempo excedido' }).in('id', expiredIds).then();
+        }
+
         return mapped;
     },
 
@@ -679,6 +730,11 @@ export const db = {
       }));
       const { error } = await supabase.from('configuracao_horarios').upsert(hoursPayload, { onConflict: 'config_id,day_of_week' });
       if (error) throw error;
+    },
+
+    save: async (s: AppSettings) => {
+        await db.settings.saveGeneral(s);
+        await db.settings.saveHours(s);
     }
   }
 };

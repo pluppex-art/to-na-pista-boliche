@@ -1,18 +1,19 @@
-
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
-import { Reservation, ReservationStatus, PaymentStatus, AuditLog, StaffPerformance, User } from '../types';
-import { Loader2, DollarSign, TrendingUp, Users, Calendar, Filter, AlertCircle, Clock, Shield, History, ArrowRight, X, Calculator, Percent, CalendarRange, ListChecks } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { Reservation, ReservationStatus, AuditLog, User } from '../types';
+import { Loader2, DollarSign, TrendingUp, Users, Calendar, AlertCircle, Shield, History, Calculator, Percent, CalendarRange, ListChecks, ChevronDown } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { supabase } from '../services/supabaseClient';
 
 const Financeiro: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'LOGS'>('OVERVIEW');
   const [loading, setLoading] = useState(true);
   const [reservations, setReservations] = useState<Reservation[]>([]);
-  // rawReservations inclui canceladas para cálculo de métricas de taxa
   const [rawReservations, setRawReservations] = useState<Reservation[]>([]);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
+  
+  // Estado visual do preset selecionado (para o Select do Mobile)
+  const [currentPreset, setCurrentPreset] = useState<string>('MONTH');
 
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
@@ -24,7 +25,6 @@ const Financeiro: React.FC = () => {
       endDate: ''
   });
 
-  // Helpers de Data
   const toLocalISO = (date: Date) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -95,15 +95,16 @@ const Financeiro: React.FC = () => {
       refreshAuditLogs();
   }, [auditFilters.userId, auditFilters.actionType]); 
 
-  // --- LÓGICA DE ATALHOS DE DATA ---
-  const applyDatePreset = (preset: 'TODAY' | '7D' | '30D' | '90D' | 'WEEK' | 'MONTH' | 'YEAR') => {
+  const applyDatePreset = (preset: 'TODAY' | '7D' | '30D' | '90D' | 'WEEK' | 'MONTH' | 'YEAR' | 'CUSTOM') => {
+      setCurrentPreset(preset);
+      if (preset === 'CUSTOM') return;
+
       const today = new Date();
       let start = new Date();
       let end = new Date();
 
       switch(preset) {
           case 'TODAY':
-              // Start e End = Hoje
               break;
           case '7D':
               start.setDate(today.getDate() - 6);
@@ -115,11 +116,9 @@ const Financeiro: React.FC = () => {
               start.setDate(today.getDate() - 89);
               break;
           case 'WEEK':
-              // Segunda a Domingo (ou Hoje)
-              const day = today.getDay(); // 0 (Dom) - 6 (Sab)
-              const diff = today.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
+              const day = today.getDay(); 
+              const diff = today.getDate() - day + (day === 0 ? -6 : 1); 
               start.setDate(diff);
-              // End is today
               break;
           case 'MONTH':
               start = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -137,56 +136,67 @@ const Financeiro: React.FC = () => {
       setAuditFilters(prev => ({ ...prev, startDate: s, endDate: e }));
   };
 
-  // --- CÁLCULOS DE MÉTRICAS ---
-  const totalRevenue = reservations
-    .filter(r => r.status !== ReservationStatus.PENDENTE)
-    .reduce((acc, curr) => acc + curr.totalValue, 0);
+  // --- CÁLCULOS DE MÉTRICAS (CORRIGIDO PARA RESERVAS POR HORA ARREDONDADA) ---
   
-  const pendingRevenue = reservations
-    .filter(r => r.status === ReservationStatus.PENDENTE)
-    .reduce((acc, curr) => acc + curr.totalValue, 0);
+  // Helper para calcular slots de uma reserva (Pistas * Horas arredondadas para cima)
+  // Ex: 0.5h = 1 reserva, 1.5h = 2 reservas
+  const calculateSlots = (r: Reservation) => (r.laneCount || 1) * Math.ceil(r.duration || 1);
 
-  const confirmedCount = reservations.filter(r => r.status !== ReservationStatus.PENDENTE && r.status !== ReservationStatus.NO_SHOW).length;
+  // 1. Definição do que é "Realizado": CONFIRMADA ou CHECK-IN.
+  const realizedReservations = reservations.filter(r => 
+      r.status === ReservationStatus.CONFIRMADA || 
+      r.status === ReservationStatus.CHECK_IN
+  );
+
+  const pendingReservations = reservations.filter(r => 
+      r.status === ReservationStatus.PENDENTE
+  );
+
+  // Faturamento Realizado
+  const totalRevenue = realizedReservations.reduce((acc, curr) => acc + curr.totalValue, 0);
   
-  // Avg Ticket based on Confirmed Reservations (not slots)
-  const avgTicket = confirmedCount > 0 ? totalRevenue / confirmedCount : 0;
+  // Faturamento Pendente
+  const pendingRevenue = pendingReservations.reduce((acc, curr) => acc + curr.totalValue, 0);
+
+  // Quantidade Realizada (EM SLOTS: Pistas * Horas)
+  const confirmedSlotsCount = realizedReservations.reduce((acc, r) => acc + calculateSlots(r), 0);
   
-  // --- NOVAS MÉTRICAS ---
-  // 1. Dias no intervalo
+  // Ticket Médio (Agora divide pela quantidade de horas vendidas)
+  const avgTicket = confirmedSlotsCount > 0 ? totalRevenue / confirmedSlotsCount : 0;
+  
+  // Média Diária
   const startD = new Date(dateRange.start);
   const endD = new Date(dateRange.end);
   const diffTime = Math.abs(endD.getTime() - startD.getTime());
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; 
-  
-  // 2. Média de Reservas por Dia
-  const dailyAverage = diffDays > 0 ? (confirmedCount / diffDays) : 0;
+  const dailyAverage = diffDays > 0 ? (confirmedSlotsCount / diffDays) : 0;
 
-  // 3. Taxa de Cancelamento
-  const totalBookingsIncludingCancelled = rawReservations.length;
-  const cancelledCount = rawReservations.filter(r => r.status === ReservationStatus.CANCELADA).length;
-  const cancellationRate = totalBookingsIncludingCancelled > 0 
-      ? (cancelledCount / totalBookingsIncludingCancelled) * 100 
+  // Taxa de Cancelamento (Baseada em Slots Totais vs Slots Cancelados)
+  const cancelledReservations = rawReservations.filter(r => r.status === ReservationStatus.CANCELADA);
+  
+  const totalSlotsIncludingCancelled = rawReservations.reduce((acc, r) => acc + calculateSlots(r), 0);
+  const cancelledSlotsCount = cancelledReservations.reduce((acc, r) => acc + calculateSlots(r), 0);
+
+  const cancellationRate = totalSlotsIncludingCancelled > 0 
+      ? (cancelledSlotsCount / totalSlotsIncludingCancelled) * 100 
       : 0;
 
-  // Gráfico
+  // Gráfico (Usando apenas Realizado)
   const revenueByDayMap = new Map<string, number>();
-  reservations
-    .filter(r => r.status !== ReservationStatus.PENDENTE)
-    .forEach(r => {
-        const val = revenueByDayMap.get(r.date) || 0;
-        revenueByDayMap.set(r.date, val + r.totalValue);
+  realizedReservations.forEach(r => {
+      const val = revenueByDayMap.get(r.date) || 0;
+      revenueByDayMap.set(r.date, val + r.totalValue);
   });
   const revenueChartData = Array.from(revenueByDayMap.entries())
     .map(([date, value]) => ({ date: date.split('-').slice(1).reverse().join('/'), value }))
     .sort((a,b) => a.date.localeCompare(b.date));
 
+  // Top Clientes (Usando Slots Realizados)
   const clientSpendMap = new Map<string, {name: string, total: number, slots: number}>();
-  reservations.forEach(r => {
+  realizedReservations.forEach(r => {
       const current = clientSpendMap.get(r.clientId) || { name: r.clientName, total: 0, slots: 0 };
-      if (r.status !== ReservationStatus.PENDENTE) {
-        current.total += r.totalValue;
-      }
-      current.slots += 1;
+      current.total += r.totalValue;
+      current.slots += calculateSlots(r); // Soma slots (horas*pistas)
       clientSpendMap.set(r.clientId, current);
   });
   
@@ -197,55 +207,101 @@ const Financeiro: React.FC = () => {
   if (loading) return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin text-neon-blue" size={48} /></div>;
 
   return (
-    <div className="space-y-8 animate-fade-in pb-20 md:pb-0">
-        <div className="flex flex-col gap-6 border-b border-slate-800 pb-6">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    <div className="space-y-6 animate-fade-in pb-20 md:pb-0">
+        <div className="flex flex-col gap-4 border-b border-slate-800 pb-6">
+            <h1 className="text-3xl font-bold text-white">Financeiro</h1>
+
+            {/* PAINEL DE FILTROS OTIMIZADO MOBILE */}
+            <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex flex-col gap-4">
+                
+                {/* 1. SELETOR DE PRESETS */}
                 <div>
-                    <h1 className="text-3xl font-bold text-white">Financeiro</h1>
-                    <p className="text-slate-400">Resultados, estatísticas e logs do sistema</p>
-                </div>
-            </div>
+                    <label className="text-xs text-slate-400 font-bold uppercase mb-2 block">Período de Análise</label>
+                    
+                    {/* MOBILE: Dropdown Nativo */}
+                    <div className="md:hidden relative">
+                        <select 
+                            className="w-full bg-slate-900 border border-slate-600 text-white text-sm rounded-lg p-3 appearance-none focus:border-neon-blue outline-none font-bold"
+                            value={currentPreset}
+                            onChange={(e) => applyDatePreset(e.target.value as any)}
+                        >
+                            <option value="TODAY">Hoje</option>
+                            <option value="WEEK">Esta Semana</option>
+                            <option value="MONTH">Este Mês</option>
+                            <option value="YEAR">Este Ano</option>
+                            <option value="7D">Últimos 7 dias</option>
+                            <option value="30D">Últimos 30 dias</option>
+                            <option value="90D">Últimos 90 dias</option>
+                            <option value="CUSTOM">Personalizado</option>
+                        </select>
+                        <ChevronDown className="absolute right-3 top-3.5 text-slate-400 pointer-events-none" size={16} />
+                    </div>
 
-            {/* SELETORES DE DATA */}
-            <div className="flex flex-col gap-3 bg-slate-800 p-4 rounded-xl border border-slate-700">
-                <div className="flex flex-wrap gap-2">
-                    <button onClick={() => applyDatePreset('TODAY')} className="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-700 text-slate-300 hover:bg-neon-blue hover:text-white transition">Hoje</button>
-                    <button onClick={() => applyDatePreset('WEEK')} className="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-700 text-slate-300 hover:bg-neon-blue hover:text-white transition">Esta Semana</button>
-                    <button onClick={() => applyDatePreset('7D')} className="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-700 text-slate-300 hover:bg-neon-blue hover:text-white transition">Últimos 7 dias</button>
-                    <button onClick={() => applyDatePreset('MONTH')} className="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-700 text-slate-300 hover:bg-neon-blue hover:text-white transition">Este Mês</button>
-                    <button onClick={() => applyDatePreset('30D')} className="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-700 text-slate-300 hover:bg-neon-blue hover:text-white transition">Últimos 30 dias</button>
-                    <button onClick={() => applyDatePreset('90D')} className="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-700 text-slate-300 hover:bg-neon-blue hover:text-white transition">Últimos 90 dias</button>
-                    <button onClick={() => applyDatePreset('YEAR')} className="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-700 text-slate-300 hover:bg-neon-blue hover:text-white transition">Este Ano</button>
+                    {/* DESKTOP: Botões (Mantido pois é bom em telas grandes) */}
+                    <div className="hidden md:flex flex-wrap gap-2">
+                        {[
+                            { id: 'TODAY', label: 'Hoje' },
+                            { id: 'WEEK', label: 'Esta Semana' },
+                            { id: 'MONTH', label: 'Este Mês' },
+                            { id: '7D', label: 'Últimos 7 dias' },
+                            { id: '30D', label: 'Últimos 30 dias' },
+                            { id: '90D', label: 'Últimos 90 dias' },
+                            { id: 'YEAR', label: 'Este Ano' }
+                        ].map(preset => (
+                            <button 
+                                key={preset.id}
+                                onClick={() => applyDatePreset(preset.id as any)} 
+                                className={`px-3 py-1.5 rounded-full text-xs font-bold transition border ${
+                                    currentPreset === preset.id 
+                                    ? 'bg-neon-blue text-white border-neon-blue' 
+                                    : 'bg-slate-700 text-slate-300 border-transparent hover:bg-slate-600'
+                                }`}
+                            >
+                                {preset.label}
+                            </button>
+                        ))}
+                    </div>
                 </div>
 
-                <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto pt-2 border-t border-slate-700/50">
-                    <span className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><CalendarRange size={14}/> Personalizado:</span>
-                    <input 
-                        type="date" 
-                        className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-white text-sm focus:border-neon-blue outline-none"
-                        value={dateRange.start}
-                        onChange={e => {
-                            setDateRange({...dateRange, start: e.target.value});
-                            setAuditFilters(prev => ({ ...prev, startDate: e.target.value }));
-                        }}
-                    />
-                    <span className="text-slate-500 text-xs">até</span>
-                    <input 
-                        type="date" 
-                        className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-white text-sm focus:border-neon-blue outline-none"
-                        value={dateRange.end}
-                        onChange={e => {
-                            setDateRange({...dateRange, end: e.target.value});
-                            setAuditFilters(prev => ({ ...prev, endDate: e.target.value }));
-                        }}
-                    />
+                {/* 2. INPUTS DE DATA (Grade no mobile para clique fácil) */}
+                <div className="grid grid-cols-2 md:flex md:items-center gap-3 pt-2 border-t border-slate-700/50">
+                    <div className="flex flex-col">
+                        <span className="text-[10px] text-slate-500 font-bold uppercase mb-1">De</span>
+                        <input 
+                            type="date" 
+                            className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:border-neon-blue outline-none w-full"
+                            value={dateRange.start}
+                            onChange={e => {
+                                setDateRange({...dateRange, start: e.target.value});
+                                setAuditFilters(prev => ({ ...prev, startDate: e.target.value }));
+                                setCurrentPreset('CUSTOM');
+                            }}
+                        />
+                    </div>
+                    <div className="flex flex-col">
+                        <span className="text-[10px] text-slate-500 font-bold uppercase mb-1">Até</span>
+                        <input 
+                            type="date" 
+                            className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:border-neon-blue outline-none w-full"
+                            value={dateRange.end}
+                            onChange={e => {
+                                setDateRange({...dateRange, end: e.target.value});
+                                setAuditFilters(prev => ({ ...prev, endDate: e.target.value }));
+                                setCurrentPreset('CUSTOM');
+                            }}
+                        />
+                    </div>
+                    {/* Botão de atualizar explicito se necessário, ou ícone informativo */}
+                    <div className="hidden md:flex items-center text-slate-500 text-xs ml-auto">
+                        <CalendarRange size={14} className="mr-1"/> Período Selecionado
+                    </div>
                 </div>
             </div>
         </div>
 
-        <div className="flex space-x-4 border-b border-slate-700 mb-6">
-            <button onClick={() => setActiveTab('OVERVIEW')} className={`pb-2 px-4 font-medium transition flex items-center gap-2 ${activeTab === 'OVERVIEW' ? 'text-neon-blue border-b-2 border-neon-blue' : 'text-slate-400 hover:text-white'}`}><TrendingUp size={16}/> Visão Geral</button>
-            <button onClick={() => setActiveTab('LOGS')} className={`pb-2 px-4 font-medium transition flex items-center gap-2 ${activeTab === 'LOGS' ? 'text-neon-orange border-b-2 border-neon-orange' : 'text-slate-400 hover:text-white'}`}><Shield size={16}/> Auditoria & Logs</button>
+        <div className="flex space-x-4 border-b border-slate-700 mb-6 overflow-x-auto no-scrollbar">
+            <button onClick={() => setActiveTab('OVERVIEW')} className={`pb-2 px-4 font-medium transition flex items-center gap-2 whitespace-nowrap ${activeTab === 'OVERVIEW' ? 'text-neon-blue border-b-2 border-neon-blue' : 'text-slate-400 hover:text-white'}`}><TrendingUp size={16}/> Visão Geral</button>
+            <button onClick={() => setActiveTab('LOGS')} className={`pb-2 px-4 font-medium transition flex items-center gap-2 whitespace-nowrap ${activeTab === 'LOGS' ? 'text-neon-orange border-b-2 border-neon-orange' : 'text-slate-400 hover:text-white'}`}><Shield size={16}/> Auditoria & Logs</button>
         </div>
 
         {activeTab === 'OVERVIEW' ? (
@@ -259,6 +315,7 @@ const Financeiro: React.FC = () => {
                              <div>
                                  <p className="text-xs text-green-500 font-bold uppercase tracking-wide mb-1">Faturamento Realizado</p>
                                  <h3 className="text-2xl font-bold text-white">{totalRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3>
+                                 <p className="text-[10px] text-slate-500 mt-1">Confirmados & Check-ins</p>
                              </div>
                              <div className="p-2 bg-green-500/10 rounded-lg text-green-500"><DollarSign size={24}/></div>
                          </div>
@@ -279,19 +336,20 @@ const Financeiro: React.FC = () => {
                      <div className="bg-slate-800 p-4 rounded-xl border border-neon-blue/30 shadow-lg hover:border-neon-blue transition xl:col-span-2">
                          <div className="flex justify-between items-start">
                              <div>
-                                 <p className="text-xs text-neon-blue font-bold uppercase tracking-wide mb-1">Ticket Médio</p>
+                                 <p className="text-xs text-neon-blue font-bold uppercase tracking-wide mb-1">Ticket Médio (p/ Reserva)</p>
                                  <h3 className="text-2xl font-bold text-white">{avgTicket.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3>
                              </div>
                              <div className="p-2 bg-neon-blue/10 rounded-lg text-neon-blue"><TrendingUp size={24}/></div>
                          </div>
                     </div>
 
-                    {/* Reservas Totais */}
+                    {/* Reservas Totais (Slots) */}
                     <div className="bg-slate-800 p-4 rounded-xl border border-slate-600 shadow-lg xl:col-span-2">
                          <div className="flex justify-between items-start">
                              <div>
-                                 <p className="text-xs text-slate-400 font-bold uppercase tracking-wide mb-1">Reservas Confirmadas</p>
-                                 <h3 className="text-2xl font-bold text-white">{confirmedCount}</h3>
+                                 <p className="text-xs text-slate-400 font-bold uppercase tracking-wide mb-1">Reservas (Horas Vendidas)</p>
+                                 <h3 className="text-2xl font-bold text-white">{confirmedSlotsCount}</h3>
+                                 <p className="text-[10px] text-slate-500 mt-1">Soma de Pistas x Horas</p>
                              </div>
                              <div className="p-2 bg-slate-700 rounded-lg text-slate-300"><ListChecks size={24}/></div>
                          </div>
@@ -301,8 +359,8 @@ const Financeiro: React.FC = () => {
                     <div className="bg-slate-800 p-4 rounded-xl border border-purple-500/30 shadow-lg hover:border-purple-500 transition xl:col-span-2">
                          <div className="flex justify-between items-start">
                              <div>
-                                 <p className="text-xs text-purple-400 font-bold uppercase tracking-wide mb-1">Média Diária de Reservas</p>
-                                 <h3 className="text-2xl font-bold text-white">{dailyAverage.toFixed(1)} <span className="text-sm font-normal text-slate-400">/ dia</span></h3>
+                                 <p className="text-xs text-purple-400 font-bold uppercase tracking-wide mb-1">Média Diária de Vendas</p>
+                                 <h3 className="text-2xl font-bold text-white">{dailyAverage.toFixed(1)} <span className="text-sm font-normal text-slate-400">reservas/dia</span></h3>
                              </div>
                              <div className="p-2 bg-purple-500/10 rounded-lg text-purple-500"><Calculator size={24}/></div>
                          </div>
@@ -314,6 +372,7 @@ const Financeiro: React.FC = () => {
                              <div>
                                  <p className="text-xs text-red-400 font-bold uppercase tracking-wide mb-1">Taxa de Cancelamento</p>
                                  <h3 className="text-2xl font-bold text-white">{cancellationRate.toFixed(1)}%</h3>
+                                 <p className="text-[10px] text-slate-500 mt-1">Baseado em reservas perdidas</p>
                              </div>
                              <div className="p-2 bg-red-500/10 rounded-lg text-red-500"><Percent size={24}/></div>
                          </div>
@@ -339,7 +398,7 @@ const Financeiro: React.FC = () => {
                         <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Users size={20} className="text-neon-blue"/> Top 5 Clientes</h3>
                         <div className="flex-1 overflow-auto">
                             <table className="w-full text-left text-sm">
-                                <thead className="text-slate-400 border-b border-slate-700"><tr><th className="pb-2">Cliente</th><th className="pb-2 text-right">Qtd</th><th className="pb-2 text-right">Total</th></tr></thead>
+                                <thead className="text-slate-400 border-b border-slate-700"><tr><th className="pb-2">Cliente</th><th className="pb-2 text-right">Qtd Reservas</th><th className="pb-2 text-right">Total</th></tr></thead>
                                 <tbody className="divide-y divide-slate-700">
                                     {topClients.map((c, i) => (<tr key={i} className="group hover:bg-slate-700/50"><td className="py-3 font-medium text-white">{c.name}</td><td className="py-3 text-right text-slate-400">{c.slots}</td><td className="py-3 text-right text-neon-green font-bold">{c.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td></tr>))}
                                     {topClients.length === 0 && (<tr><td colSpan={3} className="py-8 text-center text-slate-500">Sem dados no período</td></tr>)}
