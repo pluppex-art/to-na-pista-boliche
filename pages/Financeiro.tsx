@@ -2,8 +2,8 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
 import { Reservation, ReservationStatus, AuditLog, User, PaymentStatus } from '../types';
-import { Loader2, DollarSign, TrendingUp, Users, Calendar, AlertCircle, Shield, History, Calculator, Percent, CalendarRange, ListChecks, ChevronDown, Clock } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { Loader2, DollarSign, TrendingUp, Users, Calendar, AlertCircle, Shield, History, Calculator, Percent, CalendarRange, ListChecks, ChevronDown, Clock, PieChart as PieIcon, Tag } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts';
 import { supabase } from '../services/supabaseClient';
 
 const Financeiro: React.FC = () => {
@@ -202,6 +202,20 @@ const Financeiro: React.FC = () => {
     .map(([date, value]) => ({ date: date.split('-').slice(1).reverse().join('/'), value }))
     .sort((a,b) => a.date.localeCompare(b.date));
 
+  // --- NOVO GRÁFICO: RECEITA POR TIPO DE EVENTO (PIE CHART) ---
+  const revenueByTypeMap = new Map<string, number>();
+  realizedReservations.forEach(r => {
+      const current = revenueByTypeMap.get(r.eventType) || 0;
+      revenueByTypeMap.set(r.eventType, current + r.totalValue);
+  });
+  
+  const revenueByTypeData = Array.from(revenueByTypeMap.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+
+  // Paleta de Cores Neon/Vibrante para o gráfico
+  const COLORS = ['#22c55e', '#3b82f6', '#f97316', '#a855f7', '#ef4444', '#eab308'];
+
   // --- NOVO GRÁFICO: HORÁRIOS DE PICO (HEATMAP SIMPLIFICADO) ---
   const hoursMap = new Array(24).fill(0);
   
@@ -223,19 +237,6 @@ const Financeiro: React.FC = () => {
       hour: `${hour}:00`,
       count: count
   })).filter(d => d.count > 0 || (parseInt(d.hour) >= 16 || parseInt(d.hour) <= 2)); // Mostra pelo menos o horário comercial noturno padrão
-
-  // Top Clientes (Usando Slots Realizados)
-  const clientSpendMap = new Map<string, {name: string, total: number, slots: number}>();
-  realizedReservations.forEach(r => {
-      const current = clientSpendMap.get(r.clientId) || { name: r.clientName, total: 0, slots: 0 };
-      current.total += r.totalValue;
-      current.slots += calculateSlots(r); // Soma slots (horas*pistas)
-      clientSpendMap.set(r.clientId, current);
-  });
-  
-  const topClients = Array.from(clientSpendMap.values())
-    .sort((a,b) => b.total - a.total)
-    .slice(0, 5);
 
   if (loading) return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin text-neon-blue" size={48} /></div>;
 
@@ -435,22 +436,47 @@ const Financeiro: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* TOP CLIENTES - ORDER 3 (MOBILE), ORDER 2 (DESKTOP) */}
-                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg flex flex-col order-3 lg:order-2">
-                        <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Users size={20} className="text-neon-blue"/> Top 5 Clientes</h3>
-                        <div className="flex-1 overflow-auto">
-                            <table className="w-full text-left text-sm">
-                                <thead className="text-slate-400 border-b border-slate-700"><tr><th className="pb-2">Cliente</th><th className="pb-2 text-right">Qtd Reservas</th><th className="pb-2 text-right">Total</th></tr></thead>
-                                <tbody className="divide-y divide-slate-700">
-                                    {topClients.map((c, i) => (<tr key={i} className="group hover:bg-slate-700/50"><td className="py-3 font-medium text-white">{c.name}</td><td className="py-3 text-right text-slate-400">{c.slots}</td><td className="py-3 text-right text-neon-green font-bold">{c.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td></tr>))}
-                                    {topClients.length === 0 && (<tr><td colSpan={3} className="py-8 text-center text-slate-500">Sem dados no período</td></tr>)}
-                                </tbody>
-                            </table>
+                    {/* RECEITA POR TIPO DE EVENTO - ORDER 2 (DESKTOP E MOBILE) */}
+                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg flex flex-col order-2">
+                        <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Tag size={20} className="text-neon-blue"/> Origem da Receita</h3>
+                        <div className="flex-1 min-h-[300px] relative">
+                            {revenueByTypeData.length > 0 ? (
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie
+                                            data={revenueByTypeData}
+                                            cx="50%"
+                                            cy="50%"
+                                            innerRadius={60}
+                                            outerRadius={80}
+                                            paddingAngle={5}
+                                            dataKey="value"
+                                        >
+                                            {revenueByTypeData.map((entry, index) => (
+                                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} stroke="rgba(0,0,0,0.2)" />
+                                            ))}
+                                        </Pie>
+                                        <Tooltip 
+                                            contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', color: '#fff', borderRadius: '8px'}}
+                                            itemStyle={{color: '#fff'}}
+                                            formatter={(value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                        />
+                                        <Legend 
+                                            verticalAlign="bottom" 
+                                            height={36}
+                                            iconType="circle"
+                                            formatter={(value, entry: any) => <span className="text-slate-300 text-xs ml-1">{value}</span>}
+                                        />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            ) : (
+                                <div className="flex h-full items-center justify-center text-slate-500 italic text-sm">Sem dados para o período</div>
+                            )}
                         </div>
                     </div>
 
-                    {/* NOVO GRÁFICO: HORÁRIOS DE PICO - ORDER 2 (MOBILE), ORDER 3 (DESKTOP) */}
-                    <div className="lg:col-span-3 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg order-2 lg:order-3">
+                    {/* NOVO GRÁFICO: HORÁRIOS DE PICO - ORDER 3 */}
+                    <div className="lg:col-span-3 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg order-3">
                         <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
                             <Clock size={20} className="text-neon-orange"/> Horários de Pico (Volume de Pistas)
                         </h3>
