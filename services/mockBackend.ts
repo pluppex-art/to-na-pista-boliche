@@ -277,8 +277,13 @@ export const db = {
           .eq('email', email)
           .maybeSingle();
 
-        if (error) return { error: `Erro técnico: ${error.message}` };
-        if (!data) return { error: 'Cadastro de cliente incompleto no sistema.' };
+        if (error) {
+            console.error("Login DB Error:", error);
+            // Se der erro de permissão (403), avisa de forma mais clara
+            if (error.code === '42501') return { error: 'Erro de permissão no banco de dados. Contate o suporte.' };
+            return { error: `Erro técnico: ${error.message}` };
+        }
+        if (!data) return { error: 'Cadastro de cliente incompleto no sistema (DB).' };
 
         return {
             client: {
@@ -313,7 +318,14 @@ export const db = {
                 }
             });
 
-            if (authError) return { error: authError.message };
+            if (authError) {
+                // Tradução amigável para erro de duplicidade
+                if (authError.message.includes('already registered')) {
+                    return { error: 'Este e-mail já está cadastrado. Por favor, clique em "Fazer Login".' };
+                }
+                return { error: authError.message };
+            }
+            
             const authId = authData.user?.id;
 
             if (!authId) return { error: 'Erro ao gerar ID de autenticação.' };
