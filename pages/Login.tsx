@@ -34,7 +34,7 @@ const Login: React.FC = () => {
   useEffect(() => {
       localStorage.removeItem('tonapista_auth');
       localStorage.removeItem('tonapista_client_auth');
-      refreshUser(); 
+      // Não chama refreshUser no mount do login para evitar sobrescrever estado de loading global desnecessariamente
   }, []);
 
   useEffect(() => {
@@ -43,7 +43,6 @@ const Login: React.FC = () => {
             const s = await db.settings.get();
             if (s.logoUrl) {
                 setLogoUrl(s.logoUrl);
-                // Important: Reset error if we have a valid URL to force img render
                 setImgError(false); 
             }
             if (s.establishmentName) setEstablishmentName(s.establishmentName);
@@ -78,10 +77,12 @@ const Login: React.FC = () => {
       }
 
       localStorage.setItem('tonapista_auth', JSON.stringify(user));
-      refreshUser();
-      setTimeout(() => {
-          navigate('/agenda', { replace: true });
-      }, 100);
+      
+      // IMPORTANTE: Aguarda o contexto atualizar o usuário antes de navegar
+      await refreshUser();
+      
+      navigate('/agenda', { replace: true });
+      
     } catch (err) {
       console.error(err);
       setError('Erro ao processar login.');
@@ -109,10 +110,8 @@ const Login: React.FC = () => {
           await db.users.update({ ...tempUser, passwordHash: newPassword });
           const updatedUser = { ...tempUser }; 
           localStorage.setItem('tonapista_auth', JSON.stringify(updatedUser));
-          refreshUser();
-          setTimeout(() => {
-              navigate('/agenda', { replace: true });
-          }, 100);
+          await refreshUser();
+          navigate('/agenda', { replace: true });
       } catch (e) {
           setError("Erro ao atualizar senha.");
           setIsLoading(false);
