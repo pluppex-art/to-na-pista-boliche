@@ -80,11 +80,8 @@ const ClientDashboard: React.FC = () => {
           });
 
           // Load History
-          const allRes = await db.reservations.getAll();
-          // Ordena pela DATA DE CRIAÇÃO (createdAt) decrescente
-          const myRes = allRes
-              .filter(r => r.clientId === activeClient.id)
-              .sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          // MODIFICAÇÃO DE SEGURANÇA: Usa getByClient em vez de getAll + filter
+          const myRes = await db.reservations.getByClient(activeClient.id);
               
           setHistory(myRes);
 

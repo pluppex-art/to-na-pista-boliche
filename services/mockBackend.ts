@@ -100,8 +100,6 @@ export const db = {
         const roleNormalized = (data.role || '').toUpperCase() as UserRole;
         const isAdmin = roleNormalized === UserRole.ADMIN;
         
-        // Mantemos a lógica de primeiro acesso se a senha ainda for a padrão no banco (legado)
-        // ou podemos remover isso se quiser confiar 100% no Supabase.
         const isFirstAccess = false; 
 
         db.audit.log(data.id, data.nome, 'LOGIN', 'Usuário realizou login via Auth');
@@ -109,11 +107,11 @@ export const db = {
         return {
           isFirstAccess, 
           user: {
-            id: data.id, // Mantemos o ID da tabela pública para relacionamentos
+            id: data.id, 
             name: data.nome,
             email: data.email,
             role: roleNormalized,
-            passwordHash: '', // Não expor hash
+            passwordHash: '',
             perm_view_agenda: isAdmin ? true : (data.perm_view_agenda ?? false),
             perm_view_financial: isAdmin ? true : (data.perm_view_financial ?? false),
             perm_view_crm: isAdmin ? true : (data.perm_view_crm ?? false),
@@ -182,14 +180,12 @@ export const db = {
       };
     },
     create: async (user: User) => {
-      // NOTA: Criar usuário aqui cria apenas no BANCO DE DADOS PÚBLICO.
-      // O Admin deve criar o Login também no Painel Auth do Supabase ou implementar signUp admin.
       const { error } = await supabase.from('usuarios').insert({
         id: user.id,
         nome: user.name,
         email: user.email,
         role: user.role,
-        senha: 'USE_AUTH', // Placeholder pois agora usamos Auth
+        senha: 'USE_AUTH', 
         ativo: true,
         perm_view_agenda: user.perm_view_agenda,
         perm_view_financial: user.perm_view_financial,
@@ -218,7 +214,6 @@ export const db = {
         perm_receive_payment: user.perm_receive_payment,
         perm_create_reservation_no_contact: user.perm_create_reservation_no_contact
       };
-      // Senha é gerenciada pelo Auth agora, ignoramos update de senha aqui
       const { error } = await supabase.from('usuarios').update(payload).eq('id', user.id);
       if (error) throw new Error(error.message);
     },
@@ -270,16 +265,32 @@ export const db = {
         if (authError) return { error: 'E-mail ou senha incorretos.' };
         if (!authData.user) return { error: 'Usuário não encontrado.' };
 
-        // 2. Busca dados na tabela clientes pelo email
-        const { data, error } = await supabase
+        // 2. Busca dados na tabela clientes pelo ID DO AUTH (Vinculo Seguro)
+        // Se falhar (usuário antigo), tenta pelo email como fallback
+        let { data, error } = await supabase
           .from('clientes')
           .select('*')
-          .eq('email', email)
+          .eq('client_id', authData.user.id) // Busca segura
           .maybeSingle();
+        
+        // Fallback para email se não achar pelo ID (migração de dados antigos)
+        if (!data && !error) {
+             const { data: dataByEmail, error: errorEmail } = await supabase
+                .from('clientes')
+                .select('*')
+                .eq('email', email)
+                .maybeSingle();
+             
+             if (dataByEmail) {
+                 data = dataByEmail;
+                 // Opcional: Atualizar o client_id para bater com o Auth ID no futuro
+             } else {
+                 error = errorEmail;
+             }
+        }
 
         if (error) {
             console.error("Login DB Error:", error);
-            // Se der erro de permissão (403), avisa de forma mais clara
             if (error.code === '42501') return { error: 'Erro de permissão no banco de dados. Contate o suporte.' };
             return { error: `Erro técnico: ${error.message}` };
         }
@@ -319,7 +330,6 @@ export const db = {
             });
 
             if (authError) {
-                // Tradução amigável para erro de duplicidade
                 if (authError.message.includes('already registered')) {
                     return { error: 'Este e-mail já está cadastrado. Por favor, clique em "Fazer Login".' };
                 }
@@ -327,7 +337,6 @@ export const db = {
             }
             
             const authId = authData.user?.id;
-
             if (!authId) return { error: 'Erro ao gerar ID de autenticação.' };
 
             // 2. Insere na tabela pública
@@ -337,12 +346,10 @@ export const db = {
             const { data: existing } = await supabase.from('clientes').select('*').eq('phone', phoneClean).maybeSingle();
 
             if (existing) {
-                // Se existe, atualiza com o email e vincula? 
-                // Num sistema simples, vamos apenas atualizar.
                 await supabase.from('clientes').update({ 
                     email: client.email,
-                    // client_id: authId // Em teoria deveríamos atualizar o ID, mas isso quebraria FKs. 
-                    // Vamos manter o ID antigo e confiar no email para login.
+                    // Se o cliente existe mas é "fantasma" (criado por staff), vincula o Auth ID agora?
+                    // Idealmente sim, mas exige cuidado. Por enquanto mantemos o ID antigo.
                 }).eq('client_id', existing.client_id);
                 
                 return { client: { ...client, id: existing.client_id } };
@@ -353,7 +360,7 @@ export const db = {
                 name: client.name,
                 phone: phoneClean,
                 email: client.email,
-                password: 'AUTH', // Placeholder
+                password: 'AUTH', 
                 photo_url: client.photoUrl,
                 tags: ['Novo Cadastro'],
                 last_contact_at: new Date().toISOString(),
@@ -372,7 +379,6 @@ export const db = {
         }
     },
     getAll: async (): Promise<Client[]> => {
-      // NOTE: Clients table usually stays small enough for getAll, but for huge CRMs should use search
       const { data, error } = await supabase.from('clientes').select('*');
       if (error) return [];
       
@@ -551,6 +557,21 @@ export const db = {
   },
 
   reservations: {
+    // Busca Segura: Apenas reservas do cliente específico
+    getByClient: async (clientId: string): Promise<Reservation[]> => {
+        const { data, error } = await supabase
+            .from('reservas')
+            .select('*')
+            .eq('client_id', clientId)
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            console.error("Erro ao buscar reservas do cliente:", error);
+            return [];
+        }
+        return db.reservations._mapReservations(data);
+    },
+
     // 🚨 OPTIMIZED FETCH: Accepts Date Range to prevent loading FULL DB
     getByDateRange: async (startDate: string, endDate: string): Promise<Reservation[]> => {
         const { data, error } = await supabase
