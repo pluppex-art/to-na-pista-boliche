@@ -421,6 +421,65 @@ export const db = {
         return { error: 'Erro inesperado.' };
       }
     },
+    // --- NOVO MÉTODO OTIMIZADO PARA LISTAGEM (PAGINAÇÃO SERVER-SIDE) ---
+    list: async (page = 1, pageSize = 50, search = ''): Promise<{ data: Client[], count: number }> => {
+        let query = supabase.from('clientes').select('client_id, name, phone, email, tags, last_contact_at, funnel_stage, loyalty_balance', { count: 'exact' });
+        
+        if (search) {
+            // Busca por nome ou telefone
+            const cleanSearch = cleanPhone(search);
+            if (cleanSearch.length > 3) {
+                query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%,phone.ilike.%${cleanSearch}%`);
+            } else {
+                query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%`);
+            }
+        }
+
+        const from = (page - 1) * pageSize;
+        const to = from + pageSize - 1;
+
+        const { data, count, error } = await query
+            .order('name', { ascending: true })
+            .range(from, to);
+
+        if (error) {
+            console.error("Erro ao listar clientes:", error);
+            return { data: [], count: 0 };
+        }
+
+        const mapped = (data || []).map((c: any) => ({
+            id: c.client_id,
+            name: c.name || 'Sem Nome',
+            phone: c.phone || '',
+            email: c.email,
+            photoUrl: '', // Não carrega foto na listagem leve
+            tags: safeTags(c.tags),
+            createdAt: new Date().toISOString(), // Não é crítico na listagem
+            lastContactAt: c.last_contact_at || new Date().toISOString(),
+            funnelStage: c.funnel_stage || FunnelStage.NOVO,
+            loyaltyBalance: c.loyalty_balance || 0
+        }));
+
+        return { data: mapped, count: count || 0 };
+    },
+    
+    // Mantém getAll APENAS para pequenos dropdowns, mas não deve ser usado no CRM principal
+    getAll: async (): Promise<Client[]> => {
+      const { data, error } = await supabase.from('clientes').select('client_id, name, phone, email, tags, funnel_stage').limit(200); // Limitado para segurança
+      if (error) return [];
+      return data.map((c: any) => ({
+          id: c.client_id,
+          name: c.name,
+          phone: c.phone,
+          email: c.email,
+          tags: safeTags(c.tags),
+          createdAt: new Date().toISOString(),
+          lastContactAt: new Date().toISOString(),
+          funnelStage: c.funnel_stage,
+          photoUrl: ''
+      }));
+    },
+
     register: async (client: Client, password: string): Promise<{ client?: Client; error?: string }> => {
         try {
             const { data: authData, error: authError } = await (supabase.auth as any).signUp({
@@ -449,33 +508,9 @@ export const db = {
             return { client: { ...client, id: authData.user.id } };
         } catch (e: any) { return { error: String(e) }; }
     },
-    getAll: async (): Promise<Client[]> => {
-      // PERFORMANCE FIX: NÃO BUSCAR 'photo_url' NA LISTAGEM GERAL
-      // Isso previne que o download de imagens pesadas trave o carregamento inicial
-      const { data, error } = await supabase.from('clientes').select('client_id, name, phone, email, tags, created_at, last_contact_at, funnel_stage, loyalty_balance');
-      if (error) return [];
-      return data.map((c: any) => {
-        const tags = safeTags(c.tags);
-        const stageFromTag = tags.find((t: string) => FUNNEL_STAGES.includes(t as FunnelStage));
-        const finalStage = (c.funnel_stage as FunnelStage) || (stageFromTag as FunnelStage) || FunnelStage.NOVO;
-        return {
-          id: c.client_id, 
-          name: c.name || 'Sem Nome', 
-          phone: c.phone || '',
-          email: c.email,
-          photoUrl: '', // Deixa vazio na listagem para performance. GetById busca a foto se precisar.
-          tags: tags,
-          createdAt: c.created_at || new Date().toISOString(),
-          lastContactAt: c.last_contact_at || new Date().toISOString(),
-          funnelStage: finalStage,
-          loyaltyBalance: c.loyalty_balance || 0
-        };
-      });
-    },
     getByPhone: async (phone: string): Promise<Client | null> => {
       const cleanedPhone = cleanPhone(phone);
       if (!cleanedPhone) return null;
-      // Get by phone can bring photo_url since it's a specific record
       const { data, error } = await supabase.from('clientes').select('*').or(`phone.eq.${phone},phone.eq.${cleanedPhone}`).maybeSingle();
       if (error || !data) return null;
       return {
@@ -483,7 +518,6 @@ export const db = {
       };
     },
     getById: async (id: string): Promise<Client | null> => {
-      // Get by ID is specific, so we bring the photo
       const { data, error } = await supabase.from('clientes').select('*').eq('client_id', id).maybeSingle();
       if (error || !data) return null;
       return { id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url, tags: safeTags(data.tags), createdAt: data.created_at, lastContactAt: data.last_contact_at, funnelStage: data.funnel_stage || FunnelStage.NOVO, loyaltyBalance: data.loyalty_balance || 0 };
@@ -566,6 +600,37 @@ export const db = {
       }
   },
   reservations: {
+    // --- NOVO: BUSCA LEVE PARA FINANCEIRO ---
+    getFinanceData: async (startDate: string, endDate: string) => {
+        const { data, error } = await supabase
+            .from('reservas')
+            .select('date, total_value, status, payment_status, lane_count, duration, client_name, client_id')
+            .gte('date', startDate)
+            .lte('date', endDate);
+            
+        if (error) {
+            console.error("Erro financeiro:", error);
+            return [];
+        }
+        
+        // Mapeia para um formato mínimo necessário
+        return data.map((r: any) => ({
+            id: 'n/a', // Não precisamos do ID completo
+            clientId: r.client_id,
+            clientName: r.client_name,
+            date: r.date,
+            time: '',
+            peopleCount: 0,
+            laneCount: r.lane_count || 1,
+            duration: r.duration || 1,
+            totalValue: r.total_value || 0,
+            status: r.status,
+            paymentStatus: r.payment_status,
+            eventType: 'Outro',
+            createdAt: ''
+        })) as Reservation[];
+    },
+
     getByDateRange: async (startDate: string, endDate: string): Promise<Reservation[]> => {
         const { data, error } = await supabase.from('reservas').select('*').gte('date', startDate).lte('date', endDate);
         if (error) { console.error("Erro ao buscar reservas por data:", error); return []; }

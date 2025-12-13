@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
 import { Reservation, ReservationStatus, AuditLog, User } from '../types';
@@ -8,8 +9,10 @@ import { supabase } from '../services/supabaseClient';
 const Financeiro: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'LOGS'>('OVERVIEW');
   const [loading, setLoading] = useState(true);
-  const [reservations, setReservations] = useState<Reservation[]>([]);
-  const [rawReservations, setRawReservations] = useState<Reservation[]>([]);
+  
+  // Otimização: Não usar Reservation[] completo aqui, apenas o subset financeiro
+  const [financeData, setFinanceData] = useState<Reservation[]>([]);
+  
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   
   // Estado visual do preset selecionado (para o Select do Mobile)
@@ -48,10 +51,11 @@ const Financeiro: React.FC = () => {
     if (!dateRange.start || !dateRange.end) return;
     if (!isBackground) setLoading(true);
     try {
-        const all = await db.reservations.getByDateRange(dateRange.start, dateRange.end);
-        setRawReservations(all);
-        setReservations(all.filter(r => r.status !== ReservationStatus.CANCELADA));
+        // OTIMIZAÇÃO: Busca apenas colunas necessárias via getFinanceData
+        const data = await db.reservations.getFinanceData(dateRange.start, dateRange.end);
+        setFinanceData(data);
         
+        // Logs ainda são necessários na aba de auditoria
         const usersList = await db.users.getAll();
         setAllUsers(usersList);
         
@@ -136,52 +140,40 @@ const Financeiro: React.FC = () => {
       setAuditFilters(prev => ({ ...prev, startDate: s, endDate: e }));
   };
 
-  // --- CÁLCULOS DE MÉTRICAS (CORRIGIDO PARA RESERVAS POR HORA ARREDONDADA) ---
+  // --- CÁLCULOS DE MÉTRICAS ---
   
-  // Helper para calcular slots de uma reserva (Pistas * Horas arredondadas para cima)
-  // Ex: 0.5h = 1 reserva, 1.5h = 2 reservas
   const calculateSlots = (r: Reservation) => (r.laneCount || 1) * Math.ceil(r.duration || 1);
 
-  // 1. Definição do que é "Realizado": CONFIRMADA ou CHECK-IN.
-  const realizedReservations = reservations.filter(r => 
+  const realizedReservations = financeData.filter(r => 
       r.status === ReservationStatus.CONFIRMADA || 
       r.status === ReservationStatus.CHECK_IN
   );
 
-  const pendingReservations = reservations.filter(r => 
+  const pendingReservations = financeData.filter(r => 
       r.status === ReservationStatus.PENDENTE
   );
 
-  // Faturamento Realizado
   const totalRevenue = realizedReservations.reduce((acc, curr) => acc + curr.totalValue, 0);
-  
-  // Faturamento Pendente
   const pendingRevenue = pendingReservations.reduce((acc, curr) => acc + curr.totalValue, 0);
-
-  // Quantidade Realizada (EM SLOTS: Pistas * Horas)
   const confirmedSlotsCount = realizedReservations.reduce((acc, r) => acc + calculateSlots(r), 0);
   
-  // Ticket Médio (Agora divide pela quantidade de horas vendidas)
   const avgTicket = confirmedSlotsCount > 0 ? totalRevenue / confirmedSlotsCount : 0;
   
-  // Média Diária
   const startD = new Date(dateRange.start);
   const endD = new Date(dateRange.end);
   const diffTime = Math.abs(endD.getTime() - startD.getTime());
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; 
   const dailyAverage = diffDays > 0 ? (confirmedSlotsCount / diffDays) : 0;
 
-  // Taxa de Cancelamento (Baseada em Slots Totais vs Slots Cancelados)
-  const cancelledReservations = rawReservations.filter(r => r.status === ReservationStatus.CANCELADA);
-  
-  const totalSlotsIncludingCancelled = rawReservations.reduce((acc, r) => acc + calculateSlots(r), 0);
+  const cancelledReservations = financeData.filter(r => r.status === ReservationStatus.CANCELADA);
+  const totalSlotsIncludingCancelled = financeData.reduce((acc, r) => acc + calculateSlots(r), 0);
   const cancelledSlotsCount = cancelledReservations.reduce((acc, r) => acc + calculateSlots(r), 0);
 
   const cancellationRate = totalSlotsIncludingCancelled > 0 
       ? (cancelledSlotsCount / totalSlotsIncludingCancelled) * 100 
       : 0;
 
-  // Gráfico (Usando apenas Realizado)
+  // Gráfico
   const revenueByDayMap = new Map<string, number>();
   realizedReservations.forEach(r => {
       const val = revenueByDayMap.get(r.date) || 0;
@@ -191,12 +183,12 @@ const Financeiro: React.FC = () => {
     .map(([date, value]) => ({ date: date.split('-').slice(1).reverse().join('/'), value }))
     .sort((a,b) => a.date.localeCompare(b.date));
 
-  // Top Clientes (Usando Slots Realizados)
+  // Top Clientes
   const clientSpendMap = new Map<string, {name: string, total: number, slots: number}>();
   realizedReservations.forEach(r => {
       const current = clientSpendMap.get(r.clientId) || { name: r.clientName, total: 0, slots: 0 };
       current.total += r.totalValue;
-      current.slots += calculateSlots(r); // Soma slots (horas*pistas)
+      current.slots += calculateSlots(r);
       clientSpendMap.set(r.clientId, current);
   });
   
@@ -211,14 +203,9 @@ const Financeiro: React.FC = () => {
         <div className="flex flex-col gap-4 border-b border-slate-800 pb-6">
             <h1 className="text-3xl font-bold text-white">Financeiro</h1>
 
-            {/* PAINEL DE FILTROS OTIMIZADO MOBILE */}
             <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex flex-col gap-4">
-                
-                {/* 1. SELETOR DE PRESETS */}
                 <div>
                     <label className="text-xs text-slate-400 font-bold uppercase mb-2 block">Período de Análise</label>
-                    
-                    {/* MOBILE: Dropdown Nativo */}
                     <div className="md:hidden relative">
                         <select 
                             className="w-full bg-slate-900 border border-slate-600 text-white text-sm rounded-lg p-3 appearance-none focus:border-neon-blue outline-none font-bold"
@@ -237,7 +224,6 @@ const Financeiro: React.FC = () => {
                         <ChevronDown className="absolute right-3 top-3.5 text-slate-400 pointer-events-none" size={16} />
                     </div>
 
-                    {/* DESKTOP: Botões (Mantido pois é bom em telas grandes) */}
                     <div className="hidden md:flex flex-wrap gap-2">
                         {[
                             { id: 'TODAY', label: 'Hoje' },
@@ -263,7 +249,6 @@ const Financeiro: React.FC = () => {
                     </div>
                 </div>
 
-                {/* 2. INPUTS DE DATA (Grade no mobile para clique fácil) */}
                 <div className="grid grid-cols-2 md:flex md:items-center gap-3 pt-2 border-t border-slate-700/50">
                     <div className="flex flex-col">
                         <span className="text-[10px] text-slate-500 font-bold uppercase mb-1">De</span>
@@ -291,7 +276,6 @@ const Financeiro: React.FC = () => {
                             }}
                         />
                     </div>
-                    {/* Botão de atualizar explicito se necessário, ou ícone informativo */}
                     <div className="hidden md:flex items-center text-slate-500 text-xs ml-auto">
                         <CalendarRange size={14} className="mr-1"/> Período Selecionado
                     </div>
@@ -306,10 +290,8 @@ const Financeiro: React.FC = () => {
 
         {activeTab === 'OVERVIEW' ? (
             <div className="space-y-6 animate-fade-in">
-                {/* GRID DE MÉTRICAS */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
                     
-                    {/* Faturamento */}
                     <div className="bg-slate-800 p-4 rounded-xl border border-green-500/30 shadow-lg hover:border-green-500 transition xl:col-span-2">
                          <div className="flex justify-between items-start">
                              <div>
@@ -321,7 +303,6 @@ const Financeiro: React.FC = () => {
                          </div>
                     </div>
 
-                    {/* Pendente */}
                     <div className="bg-slate-800 p-4 rounded-xl border border-yellow-500/30 shadow-lg hover:border-yellow-500 transition xl:col-span-2">
                          <div className="flex justify-between items-start">
                              <div>
@@ -332,7 +313,6 @@ const Financeiro: React.FC = () => {
                          </div>
                     </div>
 
-                     {/* Ticket Médio */}
                      <div className="bg-slate-800 p-4 rounded-xl border border-neon-blue/30 shadow-lg hover:border-neon-blue transition xl:col-span-2">
                          <div className="flex justify-between items-start">
                              <div>
@@ -343,7 +323,6 @@ const Financeiro: React.FC = () => {
                          </div>
                     </div>
 
-                    {/* Reservas Totais (Slots) */}
                     <div className="bg-slate-800 p-4 rounded-xl border border-slate-600 shadow-lg xl:col-span-2">
                          <div className="flex justify-between items-start">
                              <div>
@@ -355,7 +334,6 @@ const Financeiro: React.FC = () => {
                          </div>
                     </div>
 
-                    {/* Média Diária */}
                     <div className="bg-slate-800 p-4 rounded-xl border border-purple-500/30 shadow-lg hover:border-purple-500 transition xl:col-span-2">
                          <div className="flex justify-between items-start">
                              <div>
@@ -366,7 +344,6 @@ const Financeiro: React.FC = () => {
                          </div>
                     </div>
 
-                    {/* Taxa de Cancelamento */}
                     <div className="bg-slate-800 p-4 rounded-xl border border-red-500/30 shadow-lg hover:border-red-500 transition xl:col-span-2">
                          <div className="flex justify-between items-start">
                              <div>
