@@ -61,11 +61,16 @@ const Settings: React.FC = () => {
   const daysOfWeek = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
   const hoursOptions = Array.from({ length: 25 }, (_, i) => i);
 
+  // ATUALIZADO: Adicionado 'SET search_path = public' para corrigir warning de segurança
   const SQL_RPC_SCRIPT = `
 -- COPIE E COLE NO SQL EDITOR DO SUPABASE --
 
 CREATE OR REPLACE FUNCTION swap_user_id(old_id UUID, new_id UUID)
-RETURNS void AS $$
+RETURNS void 
+LANGUAGE plpgsql 
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
   SET session_replication_role = 'replica';
   UPDATE public.reservas SET created_by = new_id WHERE created_by = old_id;
@@ -79,10 +84,14 @@ BEGIN
   END IF;
   SET session_replication_role = 'origin';
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 CREATE OR REPLACE FUNCTION swap_client_id(old_id UUID, new_id UUID)
-RETURNS void AS $$
+RETURNS void 
+LANGUAGE plpgsql 
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
   SET session_replication_role = 'replica';
   UPDATE public.reservas SET client_id = new_id WHERE client_id = old_id;
@@ -96,7 +105,7 @@ BEGIN
   END IF;
   SET session_replication_role = 'origin';
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 `.trim();
 
   const copySql = () => {
