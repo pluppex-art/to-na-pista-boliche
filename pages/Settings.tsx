@@ -87,9 +87,26 @@ END;
 $$;
 `.trim();
 
-  // SCRIPT CRÍTICO DE SEGURANÇA (RLS)
+  // SCRIPT CRÍTICO DE SEGURANÇA (RLS) - VERSÃO V2 ANTI-RECURSÃO
   const SQL_RLS_SCRIPT = `
--- 2. HABILITAR SEGURANÇA (RLS)
+-- 1. LIMPEZA TOTAL DE POLÍTICAS ANTIGAS (Evita conflitos)
+DO $$ 
+DECLARE 
+    r RECORD; 
+BEGIN 
+    FOR r IN (SELECT policyname, tablename FROM pg_policies WHERE schemaname = 'public') LOOP 
+        EXECUTE 'DROP POLICY IF EXISTS "' || r.policyname || '" ON public.' || r.tablename; 
+    END LOOP; 
+END $$;
+
+-- 2. CORREÇÃO DE FUNÇÕES E SEARCH PATH
+ALTER FUNCTION public.get_financial_metrics(date, date) SET search_path = public;
+ALTER FUNCTION public.get_daily_revenue(date, date) SET search_path = public;
+ALTER FUNCTION public.get_top_clients_metrics(date, date, int) SET search_path = public;
+ALTER FUNCTION public.get_agenda_kpis(date) SET search_path = public;
+ALTER FUNCTION public.swap_user_id(uuid, uuid) SET search_path = public;
+
+-- 3. HABILITAR RLS
 ALTER TABLE public.usuarios ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.clientes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reservas ENABLE ROW LEVEL SECURITY;
@@ -99,14 +116,15 @@ ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.loyalty_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.interacoes ENABLE ROW LEVEL SECURITY;
 
--- 3. FUNÇÃO SEGURA PARA CHECAR STAFF (Evita Loop Infinito)
+-- 4. FUNÇÃO SEGURA PARA CHECAR STAFF (SECURITY DEFINER QUEBRA O LOOP)
 CREATE OR REPLACE FUNCTION public.is_staff()
 RETURNS BOOLEAN
 LANGUAGE plpgsql
-SECURITY DEFINER
+SECURITY DEFINER -- Roda como admin, ignora RLS da tabela usuarios
 SET search_path = public
 AS $$
 BEGIN
+  -- Verifica se o usuário atual tem cargo de gestão
   RETURN EXISTS (
     SELECT 1 FROM public.usuarios 
     WHERE id = auth.uid() 
@@ -115,58 +133,43 @@ BEGIN
 END;
 $$;
 
--- 4. POLÍTICAS DE ACESSO (Quem pode fazer o quê)
+-- 5. POLÍTICAS DE ACESSO (REFEITAS)
 
--- CONFIGURAÇÕES (Público pode ler para ver horários, Staff edita)
-DROP POLICY IF EXISTS "Public Read Configs" ON public.configuracoes;
+-- [CONFIGURAÇÕES]
 CREATE POLICY "Public Read Configs" ON public.configuracoes FOR SELECT USING (true);
-DROP POLICY IF EXISTS "Staff Update Configs" ON public.configuracoes;
 CREATE POLICY "Staff Update Configs" ON public.configuracoes FOR ALL USING (public.is_staff());
 
-DROP POLICY IF EXISTS "Public Read Hours" ON public.configuracao_horarios;
 CREATE POLICY "Public Read Hours" ON public.configuracao_horarios FOR SELECT USING (true);
-DROP POLICY IF EXISTS "Staff Update Hours" ON public.configuracao_horarios;
 CREATE POLICY "Staff Update Hours" ON public.configuracao_horarios FOR ALL USING (public.is_staff());
 
--- USUÁRIOS (Você lê seu próprio perfil para logar, Staff lê todos)
-DROP POLICY IF EXISTS "Read Own Profile" ON public.usuarios;
-CREATE POLICY "Read Own Profile" ON public.usuarios FOR SELECT USING (auth.uid() = id);
-DROP POLICY IF EXISTS "Staff Read All" ON public.usuarios;
-CREATE POLICY "Staff Read All" ON public.usuarios FOR SELECT USING (public.is_staff());
-DROP POLICY IF EXISTS "Admin Manage Users" ON public.usuarios;
+-- [USUÁRIOS] - AQUI OCORRIA O ERRO
+-- Otimização: Se for o próprio usuário, nem chama a função is_staff()
+CREATE POLICY "Users Read Access" ON public.usuarios 
+FOR SELECT USING (
+  auth.uid() = id OR public.is_staff()
+);
+
 CREATE POLICY "Admin Manage Users" ON public.usuarios FOR ALL USING (
   EXISTS (SELECT 1 FROM public.usuarios WHERE id = auth.uid() AND role = 'ADMIN')
 );
 
--- CLIENTES (Público cria ao se cadastrar, Staff vê tudo, Cliente vê a si mesmo)
-DROP POLICY IF EXISTS "Public Create Client" ON public.clientes;
+-- [CLIENTES]
 CREATE POLICY "Public Create Client" ON public.clientes FOR INSERT WITH CHECK (true);
-DROP POLICY IF EXISTS "Staff Manage Clients" ON public.clientes;
 CREATE POLICY "Staff Manage Clients" ON public.clientes FOR ALL USING (public.is_staff());
-DROP POLICY IF EXISTS "Client Read Self" ON public.clientes;
 CREATE POLICY "Client Read Self" ON public.clientes FOR SELECT USING (auth.uid() = client_id);
-DROP POLICY IF EXISTS "Client Update Self" ON public.clientes;
 CREATE POLICY "Client Update Self" ON public.clientes FOR UPDATE USING (auth.uid() = client_id);
 
--- RESERVAS (Público cria, Staff gerencia tudo, Cliente vê as suas)
-DROP POLICY IF EXISTS "Public Create Res" ON public.reservas;
+-- [RESERVAS]
 CREATE POLICY "Public Create Res" ON public.reservas FOR INSERT WITH CHECK (true);
-DROP POLICY IF EXISTS "Staff Manage Res" ON public.reservas;
 CREATE POLICY "Staff Manage Res" ON public.reservas FOR ALL USING (public.is_staff());
-DROP POLICY IF EXISTS "Client Read Own Res" ON public.reservas;
 CREATE POLICY "Client Read Own Res" ON public.reservas FOR SELECT USING (client_id = auth.uid());
-DROP POLICY IF EXISTS "Client Cancel Own Res" ON public.reservas;
-CREATE POLICY "Client Cancel Own Res" ON public.reservas FOR UPDATE USING (client_id = auth.uid());
+CREATE POLICY "Client Update Own Res" ON public.reservas FOR UPDATE USING (client_id = auth.uid());
 
--- OUTROS
-DROP POLICY IF EXISTS "Staff Audit" ON public.audit_logs;
+-- [OUTROS]
 CREATE POLICY "Staff Audit" ON public.audit_logs FOR SELECT USING (public.is_staff());
-DROP POLICY IF EXISTS "Insert Audit" ON public.audit_logs;
 CREATE POLICY "Insert Audit" ON public.audit_logs FOR INSERT WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Loyalty Public" ON public.loyalty_transactions;
 CREATE POLICY "Loyalty Public" ON public.loyalty_transactions FOR SELECT USING (client_id = auth.uid());
-DROP POLICY IF EXISTS "Loyalty Staff" ON public.loyalty_transactions;
 CREATE POLICY "Loyalty Staff" ON public.loyalty_transactions FOR ALL USING (public.is_staff());
 `.trim();
 
@@ -191,10 +194,8 @@ CREATE POLICY "Loyalty Staff" ON public.loyalty_transactions FOR ALL USING (publ
     fetchData();
   }, []);
 
-  // ... (RESTANTE DO CÓDIGO PERMANECE IGUAL ATÉ A TAB SYSTEM) ...
   // Update permissions logic when role changes in form
   useEffect(() => {
-      // Se for Admin, garante todas as permissões como true na UI (apenas visual, pois backend/app ignora)
       if (userForm.role === UserRole.ADMIN) {
           setUserForm(prev => ({
               ...prev,
@@ -210,10 +211,7 @@ CREATE POLICY "Loyalty Staff" ON public.loyalty_transactions FOR ALL USING (publ
           }));
       }
       
-      // Se for Gestor, reseta para falso para que o usuario selecione manualmente (ou mantem o que ja estava se for edicao)
-      // Ajuste: Apenas Admin Master tem acesso restrito a configurações, Gestor tem acesso a operacional.
       if (userForm.role === UserRole.GESTOR && !isEditingUser) {
-           // Se for novo usuario, sugerir algumas permissoes padrao
            setUserForm(prev => ({
               ...prev,
               perm_view_agenda: true,
@@ -346,7 +344,6 @@ CREATE POLICY "Loyalty Staff" ON public.loyalty_transactions FOR ALL USING (publ
         return;
     }
 
-    // Monta objeto completo garantindo os booleanos
     const payload: User = {
       id: isEditingUser ? (userForm.id || '') : uuidv4(),
       name: userForm.name,
@@ -372,7 +369,6 @@ CREATE POLICY "Loyalty Staff" ON public.loyalty_transactions FOR ALL USING (publ
             await db.users.create(payload);
         }
         
-        // REFRESH LIST FROM DB
         setUsers(await db.users.getAll());
         setShowUserModal(false);
         alert(isEditingUser ? 'Usuário atualizado!' : 'Usuário criado!');
@@ -422,7 +418,6 @@ CREATE POLICY "Loyalty Staff" ON public.loyalty_transactions FOR ALL USING (publ
       setSettings({ ...settings, businessHours: newHours });
   };
 
-  // MIGRATION HANDLER
   const handleStartMigration = async () => {
       if (!confirm("Isso criará contas no Auth para todos os usuários/clientes e corrigirá os IDs no banco. Continuar?")) return;
       
@@ -451,7 +446,6 @@ CREATE POLICY "Loyalty Staff" ON public.loyalty_transactions FOR ALL USING (publ
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-20 md:pb-0 relative px-2 md:px-0">
       
-      {/* Notifications */}
       {saveSuccess && (
         <div className="fixed top-4 right-4 z-50 animate-fade-in-down w-[90%] md:w-auto">
           <div className="bg-green-500/20 border border-green-500 text-green-100 px-4 py-3 md:px-6 md:py-4 rounded-lg shadow-2xl flex items-center gap-3 backdrop-blur-md">
@@ -470,7 +464,6 @@ CREATE POLICY "Loyalty Staff" ON public.loyalty_transactions FOR ALL USING (publ
         </div>
       )}
 
-      {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <h1 className="text-2xl md:text-3xl font-bold text-white">Configurações</h1>
         <button 
@@ -482,7 +475,6 @@ CREATE POLICY "Loyalty Staff" ON public.loyalty_transactions FOR ALL USING (publ
         </button>
       </div>
 
-      {/* Tabs */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 bg-slate-900/50 p-1 rounded-lg border border-slate-700">
         <button onClick={() => setActiveTab('general')} className={`px-4 py-3 rounded-md font-medium transition text-sm ${activeTab === 'general' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}>Geral</button>
         <button onClick={() => setActiveTab('integrations')} className={`px-4 py-3 rounded-md font-medium transition text-sm ${activeTab === 'integrations' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}>Pagamentos</button>
@@ -491,8 +483,6 @@ CREATE POLICY "Loyalty Staff" ON public.loyalty_transactions FOR ALL USING (publ
       </div>
 
       <div className="bg-slate-800 rounded-xl p-4 md:p-6 border border-slate-700 shadow-lg">
-        
-        {/* ... TABS GENERAL, INTEGRATIONS, TEAM IGUAIS ... */}
         {activeTab === 'general' && (
              <div className="text-center py-6 md:py-10">
                  <div className="space-y-8 animate-fade-in text-left">
@@ -586,10 +576,9 @@ CREATE POLICY "Loyalty Staff" ON public.loyalty_transactions FOR ALL USING (publ
                                 <div className="flex items-center gap-3">
                                     <div className="p-2 bg-green-500/20 rounded text-green-400"><ShieldCheck size={20}/></div>
                                     <div>
-                                        <h4 className="font-bold text-white">Correção de Permissões (RLS)</h4>
+                                        <h4 className="font-bold text-white">Correção de Permissões (RLS) v2</h4>
                                         <p className="text-xs text-slate-400 mt-1">
-                                            Rode este script se o site não estiver carregando ou der erro de acesso. 
-                                            Ele libera o acesso seguro às tabelas.
+                                            Rode este script se o sistema apresentar erro de <strong>"Infinite recursion"</strong> ou falha de acesso.
                                         </p>
                                     </div>
                                 </div>
@@ -603,7 +592,7 @@ CREATE POLICY "Loyalty Staff" ON public.loyalty_transactions FOR ALL USING (publ
                                     onClick={() => copySql(SQL_RLS_SCRIPT)}
                                     className="absolute top-2 right-2 bg-slate-700 hover:bg-slate-600 text-white p-2 rounded opacity-0 group-hover:opacity-100 transition shadow-lg flex items-center gap-2 text-xs font-bold"
                                 >
-                                    <Copy size={14}/> Copiar Script RLS
+                                    <Copy size={14}/> Copiar Script
                                 </button>
                             </div>
                         </div>
@@ -658,7 +647,6 @@ CREATE POLICY "Loyalty Staff" ON public.loyalty_transactions FOR ALL USING (publ
         )}
       </div>
 
-      {/* User Modal */}
       {showUserModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
           {/* ... MODAL DE USUÁRIO PERMANECE IGUAL ... */}
