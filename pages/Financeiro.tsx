@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
-import { Reservation, ReservationStatus, AuditLog, User } from '../types';
+import { Reservation, ReservationStatus, AuditLog, User, PaymentStatus } from '../types';
 import { Loader2, DollarSign, TrendingUp, Users, Calendar, AlertCircle, Shield, History, Calculator, Percent, CalendarRange, ListChecks, ChevronDown, Clock } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { supabase } from '../services/supabaseClient';
@@ -172,14 +172,24 @@ const Financeiro: React.FC = () => {
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; 
   const dailyAverage = diffDays > 0 ? (confirmedSlotsCount / diffDays) : 0;
 
-  // Taxa de Cancelamento (Baseada em Slots Totais vs Slots Cancelados)
-  const cancelledReservations = rawReservations.filter(r => r.status === ReservationStatus.CANCELADA);
+  // --- TAXA DE CANCELAMENTO (ESTORNOS DA EQUIPE) ---
+  // Filtra reservas que:
+  // 1. Estão Canceladas
+  // 2. Foram criadas pela equipe (createdBy existe/truthy)
+  // 3. Tiveram pagamento confirmado anteriormente (Status PAGO ou REEMBOLSADO)
+  const cancelledReservations = rawReservations.filter(r => 
+      r.status === ReservationStatus.CANCELADA && 
+      r.createdBy && 
+      (r.paymentStatus === PaymentStatus.PAGO || r.paymentStatus === PaymentStatus.REEMBOLSADO)
+  );
   
-  const totalSlotsIncludingCancelled = rawReservations.reduce((acc, r) => acc + calculateSlots(r), 0);
+  // Para a base do cálculo, usamos (Realizadas + Canceladas com Estorno)
+  // Ignoramos as pendentes que expiraram para não sujar a métrica
   const cancelledSlotsCount = cancelledReservations.reduce((acc, r) => acc + calculateSlots(r), 0);
+  const totalRelevantSlots = confirmedSlotsCount + cancelledSlotsCount;
 
-  const cancellationRate = totalSlotsIncludingCancelled > 0 
-      ? (cancelledSlotsCount / totalSlotsIncludingCancelled) * 100 
+  const cancellationRate = totalRelevantSlots > 0 
+      ? (cancelledSlotsCount / totalRelevantSlots) * 100 
       : 0;
 
   // Gráfico Faturamento (Usando apenas Realizado)
@@ -395,7 +405,7 @@ const Financeiro: React.FC = () => {
                              <div>
                                  <p className="text-xs text-red-400 font-bold uppercase tracking-wide mb-1">Taxa de Cancelamento</p>
                                  <h3 className="text-2xl font-bold text-white">{cancellationRate.toFixed(1)}%</h3>
-                                 <p className="text-[10px] text-slate-500 mt-1">Baseado em reservas perdidas</p>
+                                 <p className="text-[10px] text-slate-500 mt-1">Estornos de vendas da equipe</p>
                              </div>
                              <div className="p-2 bg-red-500/10 rounded-lg text-red-500"><Percent size={24}/></div>
                          </div>
@@ -403,8 +413,8 @@ const Financeiro: React.FC = () => {
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* GRÁFICO DE RECEITA */}
-                    <div className="lg:col-span-2 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
+                    {/* GRÁFICO DE RECEITA - ORDER 1 SEMPRE */}
+                    <div className="lg:col-span-2 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg order-1">
                         <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2"><DollarSign size={20} className="text-green-500"/> Faturamento Diário (Realizado)</h3>
                         <div className="h-80 w-full">
                             <ResponsiveContainer width="100%" height="100%">
@@ -425,8 +435,8 @@ const Financeiro: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* TOP CLIENTES */}
-                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg flex flex-col">
+                    {/* TOP CLIENTES - ORDER 3 (MOBILE), ORDER 2 (DESKTOP) */}
+                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg flex flex-col order-3 lg:order-2">
                         <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Users size={20} className="text-neon-blue"/> Top 5 Clientes</h3>
                         <div className="flex-1 overflow-auto">
                             <table className="w-full text-left text-sm">
@@ -439,8 +449,8 @@ const Financeiro: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* NOVO GRÁFICO: HORÁRIOS DE PICO */}
-                    <div className="lg:col-span-3 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
+                    {/* NOVO GRÁFICO: HORÁRIOS DE PICO - ORDER 2 (MOBILE), ORDER 3 (DESKTOP) */}
+                    <div className="lg:col-span-3 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg order-2 lg:order-3">
                         <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
                             <Clock size={20} className="text-neon-orange"/> Horários de Pico (Volume de Pistas)
                         </h3>
