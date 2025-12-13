@@ -62,10 +62,9 @@ const Settings: React.FC = () => {
   const daysOfWeek = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
   const hoursOptions = Array.from({ length: 25 }, (_, i) => i);
 
-  // ATUALIZADO: Adicionado 'SET search_path = public' para corrigir warning de segurança
-  const SQL_RPC_SCRIPT = `
--- COPIE E COLE NO SQL EDITOR DO SUPABASE --
-
+  // SCRIPT DE CORREÇÃO DE IDS
+  const SQL_MIGRATION_SCRIPT = `
+-- 1. FUNÇÕES AUXILIARES DE MIGRAÇÃO
 CREATE OR REPLACE FUNCTION swap_user_id(old_id UUID, new_id UUID)
 RETURNS void 
 LANGUAGE plpgsql 
@@ -86,31 +85,93 @@ BEGIN
   SET session_replication_role = 'origin';
 END;
 $$;
+`.trim();
 
-CREATE OR REPLACE FUNCTION swap_client_id(old_id UUID, new_id UUID)
-RETURNS void 
-LANGUAGE plpgsql 
+  // SCRIPT CRÍTICO DE SEGURANÇA (RLS)
+  const SQL_RLS_SCRIPT = `
+-- 2. HABILITAR SEGURANÇA (RLS)
+ALTER TABLE public.usuarios ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.clientes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.reservas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.configuracoes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.configuracao_horarios ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.loyalty_transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.interacoes ENABLE ROW LEVEL SECURITY;
+
+-- 3. FUNÇÃO SEGURA PARA CHECAR STAFF (Evita Loop Infinito)
+CREATE OR REPLACE FUNCTION public.is_staff()
+RETURNS BOOLEAN
+LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-  SET session_replication_role = 'replica';
-  UPDATE public.reservas SET client_id = new_id WHERE client_id = old_id;
-  UPDATE public.loyalty_transactions SET client_id = new_id WHERE client_id = old_id;
-  UPDATE public.interacoes SET client_id = new_id WHERE client_id = old_id;
-  
-  IF EXISTS (SELECT 1 FROM public.clientes WHERE client_id = new_id) THEN
-     DELETE FROM public.clientes WHERE client_id = old_id;
-  ELSE
-     UPDATE public.clientes SET client_id = new_id WHERE client_id = old_id;
-  END IF;
-  SET session_replication_role = 'origin';
+  RETURN EXISTS (
+    SELECT 1 FROM public.usuarios 
+    WHERE id = auth.uid() 
+    AND (role = 'ADMIN' OR role = 'GESTOR')
+  );
 END;
 $$;
+
+-- 4. POLÍTICAS DE ACESSO (Quem pode fazer o quê)
+
+-- CONFIGURAÇÕES (Público pode ler para ver horários, Staff edita)
+DROP POLICY IF EXISTS "Public Read Configs" ON public.configuracoes;
+CREATE POLICY "Public Read Configs" ON public.configuracoes FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Staff Update Configs" ON public.configuracoes;
+CREATE POLICY "Staff Update Configs" ON public.configuracoes FOR ALL USING (public.is_staff());
+
+DROP POLICY IF EXISTS "Public Read Hours" ON public.configuracao_horarios;
+CREATE POLICY "Public Read Hours" ON public.configuracao_horarios FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Staff Update Hours" ON public.configuracao_horarios;
+CREATE POLICY "Staff Update Hours" ON public.configuracao_horarios FOR ALL USING (public.is_staff());
+
+-- USUÁRIOS (Você lê seu próprio perfil para logar, Staff lê todos)
+DROP POLICY IF EXISTS "Read Own Profile" ON public.usuarios;
+CREATE POLICY "Read Own Profile" ON public.usuarios FOR SELECT USING (auth.uid() = id);
+DROP POLICY IF EXISTS "Staff Read All" ON public.usuarios;
+CREATE POLICY "Staff Read All" ON public.usuarios FOR SELECT USING (public.is_staff());
+DROP POLICY IF EXISTS "Admin Manage Users" ON public.usuarios;
+CREATE POLICY "Admin Manage Users" ON public.usuarios FOR ALL USING (
+  EXISTS (SELECT 1 FROM public.usuarios WHERE id = auth.uid() AND role = 'ADMIN')
+);
+
+-- CLIENTES (Público cria ao se cadastrar, Staff vê tudo, Cliente vê a si mesmo)
+DROP POLICY IF EXISTS "Public Create Client" ON public.clientes;
+CREATE POLICY "Public Create Client" ON public.clientes FOR INSERT WITH CHECK (true);
+DROP POLICY IF EXISTS "Staff Manage Clients" ON public.clientes;
+CREATE POLICY "Staff Manage Clients" ON public.clientes FOR ALL USING (public.is_staff());
+DROP POLICY IF EXISTS "Client Read Self" ON public.clientes;
+CREATE POLICY "Client Read Self" ON public.clientes FOR SELECT USING (auth.uid() = client_id);
+DROP POLICY IF EXISTS "Client Update Self" ON public.clientes;
+CREATE POLICY "Client Update Self" ON public.clientes FOR UPDATE USING (auth.uid() = client_id);
+
+-- RESERVAS (Público cria, Staff gerencia tudo, Cliente vê as suas)
+DROP POLICY IF EXISTS "Public Create Res" ON public.reservas;
+CREATE POLICY "Public Create Res" ON public.reservas FOR INSERT WITH CHECK (true);
+DROP POLICY IF EXISTS "Staff Manage Res" ON public.reservas;
+CREATE POLICY "Staff Manage Res" ON public.reservas FOR ALL USING (public.is_staff());
+DROP POLICY IF EXISTS "Client Read Own Res" ON public.reservas;
+CREATE POLICY "Client Read Own Res" ON public.reservas FOR SELECT USING (client_id = auth.uid());
+DROP POLICY IF EXISTS "Client Cancel Own Res" ON public.reservas;
+CREATE POLICY "Client Cancel Own Res" ON public.reservas FOR UPDATE USING (client_id = auth.uid());
+
+-- OUTROS
+DROP POLICY IF EXISTS "Staff Audit" ON public.audit_logs;
+CREATE POLICY "Staff Audit" ON public.audit_logs FOR SELECT USING (public.is_staff());
+DROP POLICY IF EXISTS "Insert Audit" ON public.audit_logs;
+CREATE POLICY "Insert Audit" ON public.audit_logs FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Loyalty Public" ON public.loyalty_transactions;
+CREATE POLICY "Loyalty Public" ON public.loyalty_transactions FOR SELECT USING (client_id = auth.uid());
+DROP POLICY IF EXISTS "Loyalty Staff" ON public.loyalty_transactions;
+CREATE POLICY "Loyalty Staff" ON public.loyalty_transactions FOR ALL USING (public.is_staff());
 `.trim();
 
-  const copySql = () => {
-      navigator.clipboard.writeText(SQL_RPC_SCRIPT);
+  const copySql = (script: string) => {
+      navigator.clipboard.writeText(script);
       alert("Script copiado! Cole no SQL Editor do Supabase.");
   };
 
@@ -130,6 +191,7 @@ $$;
     fetchData();
   }, []);
 
+  // ... (RESTANTE DO CÓDIGO PERMANECE IGUAL ATÉ A TAB SYSTEM) ...
   // Update permissions logic when role changes in form
   useEffect(() => {
       // Se for Admin, garante todas as permissões como true na UI (apenas visual, pois backend/app ignora)
@@ -430,7 +492,7 @@ $$;
 
       <div className="bg-slate-800 rounded-xl p-4 md:p-6 border border-slate-700 shadow-lg">
         
-        {/* ... (TABS GENERAL, INTEGRATIONS, TEAM MANTIDAS IGUAIS) ... */}
+        {/* ... TABS GENERAL, INTEGRATIONS, TEAM IGUAIS ... */}
         {activeTab === 'general' && (
              <div className="text-center py-6 md:py-10">
                  <div className="space-y-8 animate-fade-in text-left">
@@ -493,7 +555,6 @@ $$;
              </div>
         )}
 
-        {/* ... (INTEGRATIONS E TEAM MANTIDOS) ... */}
         {activeTab === 'integrations' && (
              <div className="space-y-6 animate-fade-in py-6">
                  <div className="flex items-center gap-3 p-4 bg-slate-900/50 rounded-lg border border-slate-700"><input type="checkbox" checked={settings.onlinePaymentEnabled} onChange={e => setSettings({...settings, onlinePaymentEnabled: e.target.checked})} className="w-5 h-5 accent-neon-green cursor-pointer"/><span className="text-white font-bold flex items-center gap-2"><CreditCard size={20} className="text-neon-green"/> Ativar Pagamentos Online (Mercado Pago)</span></div>
@@ -514,67 +575,83 @@ $$;
             <div className="space-y-6 animate-fade-in">
                 <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-6">
                     <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                        <Database size={20} className="text-neon-orange"/> Ferramentas de Migração
+                        <Database size={20} className="text-neon-orange"/> Ferramentas de Banco de Dados
                     </h3>
-                    <div className="bg-yellow-900/20 border border-yellow-600/30 p-4 rounded-lg mb-6 text-sm text-yellow-200">
-                        <p className="font-bold flex items-center gap-2 mb-2"><AlertTriangle size={16}/> Zona de Perigo</p>
-                        <p>Estas ferramentas sincronizam a tabela de dados com o sistema de Autenticação do Supabase.</p>
-                        <p className="mt-1">Use se houver erro "Sua conta precisa de sincronização".</p>
-                    </div>
-
-                    <div className="flex flex-col gap-4">
-                        <div className="flex items-center justify-between bg-slate-800 p-4 rounded-lg border border-slate-700">
-                            <div>
-                                <h4 className="font-bold text-white">Sincronizar IDs (Auth &lt;-&gt; Banco)</h4>
-                                <p className="text-xs text-slate-400 mt-1">Cria contas no Auth para usuários/clientes existentes e corrige os IDs nas tabelas de dados.</p>
-                            </div>
-                            <button 
-                                onClick={handleStartMigration}
-                                disabled={isMigrating}
-                                className="bg-neon-blue hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 shadow-lg"
-                            >
-                                {isMigrating ? <Loader2 className="animate-spin" size={18}/> : <RefreshCw size={18}/>}
-                                {isMigrating ? 'Sincronizando...' : 'Iniciar Sincronização'}
-                            </button>
-                        </div>
-
-                        {showSqlFallback && (
-                            <div className="bg-slate-950 p-4 rounded-lg border border-red-500/50 animate-fade-in">
-                                <div className="flex items-start gap-3 mb-4 text-red-400">
-                                    <Terminal size={24} className="flex-shrink-0 mt-1"/>
+                    
+                    <div className="flex flex-col gap-6">
+                        
+                        {/* CARD 1: CORREÇÃO DE SEGURANÇA (RLS) */}
+                        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-green-500/20 rounded text-green-400"><ShieldCheck size={20}/></div>
                                     <div>
-                                        <h4 className="font-bold">Atenção: Funções SQL Ausentes</h4>
-                                        <p className="text-sm mt-1 text-slate-300">
-                                            O sistema tentou sincronizar, mas as funções necessárias não existem no banco de dados.
-                                            Por favor, copie o código abaixo e execute no <strong>SQL Editor</strong> do Supabase.
+                                        <h4 className="font-bold text-white">Correção de Permissões (RLS)</h4>
+                                        <p className="text-xs text-slate-400 mt-1">
+                                            Rode este script se o site não estiver carregando ou der erro de acesso. 
+                                            Ele libera o acesso seguro às tabelas.
                                         </p>
                                     </div>
                                 </div>
-                                <div className="relative group">
-                                    <pre className="bg-black p-4 rounded text-xs text-green-400 font-mono overflow-x-auto border border-slate-800">
-                                        {SQL_RPC_SCRIPT}
+                            </div>
+                            
+                            <div className="bg-black/50 p-4 rounded-lg border border-slate-700 relative group">
+                                <pre className="text-[10px] text-green-400 font-mono overflow-x-auto h-32 scrollbar-thin">
+                                    {SQL_RLS_SCRIPT}
+                                </pre>
+                                <button 
+                                    onClick={() => copySql(SQL_RLS_SCRIPT)}
+                                    className="absolute top-2 right-2 bg-slate-700 hover:bg-slate-600 text-white p-2 rounded opacity-0 group-hover:opacity-100 transition shadow-lg flex items-center gap-2 text-xs font-bold"
+                                >
+                                    <Copy size={14}/> Copiar Script RLS
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* CARD 2: MIGRAÇÃO DE USUÁRIOS */}
+                        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-yellow-500/20 rounded text-yellow-400"><RefreshCw size={20}/></div>
+                                    <div>
+                                        <h4 className="font-bold text-white">Sincronizar IDs (Migração)</h4>
+                                        <p className="text-xs text-slate-400 mt-1">Use apenas se tiver usuários antigos que não conseguem logar (Erro de ID).</p>
+                                    </div>
+                                </div>
+                                <button 
+                                    onClick={handleStartMigration}
+                                    disabled={isMigrating}
+                                    className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded text-xs font-bold flex items-center gap-2"
+                                >
+                                    {isMigrating ? <Loader2 className="animate-spin" size={14}/> : 'Rodar Auto-Sincronia'}
+                                </button>
+                            </div>
+
+                            {showSqlFallback && (
+                                <div className="bg-black/50 p-4 rounded-lg border border-red-500/30 relative group mt-2">
+                                    <p className="text-xs text-red-400 mb-2 font-bold flex items-center gap-1"><AlertTriangle size={12}/> Funções ausentes! Copie e rode este SQL primeiro:</p>
+                                    <pre className="text-[10px] text-slate-300 font-mono overflow-x-auto h-24 scrollbar-thin">
+                                        {SQL_MIGRATION_SCRIPT}
                                     </pre>
                                     <button 
-                                        onClick={copySql}
-                                        className="absolute top-2 right-2 bg-slate-800 hover:bg-slate-700 text-white p-2 rounded opacity-0 group-hover:opacity-100 transition"
-                                        title="Copiar SQL"
+                                        onClick={() => copySql(SQL_MIGRATION_SCRIPT)}
+                                        className="absolute top-2 right-2 bg-slate-700 hover:bg-slate-600 text-white p-2 rounded opacity-0 group-hover:opacity-100 transition text-xs"
                                     >
-                                        <Copy size={16}/>
+                                        <Copy size={14}/>
                                     </button>
                                 </div>
-                            </div>
-                        )}
+                            )}
 
-                        {/* LOGS DE MIGRAÇÃO */}
-                        <div className="bg-black/50 border border-slate-800 rounded-lg p-4 font-mono text-xs h-64 overflow-y-auto">
-                            {migrationLogs.length === 0 ? (
-                                <span className="text-slate-600 italic">Logs de operação aparecerão aqui...</span>
-                            ) : (
-                                migrationLogs.map((log, i) => (
-                                    <div key={i} className="text-slate-300 border-b border-slate-800/50 py-1 last:border-0">{log}</div>
-                                ))
+                            {/* LOGS DE MIGRAÇÃO */}
+                            {migrationLogs.length > 0 && (
+                                <div className="bg-black/50 border border-slate-800 rounded-lg p-2 font-mono text-[10px] h-24 overflow-y-auto mt-2">
+                                    {migrationLogs.map((log, i) => (
+                                        <div key={i} className="text-slate-300 border-b border-slate-800/50 py-0.5 last:border-0">{log}</div>
+                                    ))}
+                                </div>
                             )}
                         </div>
+
                     </div>
                 </div>
             </div>
@@ -584,6 +661,7 @@ $$;
       {/* User Modal */}
       {showUserModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
+          {/* ... MODAL DE USUÁRIO PERMANECE IGUAL ... */}
           <div className="bg-slate-800 border border-slate-600 w-full max-w-xl rounded-2xl shadow-2xl animate-scale-in my-auto">
              <div className="p-6 border-b border-slate-700 flex justify-between items-center"><h3 className="text-xl font-bold text-white">{isEditingUser ? 'Editar Usuário' : 'Adicionar Usuário'}</h3><button onClick={() => setShowUserModal(false)} className="text-slate-400 hover:text-white"><X size={20}/></button></div>
              <form onSubmit={handleSaveUser} className="p-6 space-y-5">
