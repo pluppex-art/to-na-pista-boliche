@@ -44,12 +44,31 @@ export const checkHourCapacity = (
   excludeReservationId?: string
 ): { occupied: number; left: number; available: boolean } => {
   
+  const now = new Date();
+
   // Filtra reservas do dia (exceto canceladas e a própria reserva se estiver editando)
-  const dayReservations = allReservations.filter(r => 
-    r.date === dateStr && 
-    r.status !== ReservationStatus.CANCELADA &&
-    r.id !== excludeReservationId
-  );
+  const dayReservations = allReservations.filter(r => {
+    // 1. Filtros Básicos
+    if (r.date !== dateStr) return false;
+    if (r.status === ReservationStatus.CANCELADA) return false;
+    if (r.id === excludeReservationId) return false;
+
+    // 2. REGRA DE 30 MINUTOS (Verificação Dupla)
+    // Se estiver Pendente, sem pagamento no local (payOnSite), e criada há mais de 30min,
+    // consideramos o horário LIBERADO para cálculo de capacidade, 
+    // mesmo que o status no banco ainda esteja como 'Pendente'.
+    if (r.status === ReservationStatus.PENDENTE && !r.payOnSite && r.createdAt) {
+        const created = new Date(r.createdAt);
+        const diffMinutes = (now.getTime() - created.getTime()) / (1000 * 60);
+        
+        // Se passou de 30 minutos (com tolerância de alguns segundos), ignora esta reserva na contagem
+        if (diffMinutes >= 30) {
+            return false; // Trata como se a reserva não existisse (libera a vaga)
+        }
+    }
+
+    return true;
+  });
 
   let occupied = 0;
 

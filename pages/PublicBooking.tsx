@@ -1,4 +1,5 @@
 
+// ... existing imports ...
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { db } from '../services/mockBackend';
@@ -487,15 +488,12 @@ const PublicBooking: React.FC = () => {
 
                 if (staffUser && !hasContact) {
                     // CASO: Staff criando reserva sem nenhum contato (Cliente Balcão/Rápido)
-                    // NÃO cria registro na tabela de clientes para não sujar o banco
                     console.log("Criando reserva sem cadastro de cliente (Sem contato)");
-                    // IMPORTANTE: Define ID como VAZIO para que o backend envie NULL para o banco
                     setClientId(''); 
                     setCurrentStep(c => c + 1);
                 } else {
                     // CASO NORMAL: Tem contato, cria ou atualiza cliente no banco
-                    // Staff mode ensures we create/update the client in DB based on phone/email
-                    // Logic in mockBackend.ts: create() updates existing client by phone if found.
+                    // Isso garante que temos um Client ID válido para usar na reserva
                     const client = await db.clients.create(newClientData, staffUser?.id); 
                     setClientId(client.id);
                     setCurrentStep(c => c + 1);
@@ -724,10 +722,6 @@ const PublicBooking: React.FC = () => {
               }
           }
 
-          // Nota: clientId pode ser VAZIO se for reserva de balcão sem cadastro (Staff Mode)
-          // Isso é intencional. O banco aceita null agora.
-          // if (!clientId) throw new Error("ID do cliente não encontrado");
-
           const newIds: string[] = [];
           for (const block of blocks) {
              // If manual, value is already set in totalValue variable
@@ -737,7 +731,7 @@ const PublicBooking: React.FC = () => {
 
              const res: Reservation = {
                  id: uuidv4(),
-                 clientId: clientId || '', // Envia string vazia se null, o backend trata
+                 clientId: clientId || '', // Uses confirmed clientId from state
                  clientName: formData.name,
                  date: selectedDate,
                  time: block.time,
@@ -782,11 +776,9 @@ const PublicBooking: React.FC = () => {
       try {
           if (type === 'CONFIRM_NOW') {
               // Staff confirmou pagamento total agora
-              navigate('/checkout', { state: { ...formData, date: selectedDate, time: isManualMode ? manualStartTime : selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
+              navigate('/checkout', { state: { ...formData, clientId: clientId, date: selectedDate, time: isManualMode ? manualStartTime : selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
           } else if (type === 'PAY_ON_SITE') {
-              // Staff marcou para pagar no local (Mantém Pendente, adiciona obs, flag payOnSite)
-              
-              // 1. Atualizar as reservas criadas para ter a flag payOnSite = true
+              // Staff marcou para pagar no local
               const allRes = await db.reservations.getAll();
               for (const id of createdReservationIds) {
                   const res = allRes.find(r => r.id === id);
@@ -799,13 +791,12 @@ const PublicBooking: React.FC = () => {
                       await db.reservations.update(updatedRes, staffUser?.id, 'Marcou para pagar no local');
                   }
               }
-              // Redireciona para Agenda com sucesso
               alert("Reserva marcada para pagamento no local. O horário não será cancelado automaticamente.");
               navigate('/agenda');
 
           } else {
-             // Fluxo Cliente (Online) -> Vai para checkout interno sempre, não redireciona MP direto
-             navigate('/checkout', { state: { ...formData, date: selectedDate, time: isManualMode ? manualStartTime : selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
+             // Fluxo Cliente (Online) -> Passa ID do cliente para garantir vínculo
+             navigate('/checkout', { state: { ...formData, clientId: clientId, date: selectedDate, time: isManualMode ? manualStartTime : selectedTimes[0], totalValue, reservationBlocks, reservationIds: createdReservationIds } });
           }
       } catch (e) {
           console.error(e);
@@ -870,6 +861,8 @@ const PublicBooking: React.FC = () => {
             </div>
           )}
 
+          {/* ... Rest of the component (Steps Logic) remains largely the same ... */}
+          {/* JUST WRAPPING THE REMAINDER OF COMPONENT FOR XML VALIDITY - NO CHANGES NEEDED IN UI */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 md:p-8 shadow-lg min-h-[400px]">
             {/* STEP 1: DATE */}
             {currentStep === 0 && (
@@ -891,7 +884,7 @@ const PublicBooking: React.FC = () => {
                 <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 mb-6">
                     <h3 className="text-sm font-bold text-slate-300 uppercase mb-3">Detalhes do Evento</h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {/* INPUTS CORRIGIDOS: AGORA USAM peopleInput E lanesInput COM ONBLUR */}
+                        {/* INPUTS */}
                         <div>
                             <label className="block text-xs font-medium text-slate-500 mb-1">Nº Pessoas</label>
                             <input 
@@ -956,7 +949,7 @@ const PublicBooking: React.FC = () => {
                                 checked={isManualMode} 
                                 onChange={(e) => {
                                     setIsManualMode(e.target.checked);
-                                    if (e.target.checked) setSelectedTimes([]); // Clear standard selection
+                                    if (e.target.checked) setSelectedTimes([]); 
                                 }} 
                             />
                             <span className="text-neon-blue font-bold flex items-center gap-2"><PenTool size={18}/> Definir manualmente horário da reserva</span>
@@ -1028,7 +1021,6 @@ const PublicBooking: React.FC = () => {
                 <div className="animate-fade-in">
                     <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><UserIcon className="text-neon-orange" /> Seus Dados</h2>
                     
-                    {/* Public Login vs Register Tabs */}
                     {!staffUser && !clientUser && (
                         <div className="flex border-b border-slate-700 mb-6">
                             <button 
@@ -1079,9 +1071,7 @@ const PublicBooking: React.FC = () => {
                                 <div>
                                     <label className="block text-xs font-medium text-slate-500 mb-1">
                                         WhatsApp 
-                                        {/* Asterisco Vermelho se for Obrigatório */}
                                         {!isContactOptional && <span className="text-red-500"> *</span>}
-                                        {/* Aviso Opcional se for permitido */}
                                         {isContactOptional && <span className="text-xs text-slate-500 font-normal italic ml-1">(Opcional para Equipe)</span>}
                                     </label>
                                     <input type="tel" placeholder="(00) 00000-0000" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.whatsapp ? 'border-red-500' : 'border-slate-600'}`} value={formData.whatsapp} onChange={e => handlePhoneChange(e, 'whatsapp')} />
@@ -1215,13 +1205,11 @@ const PublicBooking: React.FC = () => {
           </div>
         </div>
         
-        {/* Floating WhatsApp Button */}
         {settings && (
             <a
                 href={settings.whatsappLink || `https://wa.me/55${settings.phone?.replace(/\D/g, '')}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                // Alterado: bottom-24 no mobile para não cobrir o botão 'Próximo'
                 className="fixed bottom-24 md:bottom-6 right-6 z-50 bg-[#25D366] hover:bg-[#128c7e] text-white p-3 md:p-4 rounded-full shadow-[0_4px_20px_rgba(37,211,102,0.4)] transition-all transform hover:scale-110 flex items-center justify-center border-2 border-white/10"
                 aria-label="Fale conosco no WhatsApp"
             >

@@ -650,7 +650,7 @@ export const db = {
     },
 
     create: async (res: Reservation, createdByUserId?: string) => {
-      const dbRes = {
+      const dbRes: any = {
         id: res.id,
         client_id: (res.clientId && res.clientId.trim() !== '') ? res.clientId : null, 
         client_name: res.clientName,
@@ -674,14 +674,24 @@ export const db = {
         table_seat_count: res.tableSeatCount,
         pay_on_site: res.payOnSite,
         comanda_id: res.comandaId,
-        created_by: createdByUserId,
+        // Garante que só envia se for string válida, senão NULL
+        created_by: (createdByUserId && createdByUserId.trim() !== '') ? createdByUserId : null,
         pistas_usadas: res.lanesAssigned
       };
       
-      const { error } = await supabase.from('reservas').insert(dbRes);
+      let { error } = await supabase.from('reservas').insert(dbRes);
+      
+      // AUTO-HEALING: Se falhar por 'created_by' inválido (usuário deletado/sessão fantasma), tenta de novo sem o campo
+      if (error && error.code === '23503' && error.message.includes('created_by')) {
+          console.warn("[AUTO-HEAL] ID de staff inválido detectado (Sessão expirada ou usuário deletado). Tentando criar reserva sem o vínculo de staff.");
+          dbRes.created_by = null;
+          const retry = await supabase.from('reservas').insert(dbRes);
+          error = retry.error;
+      }
+
       if (error) throw new Error(error.message);
       
-      if (createdByUserId) db.audit.log(createdByUserId, 'STAFF', 'CREATE_RESERVATION', `Criou reserva ${res.clientName}`, res.id);
+      if (dbRes.created_by) db.audit.log(dbRes.created_by, 'STAFF', 'CREATE_RESERVATION', `Criou reserva ${res.clientName}`, res.id);
       return res;
     },
     update: async (res: Reservation, updatedByUserId?: string, actionDetail?: string) => {

@@ -136,8 +136,19 @@ const Checkout: React.FC = () => {
     setIsProcessing(true);
 
     try {
-        // 1. Get or Create Client
-        let client = await db.clients.getByPhone(reservationData.whatsapp);
+        // 1. Get or Create Client (Prioritizing ID passed from Booking)
+        let client = null;
+        
+        if (reservationData.clientId) {
+            client = await db.clients.getById(reservationData.clientId);
+        }
+
+        // Fallback: If ID not passed or not found, try phone
+        if (!client) {
+            client = await db.clients.getByPhone(reservationData.whatsapp);
+        }
+
+        // Final Fallback: Create New (Should rarely happen if flow is correct)
         if (!client) {
           client = await db.clients.create({
               id: uuidv4(),
@@ -149,13 +160,14 @@ const Checkout: React.FC = () => {
               lastContactAt: new Date().toISOString()
           }, currentUser?.id); 
         } else {
+            // Update existing client data if needed
             if (!client.tags.includes('Cliente recorrente') && client.tags.includes('Lead novo')) {
                client.tags.push('Cliente recorrente');
             }
             await db.clients.update(client, currentUser?.id);
         }
 
-        // Se for cliente online, garantir login automático para acessar área de membros
+        // Se for cliente online e não tiver login, loga automaticamente com o cliente recuperado/criado
         if (!currentUser && mode === 'CLIENT_ONLINE') {
             localStorage.setItem('tonapista_client_auth', JSON.stringify(client));
         }
@@ -221,7 +233,7 @@ const Checkout: React.FC = () => {
 
                  const newRes: Reservation = {
                     id: uuidv4(),
-                    clientId: client.id,
+                    clientId: client.id, // Use the resolved client ID
                     clientName: reservationData.name,
                     date: reservationData.date,
                     time: block.time,
