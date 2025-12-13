@@ -81,14 +81,10 @@ const CRM: React.FC = () => {
   useEffect(() => {
     const fetchDetails = async () => {
       if (selectedClient) {
-        // Fetch Reservations for Specific Client (Optimized)
-        // Note: Using filtered getAll logic is still okay for ONE client, but ideally we'd have db.reservations.getByClient
-        const allRes = await db.reservations.getAll(); // Ideally optimize this too later
-        const history = allRes.filter(r => {
-            const isMain = r.clientId === selectedClient.id;
-            const isGuest = r.guests?.some(g => cleanPhone(g.phone) === cleanPhone(selectedClient.phone));
-            return isMain || isGuest;
-        });
+        // CORREÇÃO DE PERFORMANCE: Usar getByClientId em vez de getAll + filter
+        // Isso evita baixar milhares de reservas de outros clientes
+        const history = await db.reservations.getByClientId(selectedClient.id);
+        
         const sortedHistory = history.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         setClientHistory(sortedHistory);
 

@@ -635,13 +635,36 @@ export const db = {
         })) as Reservation[];
     },
 
+    // --- NOVO: BUSCA OTIMIZADA POR CLIENTE ---
+    getByClientId: async (clientId: string): Promise<Reservation[]> => {
+        const { data, error } = await supabase.from('reservas').select('*').eq('client_id', clientId);
+        if(error) {
+            console.error("Erro ao buscar reservas do cliente:", error);
+            return [];
+        }
+        return db.reservations._mapReservations(data);
+    },
+
+    // --- NOVO: BUSCA OTIMIZADA POR MÚLTIPLOS IDs ---
+    getByIds: async (ids: string[]): Promise<Reservation[]> => {
+        if (!ids || ids.length === 0) return [];
+        const { data, error } = await supabase.from('reservas').select('*').in('id', ids);
+        if(error) {
+            console.error("Erro ao buscar reservas por IDs:", error);
+            return [];
+        }
+        return db.reservations._mapReservations(data);
+    },
+
     getByDateRange: async (startDate: string, endDate: string): Promise<Reservation[]> => {
         const { data, error } = await supabase.from('reservas').select('*').gte('date', startDate).lte('date', endDate);
         if (error) { console.error("Erro ao buscar reservas por data:", error); return []; }
         return db.reservations._mapReservations(data);
     },
+    
     getAll: async (): Promise<Reservation[]> => {
       // WARNING: This fetches EVERYTHING. Use sparingly or for admin tasks only.
+      // Deprecated usage in production for client views.
       const { data, error } = await supabase.from('reservas').select('*');
       if (error) return [];
       return db.reservations._mapReservations(data);

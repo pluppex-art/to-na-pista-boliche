@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Client, Reservation, LoyaltyTransaction, ReservationStatus, PaymentStatus } from '../types';
@@ -78,14 +79,12 @@ const ClientDashboard: React.FC = () => {
               photoUrl: activeClient.photoUrl || ''
           });
 
-          // Load History
-          const allRes = await db.reservations.getAll();
-          // Ordena pela DATA DE CRIAÇÃO (createdAt) decrescente
-          const myRes = allRes
-              .filter(r => r.clientId === activeClient.id)
-              .sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          // Load History (OTIMIZADO)
+          // Em vez de baixar tudo, baixa só o deste cliente
+          const myRes = await db.reservations.getByClientId(activeClient.id);
+          const sorted = myRes.sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
               
-          setHistory(myRes);
+          setHistory(sorted);
 
           // Load Loyalty
           const pts = await db.loyalty.getHistory(activeClient.id);
@@ -101,8 +100,10 @@ const ClientDashboard: React.FC = () => {
     // Subscribe to updates relevant to this client
     const channel = supabase
       .channel('client-dashboard-updates')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => {
-          loadData(true);
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, (payload) => {
+          if (client && payload.new && (payload.new as any).client_id === client.id) {
+              loadData(true);
+          }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, (payload) => {
           if (client && payload.new && (payload.new as any).client_id === client.id) {
