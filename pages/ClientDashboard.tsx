@@ -95,22 +95,48 @@ const ClientDashboard: React.FC = () => {
 
   useEffect(() => {
     loadData();
+  }, [navigate]); // Carrega dados iniciais
 
-    // Subscribe to updates relevant to this client
+  // Separate effect for subscription that depends on client.id
+  useEffect(() => {
+    if (!client?.id) return;
+
+    console.log(`[ClientDashboard] Ouvindo atualizações para cliente: ${client.id}`);
+
+    // Subscribe to updates SPECIFIC to this client to save bandwidth and improve privacy
     const channel = supabase
-      .channel('client-dashboard-updates')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => {
-          loadData(true);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, (payload) => {
-          if (client && payload.new && (payload.new as any).client_id === client.id) {
+      .channel(`client-dashboard-${client.id}`)
+      .on(
+          'postgres_changes', 
+          { 
+              event: '*', 
+              schema: 'public', 
+              table: 'reservas',
+              filter: `client_id=eq.${client.id}` // FILTRO IMPORTANTE: Só avisa se for pra MIM
+          }, 
+          () => {
+              console.log("Atualização de reserva recebida!");
               loadData(true);
           }
-      })
+      )
+      .on(
+          'postgres_changes', 
+          { 
+              event: 'UPDATE', 
+              schema: 'public', 
+              table: 'clientes',
+              filter: `client_id=eq.${client.id}`
+          }, 
+          (payload) => {
+              if (payload.new) {
+                  loadData(true);
+              }
+          }
+      )
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [navigate]); 
+  }, [client?.id]); 
 
   const handleLogout = async () => {
       localStorage.removeItem('tonapista_client_auth');
