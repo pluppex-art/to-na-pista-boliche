@@ -1,13 +1,9 @@
 
-
-
-
-
 import React, { useEffect, useState, useRef } from 'react';
 import { db } from '../services/mockBackend';
 import { AppSettings, UserRole, User, DayConfig } from '../types';
 import { PERMISSION_KEYS } from '../constants';
-import { Save, UserPlus, Clock, LogOut, X, Trash2, CreditCard, Loader2, DollarSign, MapPin, Upload, Camera, CheckCircle, AlertTriangle, Key, Link2, ShieldCheck, ChevronDown, Lock, Pencil, Shield, CalendarOff, Plus } from 'lucide-react';
+import { Save, UserPlus, Clock, LogOut, X, Trash2, CreditCard, Loader2, DollarSign, MapPin, Upload, Camera, CheckCircle, AlertTriangle, Key, Link2, ShieldCheck, ChevronDown, Lock, Pencil, Shield, CalendarOff, Plus, Crown, IdCard, Check, Settings as SettingsIcon, Database, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -37,6 +33,10 @@ const Settings: React.FC = () => {
   // Deletion State
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Migration State
+  const [isMigrating, setIsMigrating] = useState(false);
+  const [migrationLogs, setMigrationLogs] = useState<string[]>([]);
 
   // Estado do formulário de usuário com propriedades explícitas
   const [userForm, setUserForm] = useState<Partial<User>>({
@@ -94,24 +94,17 @@ const Settings: React.FC = () => {
           }));
       }
       
-      // Se for Gestor, também habilita tudo por padrão (incluindo sem contato, se desejar)
+      // Se for Gestor, reseta para falso para que o usuario selecione manualmente (ou mantem o que ja estava se for edicao)
       // Ajuste: Apenas Admin Master tem acesso restrito a configurações, Gestor tem acesso a operacional.
-      if (userForm.role === UserRole.GESTOR) {
+      if (userForm.role === UserRole.GESTOR && !isEditingUser) {
+           // Se for novo usuario, sugerir algumas permissoes padrao
            setUserForm(prev => ({
               ...prev,
               perm_view_agenda: true,
-              perm_view_financial: true,
-              perm_view_crm: true,
-              perm_create_reservation: true,
-              perm_edit_reservation: true,
-              perm_delete_reservation: true,
-              perm_edit_client: true,
-              perm_receive_payment: true,
-              // Nota: Deixar opcional para gestor ajustar manualmente ou auto-setar true se quiser
-              perm_create_reservation_no_contact: true 
+              perm_create_reservation: true
           }));
       }
-  }, [userForm.role]);
+  }, [userForm.role, isEditingUser]);
 
   const showSuccess = () => {
     setSaveSuccess(true);
@@ -204,10 +197,10 @@ const Settings: React.FC = () => {
         email: '',
         passwordHash: '',
         role: UserRole.GESTOR,
-        perm_view_agenda: false,
+        perm_view_agenda: true,
         perm_view_financial: false,
         perm_view_crm: false,
-        perm_create_reservation: false,
+        perm_create_reservation: true,
         perm_edit_reservation: false,
         perm_delete_reservation: false,
         perm_edit_client: false,
@@ -310,6 +303,20 @@ const Settings: React.FC = () => {
       setSettings({ ...settings, businessHours: newHours });
   };
 
+  // MIGRATION HANDLER
+  const handleStartMigration = async () => {
+      if (!confirm("Isso criará contas no Auth para todos os usuários/clientes e corrigirá os IDs no banco. Continuar?")) return;
+      
+      setIsMigrating(true);
+      setMigrationLogs([]);
+      
+      await db.admin.syncDatabaseIds((msg) => {
+          setMigrationLogs(prev => [...prev, msg]);
+      });
+      
+      setIsMigrating(false);
+  };
+
   if (isLoading || !settings) return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin text-neon-blue"/></div>;
 
   return (
@@ -347,10 +354,11 @@ const Settings: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-slate-900/50 p-1 rounded-lg border border-slate-700">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 bg-slate-900/50 p-1 rounded-lg border border-slate-700">
         <button onClick={() => setActiveTab('general')} className={`px-4 py-3 rounded-md font-medium transition text-sm ${activeTab === 'general' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}>Geral</button>
         <button onClick={() => setActiveTab('integrations')} className={`px-4 py-3 rounded-md font-medium transition text-sm ${activeTab === 'integrations' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}>Pagamentos</button>
         <button onClick={() => setActiveTab('team')} className={`px-4 py-3 rounded-md font-medium transition text-sm ${activeTab === 'team' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}>Equipe</button>
+        <button onClick={() => setActiveTab('system')} className={`px-4 py-3 rounded-md font-medium transition text-sm ${activeTab === 'system' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}>Sistema</button>
       </div>
 
       <div className="bg-slate-800 rounded-xl p-4 md:p-6 border border-slate-700 shadow-lg">
@@ -554,7 +562,6 @@ const Settings: React.FC = () => {
                                 </div>
                             </div>
                             
-                            {/* Campos Restaurados: Client ID & Secret */}
                             <div>
                                 <label className="block text-xs text-slate-400 mb-1 font-bold">Client ID</label>
                                 <div className="relative">
@@ -587,7 +594,7 @@ const Settings: React.FC = () => {
              </div>
         )}
 
-        {/* TEAM TAB - UPDATED */}
+        {/* TEAM TAB */}
         {activeTab === 'team' && (
           <div className="space-y-6 animate-fade-in">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -616,8 +623,9 @@ const Settings: React.FC = () => {
                        <td className="p-3 text-white font-medium">{user.name}</td>
                        <td className="p-3">{user.email}</td>
                        <td className="p-3">
-                         <span className={`px-2 py-1 rounded-full text-xs font-bold ${user.role === UserRole.ADMIN ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'}`}>
-                           {user.role === UserRole.ADMIN ? 'Admin Master' : 'Usuário'}
+                         <span className={`px-2 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1 ${user.role === UserRole.ADMIN ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'}`}>
+                           {user.role === UserRole.ADMIN ? <Crown size={12} fill="currentColor"/> : <IdCard size={12}/>}
+                           {user.role === UserRole.ADMIN ? 'Admin Master' : 'Colaborador'}
                          </span>
                        </td>
                        <td className="p-3 text-right">
@@ -633,82 +641,145 @@ const Settings: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* SYSTEM TOOLS TAB (MIGRATION) */}
+        {activeTab === 'system' && (
+            <div className="space-y-6 animate-fade-in">
+                <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-6">
+                    <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                        <Database size={20} className="text-neon-orange"/> Ferramentas de Migração
+                    </h3>
+                    <div className="bg-yellow-900/20 border border-yellow-600/30 p-4 rounded-lg mb-6 text-sm text-yellow-200">
+                        <p className="font-bold flex items-center gap-2 mb-2"><AlertTriangle size={16}/> Zona de Perigo</p>
+                        <p>Estas ferramentas sincronizam a tabela de dados com o sistema de Autenticação do Supabase.</p>
+                        <p className="mt-1">Use apenas se houver inconsistência de IDs ou se você deletou usuários do painel Auth mas manteve os dados.</p>
+                    </div>
+
+                    <div className="flex flex-col gap-4">
+                        <div className="flex items-center justify-between bg-slate-800 p-4 rounded-lg border border-slate-700">
+                            <div>
+                                <h4 className="font-bold text-white">Sincronizar IDs (Auth &lt;-&gt; Banco)</h4>
+                                <p className="text-xs text-slate-400 mt-1">Cria contas no Auth para usuários/clientes existentes e corrige os IDs nas tabelas de dados.</p>
+                            </div>
+                            <button 
+                                onClick={handleStartMigration}
+                                disabled={isMigrating}
+                                className="bg-neon-blue hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 shadow-lg"
+                            >
+                                {isMigrating ? <Loader2 className="animate-spin" size={18}/> : <RefreshCw size={18}/>}
+                                {isMigrating ? 'Sincronizando...' : 'Iniciar Sincronização'}
+                            </button>
+                        </div>
+
+                        {/* LOGS DE MIGRAÇÃO */}
+                        <div className="bg-black/50 border border-slate-800 rounded-lg p-4 font-mono text-xs h-64 overflow-y-auto">
+                            {migrationLogs.length === 0 ? (
+                                <span className="text-slate-600 italic">Logs de operação aparecerão aqui...</span>
+                            ) : (
+                                migrationLogs.map((log, i) => (
+                                    <div key={i} className="text-slate-300 border-b border-slate-800/50 py-1 last:border-0">{log}</div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
       </div>
 
       {/* User Modal (Add/Edit) */}
       {showUserModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-slate-800 border border-slate-600 w-full max-w-lg rounded-2xl shadow-2xl animate-scale-in my-auto">
+          <div className="bg-slate-800 border border-slate-600 w-full max-w-xl rounded-2xl shadow-2xl animate-scale-in my-auto">
              <div className="p-6 border-b border-slate-700 flex justify-between items-center">
                 <h3 className="text-xl font-bold text-white">{isEditingUser ? 'Editar Usuário' : 'Adicionar Usuário'}</h3>
                 <button onClick={() => setShowUserModal(false)} className="text-slate-400 hover:text-white"><X size={20}/></button>
              </div>
              
-             <form onSubmit={handleSaveUser} className="p-6 space-y-4">
+             <form onSubmit={handleSaveUser} className="p-6 space-y-5">
                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                        <label className="block text-slate-400 mb-1 text-sm">Nome Completo</label>
-                        <input required type="text" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white" value={userForm.name} onChange={e => setUserForm({...userForm, name: e.target.value})} />
+                        <label className="block text-slate-400 mb-1 text-sm font-bold">Nome Completo</label>
+                        <input required type="text" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:border-neon-blue outline-none" value={userForm.name} onChange={e => setUserForm({...userForm, name: e.target.value})} />
                     </div>
                     <div>
-                        <label className="block text-slate-400 mb-1 text-sm">E-mail de Login</label>
-                        <input required type="email" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white" value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} />
+                        <label className="block text-slate-400 mb-1 text-sm font-bold">E-mail de Login</label>
+                        <input required type="email" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:border-neon-blue outline-none" value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} />
                     </div>
                </div>
 
                <div>
-                 <label className="block text-slate-400 mb-1 text-sm">Senha {isEditingUser && <span className="text-xs text-slate-500">(Deixe em branco para manter)</span>}</label>
-                 <input required={!isEditingUser} type="password" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white" value={userForm.passwordHash} onChange={e => setUserForm({...userForm, passwordHash: e.target.value})} />
+                 <label className="block text-slate-400 mb-1 text-sm font-bold">Senha {isEditingUser && <span className="text-xs text-slate-500 font-normal">(Deixe em branco para manter)</span>}</label>
+                 <input required={!isEditingUser} type="password" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:border-neon-blue outline-none" value={userForm.passwordHash} onChange={e => setUserForm({...userForm, passwordHash: e.target.value})} />
                </div>
 
                <div>
-                 <label className="block text-slate-400 mb-1 text-sm">Função do Usuário</label>
-                 <div className="grid grid-cols-2 gap-3">
-                    <label className={`cursor-pointer border rounded-lg p-3 flex items-center gap-3 transition ${userForm.role === UserRole.ADMIN ? 'bg-purple-900/20 border-purple-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>
-                        <input type="radio" name="role" className="hidden" checked={userForm.role === UserRole.ADMIN} onChange={() => setUserForm({...userForm, role: UserRole.ADMIN})}/>
-                        <Lock size={16} className={userForm.role === UserRole.ADMIN ? 'text-purple-400' : 'text-slate-500'} />
-                        <span className="font-bold text-sm">Admin Master</span>
-                    </label>
+                 <label className="block text-slate-400 mb-2 text-sm font-bold">Função do Usuário</label>
+                 <div className="grid grid-cols-2 gap-4">
+                    <div 
+                        onClick={() => setUserForm({...userForm, role: UserRole.ADMIN})}
+                        className={`cursor-pointer rounded-xl p-4 border-2 transition relative ${userForm.role === UserRole.ADMIN ? 'bg-purple-900/20 border-purple-500' : 'bg-slate-900 border-slate-700 hover:border-slate-500'}`}
+                    >
+                        <div className="flex items-center gap-2 mb-2">
+                            <Crown size={20} className={userForm.role === UserRole.ADMIN ? 'text-purple-400' : 'text-slate-500'} fill={userForm.role === UserRole.ADMIN ? "currentColor" : "none"} />
+                            <span className={`font-bold ${userForm.role === UserRole.ADMIN ? 'text-white' : 'text-slate-400'}`}>Admin Master</span>
+                        </div>
+                        <p className="text-xs text-slate-500 leading-tight">Acesso irrestrito a todas as configurações, financeiro e usuários.</p>
+                        {userForm.role === UserRole.ADMIN && <div className="absolute top-2 right-2 text-purple-500"><CheckCircle size={16} /></div>}
+                    </div>
 
-                    <label className={`cursor-pointer border rounded-lg p-3 flex items-center gap-3 transition ${userForm.role === UserRole.GESTOR ? 'bg-blue-900/20 border-blue-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>
-                        <input type="radio" name="role" className="hidden" checked={userForm.role === UserRole.GESTOR} onChange={() => setUserForm({...userForm, role: UserRole.GESTOR})}/>
-                        <Shield size={16} className={userForm.role === UserRole.GESTOR ? 'text-blue-400' : 'text-slate-500'} />
-                        <span className="font-bold text-sm">Usuário</span>
-                    </label>
+                    <div 
+                        onClick={() => setUserForm({...userForm, role: UserRole.GESTOR})}
+                        className={`cursor-pointer rounded-xl p-4 border-2 transition relative ${userForm.role === UserRole.GESTOR ? 'bg-blue-900/20 border-blue-500' : 'bg-slate-900 border-slate-700 hover:border-slate-500'}`}
+                    >
+                        <div className="flex items-center gap-2 mb-2">
+                            <IdCard size={20} className={userForm.role === UserRole.GESTOR ? 'text-blue-400' : 'text-slate-500'} />
+                            <span className={`font-bold ${userForm.role === UserRole.GESTOR ? 'text-white' : 'text-slate-400'}`}>Colaborador</span>
+                        </div>
+                        <p className="text-xs text-slate-500 leading-tight">Acesso limitado às funções operacionais definidas abaixo.</p>
+                        {userForm.role === UserRole.GESTOR && <div className="absolute top-2 right-2 text-blue-500"><CheckCircle size={16} /></div>}
+                    </div>
                  </div>
                </div>
                
-               {/* Permissions Selector with Boolean Checkboxes */}
-               <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700">
+               {/* Permissions Selector with Smart Logic */}
+               <div className={`p-4 rounded-lg border transition-all ${userForm.role === UserRole.ADMIN ? 'bg-purple-900/10 border-purple-500/30' : 'bg-slate-900/50 border-slate-700'}`}>
                   <div className="flex justify-between items-center mb-3">
                       <label className="text-sm font-bold text-slate-300">Permissões de Acesso</label>
-                      {userForm.role === UserRole.ADMIN && <span className="text-[10px] bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded">Total (Bloqueado)</span>}
                   </div>
                   
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
-                      {PERMISSION_KEYS.map(perm => {
-                          const isSelected = !!userForm[perm.key];
-                          const isAdmin = userForm.role === UserRole.ADMIN;
-                          
-                          return (
-                              <label key={perm.key} className={`flex items-center gap-2 p-2 rounded border text-xs select-none transition ${isAdmin ? 'opacity-50 cursor-not-allowed bg-slate-800 border-slate-700' : 'cursor-pointer hover:bg-slate-800 border-slate-700'}`}>
-                                  <input 
-                                    type="checkbox" 
-                                    disabled={isAdmin}
-                                    checked={isSelected}
-                                    onChange={() => togglePermission(perm.key)}
-                                    className={`rounded w-4 h-4 ${isAdmin ? 'accent-purple-500' : 'accent-neon-blue'}`}
-                                  />
-                                  <span className={isSelected ? 'text-white font-medium' : 'text-slate-400'}>
-                                      {perm.label}
-                                  </span>
-                              </label>
-                          );
-                      })}
-                  </div>
+                  {userForm.role === UserRole.ADMIN ? (
+                      <div className="flex flex-col items-center justify-center py-4 text-center">
+                          <ShieldCheck size={32} className="text-purple-500 mb-2"/>
+                          <p className="text-sm font-bold text-white">Acesso Total Habilitado</p>
+                          <p className="text-xs text-purple-400 mt-1">Administradores possuem todas as permissões por padrão.</p>
+                      </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1 animate-fade-in">
+                        {PERMISSION_KEYS.map(perm => {
+                            const isSelected = !!userForm[perm.key];
+                            return (
+                                <label key={perm.key} className="flex items-center gap-3 p-2 rounded border border-slate-700 cursor-pointer hover:bg-slate-800 transition">
+                                    <div className={`w-5 h-5 rounded flex items-center justify-center border ${isSelected ? 'bg-neon-blue border-neon-blue' : 'bg-slate-900 border-slate-600'}`}>
+                                        {isSelected && <Check size={14} className="text-white"/>}
+                                    </div>
+                                    <input 
+                                        type="checkbox" 
+                                        className="hidden"
+                                        checked={isSelected}
+                                        onChange={() => togglePermission(perm.key)}
+                                    />
+                                    <span className={`text-xs ${isSelected ? 'text-white font-medium' : 'text-slate-400'}`}>
+                                        {perm.label}
+                                    </span>
+                                </label>
+                            );
+                        })}
+                    </div>
+                  )}
                </div>
 
-               <div className="pt-4">
+               <div className="pt-2">
                  <button type="submit" className="w-full bg-neon-blue hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition shadow-lg">
                    {isEditingUser ? 'Salvar Alterações' : 'Criar Usuário'}
                  </button>
