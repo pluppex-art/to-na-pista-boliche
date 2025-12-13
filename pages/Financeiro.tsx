@@ -1,8 +1,9 @@
+
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
 import { Reservation, ReservationStatus, AuditLog, User } from '../types';
-import { Loader2, DollarSign, TrendingUp, Users, Calendar, AlertCircle, Shield, History, Calculator, Percent, CalendarRange, ListChecks, ChevronDown } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Loader2, DollarSign, TrendingUp, Users, Calendar, AlertCircle, Shield, History, Calculator, Percent, CalendarRange, ListChecks, ChevronDown, Clock } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { supabase } from '../services/supabaseClient';
 
 const Financeiro: React.FC = () => {
@@ -181,7 +182,7 @@ const Financeiro: React.FC = () => {
       ? (cancelledSlotsCount / totalSlotsIncludingCancelled) * 100 
       : 0;
 
-  // Gráfico (Usando apenas Realizado)
+  // Gráfico Faturamento (Usando apenas Realizado)
   const revenueByDayMap = new Map<string, number>();
   realizedReservations.forEach(r => {
       const val = revenueByDayMap.get(r.date) || 0;
@@ -190,6 +191,28 @@ const Financeiro: React.FC = () => {
   const revenueChartData = Array.from(revenueByDayMap.entries())
     .map(([date, value]) => ({ date: date.split('-').slice(1).reverse().join('/'), value }))
     .sort((a,b) => a.date.localeCompare(b.date));
+
+  // --- NOVO GRÁFICO: HORÁRIOS DE PICO (HEATMAP SIMPLIFICADO) ---
+  const hoursMap = new Array(24).fill(0);
+  
+  realizedReservations.forEach(r => {
+      const startH = parseInt(r.time.split(':')[0]);
+      const duration = Math.ceil(r.duration);
+      const lanes = r.laneCount || 1;
+
+      // Adiciona o peso (número de pistas) para cada hora que a reserva ocupa
+      for (let i = 0; i < duration; i++) {
+          const currentHour = (startH + i) % 24; // Lida com virada de noite se necessário
+          hoursMap[currentHour] += lanes;
+      }
+  });
+
+  // Filtra apenas horas com movimento para o gráfico ficar mais limpo
+  // Exibimos das 16h as 02h geralmente, ou dinamicamente onde tem dados
+  const peakHoursChartData = hoursMap.map((count, hour) => ({
+      hour: `${hour}:00`,
+      count: count
+  })).filter(d => d.count > 0 || (parseInt(d.hour) >= 16 || parseInt(d.hour) <= 2)); // Mostra pelo menos o horário comercial noturno padrão
 
   // Top Clientes (Usando Slots Realizados)
   const clientSpendMap = new Map<string, {name: string, total: number, slots: number}>();
@@ -380,20 +403,29 @@ const Financeiro: React.FC = () => {
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* GRÁFICO DE RECEITA */}
                     <div className="lg:col-span-2 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
                         <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2"><DollarSign size={20} className="text-green-500"/> Faturamento Diário (Realizado)</h3>
                         <div className="h-80 w-full">
                             <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={revenueChartData}>
+                                <AreaChart data={revenueChartData}>
+                                    <defs>
+                                        <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3}/>
+                                            <stop offset="95%" stopColor="#22c55e" stopOpacity={0}/>
+                                        </linearGradient>
+                                    </defs>
                                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                                    <XAxis dataKey="date" stroke="#94a3b8" />
-                                    <YAxis stroke="#94a3b8" />
+                                    <XAxis dataKey="date" stroke="#94a3b8" fontSize={12} />
+                                    <YAxis stroke="#94a3b8" fontSize={12} />
                                     <Tooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', color: '#fff'}} itemStyle={{color: '#22c55e'}} />
-                                    <Bar dataKey="value" name="Valor (R$)" fill="#22c55e" radius={[4, 4, 0, 0]} />
-                                </BarChart>
+                                    <Area type="monotone" dataKey="value" name="Valor (R$)" stroke="#22c55e" fillOpacity={1} fill="url(#colorRevenue)" />
+                                </AreaChart>
                             </ResponsiveContainer>
                         </div>
                     </div>
+
+                    {/* TOP CLIENTES */}
                     <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg flex flex-col">
                         <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Users size={20} className="text-neon-blue"/> Top 5 Clientes</h3>
                         <div className="flex-1 overflow-auto">
@@ -405,6 +437,36 @@ const Financeiro: React.FC = () => {
                                 </tbody>
                             </table>
                         </div>
+                    </div>
+
+                    {/* NOVO GRÁFICO: HORÁRIOS DE PICO */}
+                    <div className="lg:col-span-3 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
+                        <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                            <Clock size={20} className="text-neon-orange"/> Horários de Pico (Volume de Pistas)
+                        </h3>
+                        <div className="h-64 w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={peakHoursChartData}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                                    <XAxis dataKey="hour" stroke="#94a3b8" fontSize={12} />
+                                    <YAxis stroke="#94a3b8" fontSize={12} />
+                                    <Tooltip 
+                                        contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', color: '#fff'}} 
+                                        cursor={{fill: '#334155', opacity: 0.4}}
+                                    />
+                                    <Bar 
+                                        dataKey="count" 
+                                        name="Pistas Vendidas" 
+                                        fill="#f97316" 
+                                        radius={[4, 4, 0, 0]} 
+                                        barSize={40}
+                                    />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-2 text-center">
+                            * Contabiliza o número total de pistas ocupadas por hora no período selecionado.
+                        </p>
                     </div>
                 </div>
             </div>
