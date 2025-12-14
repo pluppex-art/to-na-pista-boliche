@@ -296,9 +296,21 @@ const Checkout: React.FC = () => {
             }
         }
 
-    } catch (e) {
-        console.error(e);
-        alert('Erro ao processar.');
+    } catch (e: any) {
+        console.error("Checkout Error:", e);
+        let msg = 'Erro ao processar.';
+        
+        // Tratamento de mensagens específicas do Banco de Dados
+        if (e.message) {
+            if (e.message.includes('foreign key constraint') || e.message.includes('created_by')) {
+                msg = "Sessão inválida ou usuário removido. Tente fazer logout e login novamente.";
+            } else if (e.message.includes('violates check constraint')) {
+                msg = "Erro de validação: Verifique os dados inseridos.";
+            } else {
+                msg = `Erro Técnico: ${e.message}`;
+            }
+        }
+        alert(msg);
     } finally {
         setIsProcessing(false);
     }

@@ -725,9 +725,15 @@ const PublicBooking: React.FC = () => {
           const newIds: string[] = [];
           for (const block of blocks) {
              // If manual, value is already set in totalValue variable
-             const blockTotalValue = isManualMode 
+             let blockTotalValue = isManualMode 
                 ? parseFloat(manualPrice) 
                 : (totalValue / (blocks.reduce((acc, b) => acc + b.duration, 0))) * block.duration;
+
+             // PROTECTION: Ensure value is a valid number, otherwise set to 0
+             if (isNaN(blockTotalValue) || !isFinite(blockTotalValue)) {
+                 blockTotalValue = 0;
+                 console.warn("Valor da reserva inválido (NaN), ajustado para 0.");
+             }
 
              const res: Reservation = {
                  id: uuidv4(),

@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { AppSettings, User } from '../types';
 import { INITIAL_SETTINGS } from '../constants';
@@ -32,12 +33,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (stored) {
       try {
         const parsedUser = JSON.parse(stored);
+        // Seta o usuário otimisticamente para não piscar a tela de login
         setUser(parsedUser);
         
+        // Valida se o usuário ainda existe no banco de dados
         db.users.getById(parsedUser.id).then(freshUser => {
-             if (freshUser) setUser(freshUser);
-        }).catch(() => {});
+             if (freshUser) {
+                 // Usuário existe, atualiza estado e storage com dados frescos
+                 setUser(freshUser);
+                 localStorage.setItem('tonapista_auth', JSON.stringify(freshUser));
+             } else {
+                 // Usuário NÃO existe (foi deletado), força logout
+                 console.warn("Sessão inválida: Usuário não encontrado no banco. Realizando logout automático.");
+                 localStorage.removeItem('tonapista_auth');
+                 setUser(null);
+             }
+        }).catch((err) => {
+            console.error("Erro ao validar sessão do usuário:", err);
+            // Em caso de erro de rede, mantemos a sessão otimista por segurança UX,
+            // mas erros de 404/Null já foram tratados acima.
+        });
       } catch (e) {
+        console.error("Erro ao ler usuário do storage:", e);
+        localStorage.removeItem('tonapista_auth');
         setUser(null);
       }
     } else {
