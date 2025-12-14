@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
 import { supabase } from '../services/supabaseClient';
@@ -43,8 +44,9 @@ const Agenda: React.FC = () => {
   const [availableSlots, setAvailableSlots] = useState<any[]>([]);
   const [calculatingSlots, setCalculatingSlots] = useState<boolean>(false);
 
-  // Expiring Reservations State
+  // Expiring & Overdue Reservations State
   const [expiringReservations, setExpiringReservations] = useState<Reservation[]>([]);
+  const [overduePendingReservations, setOverduePendingReservations] = useState<Reservation[]>([]);
 
   // Permissions Helpers
   const canCreate = currentUser?.role === UserRole.ADMIN || currentUser?.perm_create_reservation;
@@ -90,10 +92,12 @@ const Agenda: React.FC = () => {
 
       setMetrics({ totalSlots: total, pendingSlots: pending, confirmedSlots: confirmed, checkInSlots: checkIn, noShowSlots: noShow });
 
-      // Expiring Logic (Requires current day mostly)
+      // Expiring & Overdue Logic
       const now = new Date();
+      
+      // 1. Pré-Reservas expirando (criadas há 20-30 min)
       const expiring = monthReservations.filter(r => {
-          if (r.date !== selectedDate) return false; // Optimization
+          if (r.date !== selectedDate) return false; 
           if (r.payOnSite) return false; 
           if (r.status !== ReservationStatus.PENDENTE) return false;
           if (!r.createdAt) return false;
@@ -102,6 +106,25 @@ const Agenda: React.FC = () => {
           return diffMins >= 20 && diffMins < 30; 
       });
       setExpiringReservations(expiring);
+
+      // 2. Reservas Pendentes em Atraso (Horário do jogo já passou e ainda está pendente)
+      // Isso pega erros operacionais (esqueceram de confirmar pagamento no local/comanda)
+      const overdue = monthReservations.filter(r => {
+          if (r.status !== ReservationStatus.PENDENTE) return false;
+          
+          // Constrói data fim da reserva
+          const [y, m, d] = r.date.split('-').map(Number);
+          const [h, min] = r.time.split(':').map(Number);
+          // Data fim = Data + Hora + Duração
+          const resEnd = new Date(y, m - 1, d, h + r.duration, min);
+          
+          // Se "agora" é maior que o fim da reserva, e ela ainda está pendente => Atrasada/Esquecida
+          // Adiciona 15 min de tolerância para não piscar assim que acaba
+          const toleranceTime = new Date(resEnd.getTime() + 15 * 60000); 
+          
+          return now > toleranceTime;
+      });
+      setOverduePendingReservations(overdue);
 
     } finally {
       if (!isBackground) setLoading(false);
@@ -171,6 +194,33 @@ const Agenda: React.FC = () => {
           setShowLaneSelector(true);
       } else {
           loadData(true);
+      }
+  };
+
+  const handleResolveOverdue = async (res: Reservation, action: 'CONFIRM' | 'NO_SHOW') => {
+      if (!canEdit) return;
+      try {
+          const updatedRes = { ...res };
+          if (action === 'CONFIRM') {
+              updatedRes.status = ReservationStatus.CONFIRMADA;
+              updatedRes.paymentStatus = PaymentStatus.PAGO;
+              updatedRes.observations = (res.observations || '') + ' [Baixa Manual de Atraso]';
+              
+              // Add Points if confirming
+              const points = Math.floor(res.totalValue);
+              if (points > 0) {
+                  await db.loyalty.addTransaction(res.clientId, points, `Confirmação Tardia (${res.date})`, currentUser?.id);
+              }
+          } else {
+              updatedRes.status = ReservationStatus.NO_SHOW;
+              updatedRes.observations = (res.observations || '') + ' [No-Show por Atraso]';
+          }
+
+          await db.reservations.update(updatedRes, currentUser?.id, `Resolveu pendência atrasada: ${action}`);
+          loadData(true);
+      } catch (e) {
+          console.error(e);
+          alert("Erro ao atualizar reserva.");
       }
   };
 
@@ -442,11 +492,55 @@ const Agenda: React.FC = () => {
   return (
     <div className="flex flex-col h-full space-y-6 pb-20 md:pb-0">
       
+      {/* ALERT: OVERDUE PENDING (HIGH PRIORITY) */}
+      {overduePendingReservations.length > 0 && (
+          <div className="bg-red-500/10 border border-red-500/50 rounded-xl p-4 animate-pulse">
+              <h3 className="text-red-500 font-bold flex items-center gap-2 mb-2">
+                  <AlertCircle size={20} /> Atenção: Pagamentos Pendentes em Atraso
+              </h3>
+              <p className="text-xs text-red-300 mb-3">
+                  As reservas abaixo já aconteceram mas ainda constam como "Pendentes". 
+                  Verifique se foi <strong>Pagar no Local/Comanda</strong> e confirme o pagamento.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {overduePendingReservations.map(r => (
+                      <div key={r.id} className="bg-slate-900/90 p-3 rounded border border-red-500/30 flex flex-col gap-2">
+                          <div className="flex justify-between items-start">
+                              <div>
+                                <span className="text-sm font-bold text-white block">{r.clientName}</span>
+                                <span className="text-xs text-slate-400 block">{r.date.split('-').reverse().join('/')} às {r.time} ({r.duration}h)</span>
+                                {r.payOnSite && <span className="text-[10px] bg-slate-700 text-white px-1 rounded mt-1 inline-block">Modo Local/Comanda</span>}
+                              </div>
+                              <span className="text-red-400 text-xs font-bold bg-red-900/20 px-2 py-1 rounded">Atrasado</span>
+                          </div>
+                          
+                          <div className="flex gap-2 mt-1">
+                              <button 
+                                onClick={() => handleResolveOverdue(r, 'CONFIRM')}
+                                disabled={!canEdit}
+                                className="flex-1 bg-green-600 hover:bg-green-500 text-white text-xs font-bold py-2 rounded flex items-center justify-center gap-1 disabled:opacity-50"
+                              >
+                                  <Check size={12}/> Confirmar
+                              </button>
+                              <button 
+                                onClick={() => handleResolveOverdue(r, 'NO_SHOW')}
+                                disabled={!canEdit}
+                                className="flex-1 bg-red-600/80 hover:bg-red-500 text-white text-xs font-bold py-2 rounded flex items-center justify-center gap-1 disabled:opacity-50"
+                              >
+                                  <Ban size={12}/> No-Show
+                              </button>
+                          </div>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      )}
+
       {/* EXPIRING ALERT WIDGET */}
       {expiringReservations.length > 0 && (
-          <div className="bg-orange-500/10 border border-orange-500/50 rounded-xl p-4 animate-pulse">
+          <div className="bg-orange-500/10 border border-orange-500/50 rounded-xl p-4">
               <h3 className="text-orange-500 font-bold flex items-center gap-2 mb-2">
-                  <Clock size={20} /> Atenção: Reservas Expirando (30min)
+                  <Clock size={20} /> Pré-Reservas Expirando (30min)
               </h3>
               <div className="flex flex-wrap gap-2">
                   {expiringReservations.map(r => (
