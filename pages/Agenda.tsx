@@ -5,7 +5,7 @@ import { supabase } from '../services/supabaseClient';
 import { Reservation, ReservationStatus, EventType, UserRole, PaymentStatus } from '../types';
 import { useApp } from '../contexts/AppContext'; 
 import { generateDailySlots, checkHourCapacity } from '../utils/availability'; 
-import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, CheckCircle2, X, AlertTriangle, MessageCircle, Clock, Store, LayoutGrid, Hash, DollarSign, FileText } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, CheckCircle2, X, AlertTriangle, MessageCircle, Clock, Store, LayoutGrid, Hash, DollarSign, FileText, ClipboardList, MousePointerClick } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { EVENT_TYPES } from '../constants';
@@ -47,6 +47,7 @@ const Agenda: React.FC = () => {
   // Expiring & Overdue Reservations State
   const [expiringReservations, setExpiringReservations] = useState<Reservation[]>([]);
   const [overduePendingReservations, setOverduePendingReservations] = useState<Reservation[]>([]);
+  const [unresolvedAttendance, setUnresolvedAttendance] = useState<Reservation[]>([]);
 
   // Permissions Helpers
   const canCreate = currentUser?.role === UserRole.ADMIN || currentUser?.perm_create_reservation;
@@ -100,7 +101,6 @@ const Agenda: React.FC = () => {
 
       // Expiring & Overdue Logic
       const now = new Date();
-      // Data de hoje formatada YYYY-MM-DD
       const todayStr = [
         now.getFullYear(), 
         String(now.getMonth() + 1).padStart(2, '0'), 
@@ -120,28 +120,42 @@ const Agenda: React.FC = () => {
       setExpiringReservations(expiring);
 
       // 2. Reservas Pendentes em Atraso (Horário do jogo já passou e ainda está pendente)
-      // Isso pega erros operacionais (esqueceram de confirmar pagamento no local/comanda)
       const overdue = monthReservations.filter(r => {
           if (r.status !== ReservationStatus.PENDENTE) return false;
-          
-          // --- REGRA ATUALIZADA ---
           // Se a data da reserva for HOJE, ignoramos o alerta de atraso para não poluir a tela.
-          // O alerta só aparece se for "de um dia pro outro" (datas anteriores).
           if (r.date === todayStr) return false;
           
-          // Constrói data fim da reserva
           const [y, m, d] = r.date.split('-').map(Number);
           const [h, min] = r.time.split(':').map(Number);
-          // Data fim = Data + Hora + Duração
           const resEnd = new Date(y, m - 1, d, h + r.duration, min);
-          
-          // Se "agora" é maior que o fim da reserva, e ela ainda está pendente => Atrasada/Esquecida
-          // Adiciona 15 min de tolerância para não piscar assim que acaba
           const toleranceTime = new Date(resEnd.getTime() + 15 * 60000); 
           
           return now > toleranceTime;
       });
       setOverduePendingReservations(overdue);
+
+      // 3. LIMPEZA DE PRESENÇA (LÓGICA ATUALIZADA: 20 MINUTOS DEPOIS DO INÍCIO)
+      const unresolved = monthReservations.filter(r => {
+          // Apenas reservas confirmadas
+          if (r.status !== ReservationStatus.CONFIRMADA) return false;
+          
+          // Verifica se JÁ tem check-in ou no-show (se tiver, não precisa listar)
+          const hasCheckIn = r.checkedInIds && r.checkedInIds.length > 0;
+          const hasNoShow = r.noShowIds && r.noShowIds.length > 0;
+          if (hasCheckIn || hasNoShow) return false;
+
+          // Constrói Data/Hora de Início da Reserva
+          const [y, m, d] = r.date.split('-').map(Number);
+          const [h, min] = r.time.split(':').map(Number);
+          const startDateTime = new Date(y, m - 1, d, h, min);
+          
+          // Tolerância: 20 minutos após o início
+          const toleranceTime = new Date(startDateTime.getTime() + 20 * 60000);
+
+          // Se AGORA for maior que (Início + 20min), deve aparecer no alerta
+          return now > toleranceTime;
+      });
+      setUnresolvedAttendance(unresolved);
 
     } finally {
       if (!isBackground) setLoading(false);
@@ -154,7 +168,6 @@ const Agenda: React.FC = () => {
     const channel = supabase
       .channel('agenda-updates')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, (payload) => {
-          // Optimization: Only refresh if update is within current view
           const newData = payload.new as any;
           if (!newData || !newData.date) {
               loadData(true);
@@ -222,16 +235,12 @@ const Agenda: React.FC = () => {
               updatedRes.status = ReservationStatus.CONFIRMADA;
               updatedRes.paymentStatus = PaymentStatus.PAGO;
               updatedRes.observations = (res.observations || '') + ' [Baixa Manual de Atraso]';
-              
-              // Add Points if confirming
               const points = Math.floor(res.totalValue);
               if (points > 0 && res.clientId) {
-                  // Wrap in try-catch to prevent loyalty errors from blocking reservation update
                   try {
                       await db.loyalty.addTransaction(res.clientId, points, `Confirmação Tardia (${res.date})`, currentUser?.id);
                   } catch (loyaltyError) {
                       console.warn("Erro ao adicionar pontos de fidelidade:", loyaltyError);
-                      // Non-blocking error
                   }
               }
           } else {
@@ -244,6 +253,47 @@ const Agenda: React.FC = () => {
       } catch (e: any) {
           console.error(e);
           alert(`Erro ao atualizar reserva: ${e.message || e}`);
+      }
+  };
+
+  // --- NOVA FUNÇÃO DE RESOLUÇÃO DE PRESENÇA NO WIDGET ---
+  const handleResolveAttendance = async (e: React.MouseEvent, res: Reservation, type: 'CHECK_IN' | 'NO_SHOW') => {
+      e.stopPropagation(); // Previne abrir modal
+      if (!canEdit) return;
+      try {
+          const updatedRes = { ...res };
+          const startH = parseInt(res.time.split(':')[0]);
+          const totalSlots = (res.laneCount || 1);
+          const slotsIds = [];
+          
+          // Gera todos os IDs de slots para marcar tudo de uma vez
+          for(let i=0; i<totalSlots; i++) {
+              slotsIds.push(`${res.id}_${startH}:00_${i+1}`);
+          }
+
+          if (type === 'CHECK_IN') {
+              updatedRes.status = ReservationStatus.CHECK_IN;
+              updatedRes.checkedInIds = slotsIds; // Marca todos como presentes
+              updatedRes.noShowIds = [];
+          } else {
+              updatedRes.status = ReservationStatus.NO_SHOW;
+              updatedRes.noShowIds = slotsIds; // Marca todos como falta
+              updatedRes.checkedInIds = [];
+          }
+
+          await db.reservations.update(updatedRes, currentUser?.id, `Resolução de Presença Tardia (Widget): ${type}`);
+          
+          // Se for check-in, abre seletor de pista para facilitar
+          if (type === 'CHECK_IN') {
+              setLaneSelectorTargetRes(updatedRes);
+              setTempSelectedLanes(updatedRes.lanesAssigned || []);
+              setShowLaneSelector(true);
+          } else {
+              loadData(true);
+          }
+      } catch (e: any) {
+          console.error(e);
+          alert(`Erro ao atualizar: ${e.message}`);
       }
   };
 
@@ -286,7 +336,6 @@ const Agenda: React.FC = () => {
         setCalculatingSlots(true);
         const targetLanes = editForm.laneCount || editingRes.laneCount || 1;
         
-        // Fetch only relevant date for capacity check
         const { start, end } = getMonthRange(targetDate);
         const allRes = await db.reservations.getByDateRange(start, end);
         
@@ -351,7 +400,6 @@ const Agenda: React.FC = () => {
              const reqLanes = editForm.laneCount || editingRes.laneCount || 1;
              const reqDate = editForm.date || editingRes.date || selectedDate;
              
-             // Check Capacity Efficiently
              const { start, end } = getMonthRange(reqDate);
              const allRes = await db.reservations.getByDateRange(start, end);
 
@@ -522,7 +570,50 @@ const Agenda: React.FC = () => {
   return (
     <div className="flex flex-col h-full space-y-6 pb-20 md:pb-0">
       
-      {/* ALERT: OVERDUE PENDING (HIGH PRIORITY) */}
+      {/* 1. ALERT: UNRESOLVED ATTENDANCE (ACTIONABLE BUTTONS) */}
+      {unresolvedAttendance.length > 0 && (
+          <div className="bg-yellow-500/10 border border-yellow-500/50 rounded-xl p-4 mb-2">
+              <h3 className="text-yellow-500 font-bold flex items-center gap-2 mb-2">
+                  <ClipboardList size={20} /> Atenção: Confirmação de Presença
+              </h3>
+              <p className="text-xs text-yellow-300 mb-3">
+                  Reservas que já iniciaram há mais de 20 minutos. Por favor, marque se o cliente chegou.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {unresolvedAttendance.map(r => (
+                      <div 
+                          key={r.id} 
+                          onClick={() => openResModal(r)}
+                          className="bg-slate-900/90 p-3 rounded border border-yellow-500/30 flex flex-col gap-2 cursor-pointer hover:bg-slate-800 transition relative group"
+                      >
+                          <div className="flex justify-between items-start">
+                              <span className="text-sm font-bold text-white truncate">{r.clientName}</span>
+                              <MousePointerClick size={14} className="text-slate-500 group-hover:text-yellow-500 transition"/>
+                          </div>
+                          <span className="text-xs text-slate-400">{r.date.split('-').reverse().join('/')} às {r.time}</span>
+                          
+                          {/* Botões de Ação Rápida no Card */}
+                          <div className="flex gap-2 mt-1">
+                              <button 
+                                onClick={(e) => handleResolveAttendance(e, r, 'CHECK_IN')}
+                                className="flex-1 bg-green-600 hover:bg-green-500 text-white text-[10px] font-bold py-1.5 rounded flex items-center justify-center gap-1 transition"
+                              >
+                                  <CheckCircle2 size={12}/> Sim, Veio
+                              </button>
+                              <button 
+                                onClick={(e) => handleResolveAttendance(e, r, 'NO_SHOW')}
+                                className="flex-1 bg-red-600/80 hover:bg-red-500 text-white text-[10px] font-bold py-1.5 rounded flex items-center justify-center gap-1 transition"
+                              >
+                                  <Ban size={12}/> Faltou
+                              </button>
+                          </div>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      )}
+
+      {/* 2. ALERT: OVERDUE PENDING */}
       {overduePendingReservations.length > 0 && (
           <div className="bg-red-500/10 border border-red-500/50 rounded-xl p-4 animate-pulse">
               <h3 className="text-red-500 font-bold flex items-center gap-2 mb-2">
