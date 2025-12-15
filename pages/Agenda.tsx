@@ -430,6 +430,13 @@ const Agenda: React.FC = () => {
       }
       if (!canEdit) { alert("Sem permissão."); return; }
       
+      let newPaymentStatus = editingRes.paymentStatus;
+
+      // AUTOMAÇÃO: Se confirmar e NÃO for pagar no local/comanda, marca como PAGO
+      if (status === ReservationStatus.CONFIRMADA && !editingRes.payOnSite && !editingRes.comandaId) {
+          newPaymentStatus = PaymentStatus.PAGO;
+      }
+
       if (status === ReservationStatus.CONFIRMADA && editingRes.status !== ReservationStatus.CONFIRMADA) {
           try {
               const points = Math.floor(editingRes.totalValue);
@@ -439,8 +446,8 @@ const Agenda: React.FC = () => {
           } catch (error) { console.error("Erro fidelidade", error); }
       }
 
-      const updated = { ...editingRes, status };
-      await db.reservations.update(updated, currentUser?.id, `Alterou status para ${status}`);
+      const updated = { ...editingRes, status, paymentStatus: newPaymentStatus };
+      await db.reservations.update(updated, currentUser?.id, `Alterou status para ${status} (Pgto: ${newPaymentStatus})`);
       setEditingRes(null); 
       loadData(true); 
     }
