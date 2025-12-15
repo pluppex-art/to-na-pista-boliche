@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
 import { Reservation, ReservationStatus, AuditLog, User, PaymentStatus } from '../types';
-import { Loader2, DollarSign, TrendingUp, Users, Calendar, AlertCircle, Shield, History, Calculator, Percent, CalendarRange, ListChecks, ChevronDown, Clock, PieChart as PieIcon, Tag } from 'lucide-react';
+import { Loader2, DollarSign, TrendingUp, Users, Calendar, AlertCircle, Shield, History, Calculator, Percent, CalendarRange, ListChecks, ChevronDown, Clock, PieChart as PieIcon, Tag, X, FileText, Ban } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts';
 import { supabase } from '../services/supabaseClient';
 
@@ -15,6 +15,9 @@ const Financeiro: React.FC = () => {
   
   // Estado visual do preset selecionado (para o Select do Mobile)
   const [currentPreset, setCurrentPreset] = useState<string>('MONTH');
+
+  // Drill Down State (Modal de Detalhes)
+  const [drillDownType, setDrillDownType] = useState<'PENDING' | 'CANCELLED' | null>(null);
 
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
@@ -177,6 +180,8 @@ const Financeiro: React.FC = () => {
   // 1. Estão Canceladas
   // 2. Foram criadas pela equipe (createdBy existe/truthy)
   // 3. Tiveram pagamento confirmado anteriormente (Status PAGO ou REEMBOLSADO)
+  // Esta lista é específica para a métrica de "Perda de Venda", mas no drill-down
+  // pode ser interessante mostrar todos os cancelamentos relevantes.
   const cancelledReservations = rawReservations.filter(r => 
       r.status === ReservationStatus.CANCELADA && 
       r.createdBy && 
@@ -237,6 +242,13 @@ const Financeiro: React.FC = () => {
       hour: `${hour}:00`,
       count: count
   })).filter(d => d.count > 0 || (parseInt(d.hour) >= 16 || parseInt(d.hour) <= 2)); // Mostra pelo menos o horário comercial noturno padrão
+
+  // --- HELPER PARA O DRILL DOWN LIST ---
+  const getDrillDownList = () => {
+      if (drillDownType === 'PENDING') return pendingReservations;
+      if (drillDownType === 'CANCELLED') return cancelledReservations;
+      return [];
+  };
 
   if (loading) return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin text-neon-blue" size={48} /></div>;
 
@@ -355,12 +367,16 @@ const Financeiro: React.FC = () => {
                          </div>
                     </div>
 
-                    {/* Pendente */}
-                    <div className="bg-slate-800 p-4 rounded-xl border border-yellow-500/30 shadow-lg hover:border-yellow-500 transition xl:col-span-2">
+                    {/* Pendente - CLICKABLE */}
+                    <div 
+                        onClick={() => setDrillDownType('PENDING')}
+                        className="bg-slate-800 p-4 rounded-xl border border-yellow-500/30 shadow-lg hover:border-yellow-500 transition xl:col-span-2 cursor-pointer active:scale-95 hover:bg-slate-700/50"
+                    >
                          <div className="flex justify-between items-start">
                              <div>
                                  <p className="text-xs text-yellow-500 font-bold uppercase tracking-wide mb-1">A Receber / Pendente</p>
                                  <h3 className="text-2xl font-bold text-white">{pendingRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3>
+                                 <p className="text-[10px] text-slate-500 mt-1 underline">Clique para ver lista</p>
                              </div>
                              <div className="p-2 bg-yellow-500/10 rounded-lg text-yellow-500"><AlertCircle size={24}/></div>
                          </div>
@@ -400,13 +416,16 @@ const Financeiro: React.FC = () => {
                          </div>
                     </div>
 
-                    {/* Taxa de Cancelamento */}
-                    <div className="bg-slate-800 p-4 rounded-xl border border-red-500/30 shadow-lg hover:border-red-500 transition xl:col-span-2">
+                    {/* Taxa de Cancelamento - CLICKABLE */}
+                    <div 
+                        onClick={() => setDrillDownType('CANCELLED')}
+                        className="bg-slate-800 p-4 rounded-xl border border-red-500/30 shadow-lg hover:border-red-500 transition xl:col-span-2 cursor-pointer active:scale-95 hover:bg-slate-700/50"
+                    >
                          <div className="flex justify-between items-start">
                              <div>
                                  <p className="text-xs text-red-400 font-bold uppercase tracking-wide mb-1">Taxa de Cancelamento</p>
                                  <h3 className="text-2xl font-bold text-white">{cancellationRate.toFixed(1)}%</h3>
-                                 <p className="text-[10px] text-slate-500 mt-1">Estornos de vendas da equipe</p>
+                                 <p className="text-[10px] text-slate-500 mt-1 underline">Estornos de equipe (Clique para ver)</p>
                              </div>
                              <div className="p-2 bg-red-500/10 rounded-lg text-red-500"><Percent size={24}/></div>
                          </div>
@@ -518,6 +537,63 @@ const Financeiro: React.FC = () => {
                 </div>
                 <div className="flex-1 overflow-y-auto space-y-4 pr-2">
                     {auditLogs.length === 0 ? (<div className="text-center text-slate-500 py-10">Nenhuma atividade encontrada com os filtros atuais.</div>) : (auditLogs.map(log => (<div key={log.id} className="relative pl-6 pb-6 border-l border-slate-700 last:border-0 last:pb-0"><div className="absolute left-[-5px] top-0 w-2.5 h-2.5 rounded-full bg-neon-blue border-2 border-slate-800"></div><p className="text-xs text-slate-500 mb-1 flex justify-between"><span>{new Date(log.createdAt).toLocaleString('pt-BR')}</span></p><div className="bg-slate-900/50 p-3 rounded border border-slate-700/50"><p className="text-sm text-white font-bold flex items-center gap-2">{log.userName} <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">{log.actionType}</span></p><p className="text-xs text-slate-400 mt-1">{log.details}</p></div></div>)))}
+                </div>
+            </div>
+        )}
+
+        {/* MODAL DE DRILL DOWN (LISTAGEM DETALHADA) */}
+        {drillDownType && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                <div className="bg-slate-800 border border-slate-600 w-full max-w-2xl rounded-2xl shadow-2xl animate-scale-in flex flex-col max-h-[90vh]">
+                    <div className="p-6 border-b border-slate-700 flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                            {drillDownType === 'PENDING' ? (
+                                <AlertCircle className="text-yellow-500" size={24} />
+                            ) : (
+                                <Ban className="text-red-500" size={24} />
+                            )}
+                            <div>
+                                <h3 className="text-xl font-bold text-white">
+                                    {drillDownType === 'PENDING' ? 'Reservas Pendentes' : 'Reservas Canceladas (Estornos)'}
+                                </h3>
+                                <p className="text-xs text-slate-400">
+                                    {getDrillDownList().length} registros encontrados no período
+                                </p>
+                            </div>
+                        </div>
+                        <button onClick={() => setDrillDownType(null)} className="text-slate-400 hover:text-white"><X size={20}/></button>
+                    </div>
+                    
+                    <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                        {getDrillDownList().length === 0 ? (
+                            <div className="text-center py-10 text-slate-500">Nenhum registro encontrado.</div>
+                        ) : (
+                            getDrillDownList().map(res => (
+                                <div key={res.id} className="bg-slate-900/50 border border-slate-700 p-4 rounded-lg flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                                    <div>
+                                        <h4 className="font-bold text-white">{res.clientName}</h4>
+                                        <div className="text-xs text-slate-400 flex items-center gap-2 mt-1">
+                                            <Calendar size={12}/> {res.date.split('-').reverse().join('/')}
+                                            <Clock size={12}/> {res.time}
+                                        </div>
+                                        {res.observations && (
+                                            <p className="text-[10px] text-slate-500 mt-2 italic max-w-sm truncate">{res.observations}</p>
+                                        )}
+                                    </div>
+                                    <div className="text-right flex flex-col items-end">
+                                        <span className={`font-bold text-lg ${drillDownType === 'PENDING' ? 'text-yellow-500' : 'text-red-500'}`}>
+                                            {res.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                        </span>
+                                        <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase mt-1 ${
+                                            res.status === 'Cancelada' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'
+                                        }`}>
+                                            {res.status}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
                 </div>
             </div>
         )}

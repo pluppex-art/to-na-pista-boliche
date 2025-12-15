@@ -624,12 +624,24 @@ const Agenda: React.FC = () => {
                                const isCheckedIn = res.checkedInIds?.includes(uniqueId) || false;
                                const isNoShow = res.noShowIds?.includes(uniqueId) || false;
                                const cardStyle = getCardStyle(res.status, isCheckedIn, isNoShow);
+                               
+                               // CHECK PAYMENT STATUS ALERT (Even if Checked-in)
+                               const isPaymentPending = res.paymentStatus === PaymentStatus.PENDENTE;
+                               const needsPaymentAlert = isCheckedIn && isPaymentPending;
 
                                return (
                                <div key={uniqueId} onClick={() => openResModal(res)} className={`relative p-3 rounded-lg border cursor-pointer hover:bg-slate-800 transition ${cardStyle}`}>
                                   <div className="flex justify-between items-start mb-2">
                                     <div className="min-w-0 pr-2">
                                         <h4 className={`font-bold truncate text-sm flex items-center gap-2 ${isNoShow ? 'line-through text-slate-500' : 'text-white'}`}>{res.clientName}</h4>
+                                        
+                                        {/* PAYMENT ALERT BADGE */}
+                                        {needsPaymentAlert && (
+                                            <div className="mt-1 flex items-center gap-1 text-[10px] bg-red-500/20 text-red-400 border border-red-500/30 px-1.5 py-0.5 rounded font-bold uppercase animate-pulse w-fit">
+                                                <DollarSign size={10} /> PGTO PENDENTE
+                                            </div>
+                                        )}
+
                                         <div className="flex items-center gap-1 text-[11px] text-slate-400 mt-0.5"><Phone size={10} /> {clientPhones[res.clientId] || 'Sem telefone'}</div>
                                         <div className="flex items-center gap-2 mt-2 flex-wrap">
                                             {isCheckedIn ? <span className="text-[10px] font-bold text-green-400 bg-green-500/20 px-1 rounded uppercase">CHECK-IN</span> : isNoShow ? <span className="text-[10px] font-bold text-red-400 bg-red-500/20 px-1 rounded uppercase">NO-SHOW</span> : <span className={`text-[10px] font-bold px-1 rounded uppercase ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border border-neon-blue/30' : res.status === ReservationStatus.PENDENTE ? 'text-yellow-400 bg-yellow-900/40 border border-yellow-500/30' : 'text-slate-400 bg-slate-800'}`}>{res.status}</span>}
