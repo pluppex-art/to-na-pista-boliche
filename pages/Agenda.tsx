@@ -94,6 +94,12 @@ const Agenda: React.FC = () => {
 
       // Expiring & Overdue Logic
       const now = new Date();
+      // Data de hoje formatada YYYY-MM-DD
+      const todayStr = [
+        now.getFullYear(), 
+        String(now.getMonth() + 1).padStart(2, '0'), 
+        String(now.getDate()).padStart(2, '0')
+      ].join('-');
       
       // 1. Pré-Reservas expirando (criadas há 20-30 min)
       const expiring = monthReservations.filter(r => {
@@ -111,6 +117,11 @@ const Agenda: React.FC = () => {
       // Isso pega erros operacionais (esqueceram de confirmar pagamento no local/comanda)
       const overdue = monthReservations.filter(r => {
           if (r.status !== ReservationStatus.PENDENTE) return false;
+          
+          // --- REGRA ATUALIZADA ---
+          // Se a data da reserva for HOJE, ignoramos o alerta de atraso para não poluir a tela.
+          // O alerta só aparece se for "de um dia pro outro" (datas anteriores).
+          if (r.date === todayStr) return false;
           
           // Constrói data fim da reserva
           const [y, m, d] = r.date.split('-').map(Number);
