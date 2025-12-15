@@ -219,8 +219,14 @@ const Agenda: React.FC = () => {
               
               // Add Points if confirming
               const points = Math.floor(res.totalValue);
-              if (points > 0) {
-                  await db.loyalty.addTransaction(res.clientId, points, `Confirmação Tardia (${res.date})`, currentUser?.id);
+              if (points > 0 && res.clientId) {
+                  // Wrap in try-catch to prevent loyalty errors from blocking reservation update
+                  try {
+                      await db.loyalty.addTransaction(res.clientId, points, `Confirmação Tardia (${res.date})`, currentUser?.id);
+                  } catch (loyaltyError) {
+                      console.warn("Erro ao adicionar pontos de fidelidade:", loyaltyError);
+                      // Non-blocking error
+                  }
               }
           } else {
               updatedRes.status = ReservationStatus.NO_SHOW;
@@ -229,9 +235,9 @@ const Agenda: React.FC = () => {
 
           await db.reservations.update(updatedRes, currentUser?.id, `Resolveu pendência atrasada: ${action}`);
           loadData(true);
-      } catch (e) {
+      } catch (e: any) {
           console.error(e);
-          alert("Erro ao atualizar reserva.");
+          alert(`Erro ao atualizar reserva: ${e.message || e}`);
       }
   };
 
