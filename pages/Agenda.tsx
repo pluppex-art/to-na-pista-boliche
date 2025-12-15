@@ -591,10 +591,9 @@ const Agenda: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
          <KPI label="Total" value={metrics.totalSlots} color="slate" icon={Calendar} />
-         <KPI label="Pagamento Pendente" value={metrics.pendingSlots} color="yellow" icon={AlertCircle} />
-         <KPI label="Pagamento Realizado" value={metrics.confirmedSlots} color="neon-blue" icon={Check} />
+         <KPI label="Pendentes" value={metrics.pendingSlots} color="yellow" icon={AlertCircle} />
          <div className="bg-green-900/20 p-3 rounded-xl border border-green-500/30 flex items-center justify-between shadow-sm"><div className="flex items-center gap-3"><div className="p-2 bg-green-500/20 rounded-lg text-green-400"><Users size={18} /></div><span className="text-xs text-green-400 uppercase font-bold">Check-in</span></div><span className="text-2xl font-bold text-green-400">{loading ? '-' : metrics.checkInSlots}</span></div>
          <div className="bg-red-900/20 p-3 rounded-xl border border-red-500/30 flex items-center justify-between shadow-sm"><div className="flex items-center gap-3"><div className="p-2 bg-red-500/20 rounded-lg text-red-400"><Ban size={18} /></div><span className="text-xs text-red-400 uppercase font-bold">No-Show</span></div><span className="text-2xl font-bold text-red-500">{loading ? '-' : metrics.noShowSlots}</span></div>
       </div>
@@ -631,8 +630,8 @@ const Agenda: React.FC = () => {
                                const isNoShow = res.noShowIds?.includes(uniqueId) || false;
                                const cardStyle = getCardStyle(res.status, isCheckedIn, isNoShow);
                                
-                               // LÓGICA DO ALERTA: ALINHADA COM O DASHBOARD
-                               // Se o pagamento for Pendente, mostra o alerta (independente de check-in)
+                               // CHECK PAYMENT STATUS ALERT (Even if Checked-in)
+                               const isPaymentPending = res.paymentStatus === PaymentStatus.PENDENTE;
                                const needsPaymentAlert = res.paymentStatus === PaymentStatus.PENDENTE;
 
                                return (
