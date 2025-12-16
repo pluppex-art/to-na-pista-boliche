@@ -205,13 +205,13 @@ const ClientDashboard: React.FC = () => {
   };
 
   const handleEditRequest = (res: Reservation) => {
-      const message = `Olá, gostaria de alterar minha reserva (ID: ${res.id.slice(0,5)}) para o dia ${new Date(res.date).toLocaleDateString('pt-BR')}.`;
+      const message = `Olá, gostaria de alterar minha reserva (ID: ${res.id.slice(0,5)}) para o dia ${res.date.split('-').reverse().join('/')}.`;
       const whatsappUrl = `https://wa.me/55${settings.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
       window.open(whatsappUrl, '_blank');
   };
 
   const handleCancelRedirect = (res: Reservation) => {
-      const message = `Olá, gostaria de cancelar minha reserva (ID: ${res.id.slice(0,5)}) do dia ${new Date(res.date).toLocaleDateString('pt-BR')} às ${res.time}.`;
+      const message = `Olá, gostaria de cancelar minha reserva (ID: ${res.id.slice(0,5)}) do dia ${res.date.split('-').reverse().join('/')} às ${res.time}.`;
       const whatsappUrl = `https://wa.me/55${settings.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
       window.open(whatsappUrl, '_blank');
   };
@@ -465,7 +465,8 @@ const ClientDashboard: React.FC = () => {
                                     <div className="flex justify-between items-start mb-3 border-b border-white/5 pb-2">
                                         <div className="text-lg font-bold text-white flex items-center gap-2">
                                             <Calendar size={18} className="text-slate-400"/>
-                                            {new Date(res.date).toLocaleDateString('pt-BR')}
+                                            {/* CORREÇÃO DO BUG DE DATA: Uso direto da string reversa para ignorar timezone */}
+                                            {res.date.split('-').reverse().join('/')}
                                             <span className="text-slate-600">|</span>
                                             <Clock size={18} className="text-slate-400"/>
                                             {res.time} <span className="text-xs text-slate-500">({res.duration}h)</span>

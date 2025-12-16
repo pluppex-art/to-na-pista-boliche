@@ -85,7 +85,6 @@ export const db = {
         if (!authData.user) return { error: 'Usuário não encontrado.' };
 
         // 2. Busca Perfil na tabela pública 'usuarios' pelo EMAIL
-        // Nota: Idealmente usaríamos o ID, mas como o sistema foi migrado, usamos email para vincular
         const { data, error } = await supabase
           .from('usuarios')
           .select('*')
@@ -257,7 +256,6 @@ export const db = {
   clients: {
     login: async (email: string, password: string): Promise<{ client?: Client; error?: string }> => {
       try {
-        // 1. Auth no Supabase
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
             email, password
         });
@@ -265,15 +263,12 @@ export const db = {
         if (authError) return { error: 'E-mail ou senha incorretos.' };
         if (!authData.user) return { error: 'Usuário não encontrado.' };
 
-        // 2. Busca dados na tabela clientes pelo ID DO AUTH (Vinculo Seguro)
-        // Se falhar (usuário antigo), tenta pelo email como fallback
         let { data, error } = await supabase
           .from('clientes')
           .select('*')
-          .eq('client_id', authData.user.id) // Busca segura
+          .eq('client_id', authData.user.id)
           .maybeSingle();
         
-        // Fallback para email se não achar pelo ID (migração de dados antigos)
         if (!data && !error) {
              const { data: dataByEmail, error: errorEmail } = await supabase
                 .from('clientes')
@@ -283,7 +278,6 @@ export const db = {
              
              if (dataByEmail) {
                  data = dataByEmail;
-                 // Opcional: Atualizar o client_id para bater com o Auth ID no futuro
              } else {
                  error = errorEmail;
              }
@@ -320,7 +314,6 @@ export const db = {
     },
     register: async (client: Client, password: string): Promise<{ client?: Client; error?: string }> => {
         try {
-            // 1. Cria usuário no Auth
             const { data: authData, error: authError } = await supabase.auth.signUp({
                 email: client.email || '',
                 password: password,
@@ -339,24 +332,20 @@ export const db = {
             const authId = authData.user?.id;
             if (!authId) return { error: 'Erro ao gerar ID de autenticação.' };
 
-            // 2. Insere na tabela pública
             const phoneClean = cleanPhone(client.phone);
 
-            // Verifica se já existe por telefone (para não duplicar)
             const { data: existing } = await supabase.from('clientes').select('*').eq('phone', phoneClean).maybeSingle();
 
             if (existing) {
                 await supabase.from('clientes').update({ 
                     email: client.email,
-                    // Se o cliente existe mas é "fantasma" (criado por staff), vincula o Auth ID agora?
-                    // Idealmente sim, mas exige cuidado. Por enquanto mantemos o ID antigo.
                 }).eq('client_id', existing.client_id);
                 
                 return { client: { ...client, id: existing.client_id } };
             }
 
             const dbClient = {
-                client_id: authId, // Vincula o ID do Auth com a tabela pública
+                client_id: authId,
                 name: client.name,
                 phone: phoneClean,
                 email: client.email,
@@ -557,7 +546,6 @@ export const db = {
   },
 
   reservations: {
-    // Busca Segura: Apenas reservas do cliente específico
     getByClient: async (clientId: string): Promise<Reservation[]> => {
         const { data, error } = await supabase
             .from('reservas')
@@ -572,7 +560,6 @@ export const db = {
         return db.reservations._mapReservations(data);
     },
 
-    // 🚨 OPTIMIZED FETCH: Accepts Date Range to prevent loading FULL DB
     getByDateRange: async (startDate: string, endDate: string): Promise<Reservation[]> => {
         const { data, error } = await supabase
             .from('reservas')
@@ -587,7 +574,6 @@ export const db = {
         return db.reservations._mapReservations(data);
     },
 
-    // DEPRECATED for production use (use getByDateRange), but kept for small lookups
     getAll: async (): Promise<Reservation[]> => {
       const { data, error } = await supabase.from('reservas').select('*');
       if (error) return [];
@@ -595,39 +581,53 @@ export const db = {
     },
 
     _mapReservations: (data: any[]): Reservation[] => {
-        // Shared mapping logic
         const now = new Date();
         const expiredIds: string[] = [];
         
-        const mapped = data.map((r: any) => ({
-            id: r.id,
-            clientId: r.client_id || '',
-            clientName: r.client_name || 'Cliente',
-            date: r.date, 
-            time: r.time, 
-            peopleCount: r.people_count, 
-            laneCount: r.lane_count, 
-            duration: r.duration, 
-            totalValue: r.total_value, 
-            eventType: r.event_type, 
-            observations: r.observations, 
-            status: (r.status as ReservationStatus) || ReservationStatus.PENDENTE,
-            paymentStatus: (r.payment_status || PaymentStatus.PENDENTE) as PaymentStatus, 
-            createdAt: r.created_at, 
-            guests: r.guests || [],
-            lanes: r.lanes || [],
-            checkedInIds: r.checked_in_ids || [], 
-            noShowIds: r.no_show_ids || [],
-            hasTableReservation: r.has_table_reservation,
-            birthdayName: r.birthday_name,
-            tableSeatCount: r.table_seat_count,
-            payOnSite: r.pay_on_site,
-            comandaId: r.comanda_id,
-            createdBy: r.created_by,
-            lanesAssigned: r.pistas_usadas || []
-        }));
+        const mapped = data.map((r: any) => {
+            // CORREÇÃO CRÍTICA DE MAPEAMENTO (CASE SENSITIVE & TRIM)
+            // Normaliza qualquer input de 'pago', 'PAGO', 'Pago ', ' pago' para PaymentStatus.PAGO
+            let safePaymentStatus = PaymentStatus.PENDENTE;
+            
+            if (r.payment_status) {
+                const normalized = String(r.payment_status).trim().toLowerCase();
+                
+                if (normalized === 'pago') {
+                    safePaymentStatus = PaymentStatus.PAGO;
+                } else if (normalized === 'reembolsado') {
+                    safePaymentStatus = PaymentStatus.REEMBOLSADO;
+                }
+            }
 
-        // Client-side auto-expire check (only for loaded data)
+            return {
+                id: r.id,
+                clientId: r.client_id || '',
+                clientName: r.client_name || 'Cliente',
+                date: r.date, 
+                time: r.time, 
+                peopleCount: r.people_count, 
+                laneCount: r.lane_count, 
+                duration: r.duration, 
+                totalValue: r.total_value, 
+                eventType: r.event_type, 
+                observations: r.observations, 
+                status: (r.status as ReservationStatus) || ReservationStatus.PENDENTE,
+                paymentStatus: safePaymentStatus, 
+                createdAt: r.created_at, 
+                guests: r.guests || [],
+                lanes: r.lanes || [],
+                checkedInIds: r.checked_in_ids || [], 
+                noShowIds: r.no_show_ids || [],
+                hasTableReservation: r.has_table_reservation,
+                birthdayName: r.birthday_name,
+                tableSeatCount: r.table_seat_count,
+                payOnSite: r.pay_on_site,
+                comandaId: r.comanda_id,
+                createdBy: r.created_by,
+                lanesAssigned: r.pistas_usadas || []
+            };
+        });
+
         mapped.forEach((r: Reservation) => {
             if (r.payOnSite) return;
             if (r.status === ReservationStatus.PENDENTE && r.createdAt) {
@@ -642,7 +642,6 @@ export const db = {
         });
 
         if (expiredIds.length > 0) {
-            // Async update to DB
             supabase.from('reservas').update({ status: ReservationStatus.CANCELADA, observations: 'Cancelado: Tempo excedido' }).in('id', expiredIds).then();
         }
 
@@ -674,16 +673,14 @@ export const db = {
         table_seat_count: res.tableSeatCount,
         pay_on_site: res.payOnSite,
         comanda_id: res.comandaId,
-        // Garante que só envia se for string válida, senão NULL
         created_by: (createdByUserId && createdByUserId.trim() !== '') ? createdByUserId : null,
         pistas_usadas: res.lanesAssigned
       };
       
       let { error } = await supabase.from('reservas').insert(dbRes);
       
-      // AUTO-HEALING: Se falhar por 'created_by' inválido (usuário deletado/sessão fantasma), tenta de novo sem o campo
       if (error && error.code === '23503' && error.message.includes('created_by')) {
-          console.warn("[AUTO-HEAL] ID de staff inválido detectado (Sessão expirada ou usuário deletado). Tentando criar reserva sem o vínculo de staff.");
+          console.warn("[AUTO-HEAL] ID de staff inválido detectado. Tentando criar sem vínculo.");
           dbRes.created_by = null;
           const retry = await supabase.from('reservas').insert(dbRes);
           error = retry.error;

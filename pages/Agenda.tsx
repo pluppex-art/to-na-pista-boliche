@@ -5,7 +5,7 @@ import { supabase } from '../services/supabaseClient';
 import { Reservation, ReservationStatus, EventType, UserRole, PaymentStatus } from '../types';
 import { useApp } from '../contexts/AppContext'; 
 import { generateDailySlots, checkHourCapacity } from '../utils/availability'; 
-import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, CheckCircle2, X, AlertTriangle, MessageCircle, Clock, Store, LayoutGrid, Hash, DollarSign, FileText, ClipboardList, MousePointerClick } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, CheckCircle2, X, AlertTriangle, MessageCircle, Clock, Store, LayoutGrid, Hash, DollarSign, FileText, ClipboardList, MousePointerClick, Wallet } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { EVENT_TYPES } from '../constants';
@@ -48,11 +48,15 @@ const Agenda: React.FC = () => {
   const [expiringReservations, setExpiringReservations] = useState<Reservation[]>([]);
   const [overduePendingReservations, setOverduePendingReservations] = useState<Reservation[]>([]);
   const [unresolvedAttendance, setUnresolvedAttendance] = useState<Reservation[]>([]);
+  
+  // New State: Confirmed but Unpaid
+  const [unpaidConfirmed, setUnpaidConfirmed] = useState<Reservation[]>([]);
 
   // Permissions Helpers
   const canCreate = currentUser?.role === UserRole.ADMIN || currentUser?.perm_create_reservation;
   const canEdit = currentUser?.role === UserRole.ADMIN || currentUser?.perm_edit_reservation;
   const canDelete = currentUser?.role === UserRole.ADMIN || currentUser?.perm_delete_reservation;
+  const canReceivePayment = currentUser?.role === UserRole.ADMIN || currentUser?.perm_receive_payment;
 
   // OPTIMIZATION: Fetch Month Range
   const getMonthRange = (dateStr: string) => {
@@ -68,7 +72,6 @@ const Agenda: React.FC = () => {
     try {
       const { start, end } = getMonthRange(selectedDate);
       
-      // OPTIMIZED: Fetch ONLY current month reservations
       const [monthReservations, allClients] = await Promise.all([
           db.reservations.getByDateRange(start, end),
           db.clients.getAll()
@@ -83,13 +86,11 @@ const Agenda: React.FC = () => {
 
       let total = 0, pending = 0, confirmed = 0, checkIn = 0, noShow = 0;
       dayReservations.forEach(r => {
-          // CORREÇÃO: Arredonda duração para cima (ex: 1.5h conta como 2 slots de tempo ocupados)
           const slotCount = (r.laneCount || 1) * Math.ceil(r.duration || 1);
           total += slotCount;
           checkIn += r.checkedInIds?.length || 0;
           noShow += r.noShowIds?.length || 0;
           
-          // MÉTRICA DO DASHBOARD: Baseada puramente no status financeiro
           if (r.paymentStatus === PaymentStatus.PENDENTE) {
               pending += slotCount;
           } else {
@@ -99,7 +100,6 @@ const Agenda: React.FC = () => {
 
       setMetrics({ totalSlots: total, pendingSlots: pending, confirmedSlots: confirmed, checkInSlots: checkIn, noShowSlots: noShow });
 
-      // Expiring & Overdue Logic
       const now = new Date();
       const todayStr = [
         now.getFullYear(), 
@@ -107,7 +107,6 @@ const Agenda: React.FC = () => {
         String(now.getDate()).padStart(2, '0')
       ].join('-');
       
-      // 1. Pré-Reservas expirando (criadas há 20-30 min)
       const expiring = monthReservations.filter(r => {
           if (r.date !== selectedDate) return false; 
           if (r.payOnSite) return false; 
@@ -119,10 +118,8 @@ const Agenda: React.FC = () => {
       });
       setExpiringReservations(expiring);
 
-      // 2. Reservas Pendentes em Atraso (Horário do jogo já passou e ainda está pendente)
       const overdue = monthReservations.filter(r => {
           if (r.status !== ReservationStatus.PENDENTE) return false;
-          // Se a data da reserva for HOJE, ignoramos o alerta de atraso para não poluir a tela.
           if (r.date === todayStr) return false;
           
           const [y, m, d] = r.date.split('-').map(Number);
@@ -134,28 +131,30 @@ const Agenda: React.FC = () => {
       });
       setOverduePendingReservations(overdue);
 
-      // 3. LIMPEZA DE PRESENÇA (LÓGICA ATUALIZADA: 20 MINUTOS DEPOIS DO INÍCIO)
       const unresolved = monthReservations.filter(r => {
-          // Apenas reservas confirmadas
           if (r.status !== ReservationStatus.CONFIRMADA) return false;
           
-          // Verifica se JÁ tem check-in ou no-show (se tiver, não precisa listar)
           const hasCheckIn = r.checkedInIds && r.checkedInIds.length > 0;
           const hasNoShow = r.noShowIds && r.noShowIds.length > 0;
           if (hasCheckIn || hasNoShow) return false;
 
-          // Constrói Data/Hora de Início da Reserva
           const [y, m, d] = r.date.split('-').map(Number);
           const [h, min] = r.time.split(':').map(Number);
           const startDateTime = new Date(y, m - 1, d, h, min);
           
-          // Tolerância: 20 minutos após o início
           const toleranceTime = new Date(startDateTime.getTime() + 20 * 60000);
-
-          // Se AGORA for maior que (Início + 20min), deve aparecer no alerta
           return now > toleranceTime;
       });
       setUnresolvedAttendance(unresolved);
+
+      // ALERTA FINANCEIRO
+      const unpaid = monthReservations.filter(r => {
+          if (r.date !== selectedDate) return false;
+          const isActive = r.status === ReservationStatus.CONFIRMADA || r.status === ReservationStatus.CHECK_IN;
+          if (!isActive) return false;
+          return r.paymentStatus === PaymentStatus.PENDENTE;
+      });
+      setUnpaidConfirmed(unpaid);
 
     } finally {
       if (!isBackground) setLoading(false);
@@ -189,7 +188,6 @@ const Agenda: React.FC = () => {
     };
   }, [selectedDate]);
 
-  // --- ACTIONS GRANULARES ---
   const handleGranularStatus = async (e: React.MouseEvent, res: Reservation, uniqueId: string, type: 'CHECK_IN' | 'NO_SHOW') => {
       e.stopPropagation(); 
       if (!canEdit) return; 
@@ -227,6 +225,45 @@ const Agenda: React.FC = () => {
       }
   };
 
+  // --- RECEBIMENTO RÁPIDO DO ALERTA (Otimista) ---
+  const handleQuickReceive = async (e: React.MouseEvent, res: Reservation) => {
+      e.stopPropagation();
+      if (!canReceivePayment) return;
+      if (!window.confirm(`Confirmar recebimento de ${res.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} para ${res.clientName}?`)) return;
+
+      // 1. Atualização Otimista da Interface
+      const optimisticRes = { ...res, paymentStatus: PaymentStatus.PAGO };
+      
+      // Remove do alerta imediatamente
+      setUnpaidConfirmed(prev => prev.filter(r => r.id !== res.id));
+      
+      // Atualiza o card na grade imediatamente
+      setReservations(prev => prev.map(r => r.id === res.id ? optimisticRes : r));
+
+      try {
+          // 2. Persistência no Backend
+          const updatedRes = { 
+              ...res, 
+              paymentStatus: PaymentStatus.PAGO,
+              observations: (res.observations || '') + ' [Baixa via Dashboard]'
+          };
+          await db.reservations.update(updatedRes, currentUser?.id, 'Recebimento Rápido (Dashboard)');
+          
+          // Opcional: Adicionar Pontos Fidelidade
+          const points = Math.floor(res.totalValue);
+          if (points > 0 && res.clientId) {
+              await db.loyalty.addTransaction(res.clientId, points, `Pagamento Confirmado (${res.date})`, currentUser?.id);
+          }
+          
+          // 3. Refresh silencioso para garantir sincronia
+          loadData(true);
+      } catch (e: any) {
+          console.error(e);
+          alert("Erro ao receber pagamento. Recarregando...");
+          loadData(true); // Reverte se falhar
+      }
+  };
+
   const handleResolveOverdue = async (res: Reservation, action: 'CONFIRM' | 'NO_SHOW') => {
       if (!canEdit) return;
       try {
@@ -256,9 +293,8 @@ const Agenda: React.FC = () => {
       }
   };
 
-  // --- NOVA FUNÇÃO DE RESOLUÇÃO DE PRESENÇA NO WIDGET ---
   const handleResolveAttendance = async (e: React.MouseEvent, res: Reservation, type: 'CHECK_IN' | 'NO_SHOW') => {
-      e.stopPropagation(); // Previne abrir modal
+      e.stopPropagation(); 
       if (!canEdit) return;
       try {
           const updatedRes = { ...res };
@@ -266,24 +302,22 @@ const Agenda: React.FC = () => {
           const totalSlots = (res.laneCount || 1);
           const slotsIds = [];
           
-          // Gera todos os IDs de slots para marcar tudo de uma vez
           for(let i=0; i<totalSlots; i++) {
               slotsIds.push(`${res.id}_${startH}:00_${i+1}`);
           }
 
           if (type === 'CHECK_IN') {
               updatedRes.status = ReservationStatus.CHECK_IN;
-              updatedRes.checkedInIds = slotsIds; // Marca todos como presentes
+              updatedRes.checkedInIds = slotsIds;
               updatedRes.noShowIds = [];
           } else {
               updatedRes.status = ReservationStatus.NO_SHOW;
-              updatedRes.noShowIds = slotsIds; // Marca todos como falta
+              updatedRes.noShowIds = slotsIds;
               updatedRes.checkedInIds = [];
           }
 
           await db.reservations.update(updatedRes, currentUser?.id, `Resolução de Presença Tardia (Widget): ${type}`);
           
-          // Se for check-in, abre seletor de pista para facilitar
           if (type === 'CHECK_IN') {
               setLaneSelectorTargetRes(updatedRes);
               setTempSelectedLanes(updatedRes.lanesAssigned || []);
@@ -297,7 +331,6 @@ const Agenda: React.FC = () => {
       }
   };
 
-  // --- LANE SELECTION LOGIC ---
   const toggleLaneSelection = (laneNumber: number) => {
       setTempSelectedLanes(prev => {
           if (prev.includes(laneNumber)) return prev.filter(l => l !== laneNumber);
@@ -326,7 +359,6 @@ const Agenda: React.FC = () => {
       setShowLaneSelector(true);
   };
 
-  // --- SLOT CALCULATION FOR EDIT (USING UTILS) ---
   useEffect(() => {
     const calculateSlots = async () => {
         if (!isEditMode || !editingRes) return;
@@ -480,7 +512,6 @@ const Agenda: React.FC = () => {
       
       let newPaymentStatus = editingRes.paymentStatus;
 
-      // AUTOMAÇÃO: Se confirmar e NÃO for pagar no local/comanda, marca como PAGO
       if (status === ReservationStatus.CONFIRMADA && !editingRes.payOnSite && !editingRes.comandaId) {
           newPaymentStatus = PaymentStatus.PAGO;
       }
@@ -570,7 +601,43 @@ const Agenda: React.FC = () => {
   return (
     <div className="flex flex-col h-full space-y-6 pb-20 md:pb-0">
       
-      {/* 1. ALERT: UNRESOLVED ATTENDANCE (ACTIONABLE BUTTONS) */}
+      {/* 1. ALERT: CONFIRMED BUT UNPAID (FINANCIAL RISK) */}
+      {unpaidConfirmed.length > 0 && (
+          <div className="bg-purple-500/10 border border-purple-500/50 rounded-xl p-4 mb-2 animate-pulse">
+              <h3 className="text-purple-400 font-bold flex items-center gap-2 mb-2">
+                  <Wallet size={20} /> Atenção: Confirmados com Pagamento Pendente
+              </h3>
+              <p className="text-xs text-purple-300 mb-3">
+                  Reservas garantidas na agenda mas sem baixa financeira. Receba o valor agora.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {unpaidConfirmed.map(r => (
+                      <div 
+                          key={r.id} 
+                          onClick={() => openResModal(r)}
+                          className="bg-slate-900/90 p-3 rounded border border-purple-500/30 flex flex-col gap-2 cursor-pointer hover:bg-slate-800 transition relative group"
+                      >
+                          <div className="flex justify-between items-start">
+                              <span className="text-sm font-bold text-white truncate">{r.clientName}</span>
+                              <span className="text-xs text-green-400 font-bold">{r.totalValue.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</span>
+                          </div>
+                          <span className="text-xs text-slate-400">{r.date.split('-').reverse().join('/')} às {r.time}</span>
+                          
+                          {/* Botão de Receber Rápido */}
+                          <button 
+                            onClick={(e) => handleQuickReceive(e, r)}
+                            disabled={!canReceivePayment}
+                            className="bg-green-600 hover:bg-green-500 text-white text-[10px] font-bold py-2 rounded flex items-center justify-center gap-1 transition mt-1 disabled:opacity-50"
+                          >
+                              <DollarSign size={12}/> Receber Agora
+                          </button>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      )}
+
+      {/* 2. ALERT: UNRESOLVED ATTENDANCE (ACTIONABLE BUTTONS) */}
       {unresolvedAttendance.length > 0 && (
           <div className="bg-yellow-500/10 border border-yellow-500/50 rounded-xl p-4 mb-2">
               <h3 className="text-yellow-500 font-bold flex items-center gap-2 mb-2">
@@ -613,15 +680,14 @@ const Agenda: React.FC = () => {
           </div>
       )}
 
-      {/* 2. ALERT: OVERDUE PENDING */}
+      {/* 3. ALERT: OVERDUE PENDING */}
       {overduePendingReservations.length > 0 && (
           <div className="bg-red-500/10 border border-red-500/50 rounded-xl p-4 animate-pulse">
               <h3 className="text-red-500 font-bold flex items-center gap-2 mb-2">
-                  <AlertCircle size={20} /> Atenção: Pagamentos Pendentes em Atraso
+                  <AlertCircle size={20} /> Atenção: Pré-Reservas Expiradas (Sem Confirmação)
               </h3>
               <p className="text-xs text-red-300 mb-3">
-                  As reservas abaixo já aconteceram mas ainda constam como "Pendentes". 
-                  Verifique se foi <strong>Pagar no Local/Comanda</strong> e confirme o pagamento.
+                  As reservas abaixo expiraram o tempo limite de pagamento e ainda constam como "Pendentes".
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                   {overduePendingReservations.map(r => (
@@ -729,7 +795,6 @@ const Agenda: React.FC = () => {
                                const cardStyle = getCardStyle(res.status, isCheckedIn, isNoShow);
                                
                                // CHECK PAYMENT STATUS ALERT (Even if Checked-in)
-                               const isPaymentPending = res.paymentStatus === PaymentStatus.PENDENTE;
                                const needsPaymentAlert = res.paymentStatus === PaymentStatus.PENDENTE;
 
                                return (
