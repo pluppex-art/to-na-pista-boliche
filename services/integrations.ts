@@ -5,33 +5,60 @@ import { supabase } from './supabaseClient';
 export const Integrations = {
   /**
    * Solicita a criação de uma preferência de pagamento de forma segura.
-   * O front-end não envia mais o preço nem recebe o token do Mercado Pago.
    */
   createMercadoPagoPreference: async (reservation: any, settings: AppSettings): Promise<string | null> => {
     try {
-      console.log(`[Segurança] Solicitando link de pagamento via Servidor para Reserva: ${reservation.id}`);
+      console.log(`[Checkout] Solicitando link para reserva: ${reservation.id}`);
 
       // Chamada para a Edge Function
-      // Passamos apenas o reservationId. A função buscará o valor real no DB.
       const { data, error } = await supabase.functions.invoke('create-mp-preference', {
         body: { reservationId: reservation.id }
       });
 
+      // Se o Supabase retornar um erro (HTTP != 2xx)
       if (error) {
         console.error('Erro na Edge Function:', error);
-        throw new Error(error.message);
+        
+        // Tenta extrair a mensagem de erro que nós enviamos no JSON
+        let customMessage = "Falha na comunicação com o servidor de pagamentos.";
+        
+        try {
+            // No Supabase v2, o erro pode conter o corpo da resposta se for um erro de função
+            if (error.context && typeof error.context.json === 'function') {
+                const errorBody = await error.context.json();
+                if (errorBody.error) customMessage = errorBody.error;
+            } else if (error.message) {
+                // Mensagem padrão do erro do Supabase
+                customMessage = error.message;
+            }
+        } catch (e) {
+            console.warn("Não foi possível ler o corpo do erro da function.");
+        }
+
+        throw new Error(customMessage);
+      }
+
+      // Erro retornado de dentro da lógica da função (se retornar 200 com flag de erro)
+      if (data?.error) {
+        throw new Error(data.error);
       }
 
       if (!data?.url) {
-        console.error('Resposta inválida do servidor de pagamentos');
-        return null;
+        throw new Error("O servidor não retornou uma URL de pagamento válida.");
       }
 
-      return data.url; // URL do checkout (init_point)
+      return data.url;
 
     } catch (error: any) {
-      console.error('Erro crítico na integração de pagamento:', error);
-      alert("Erro ao gerar pagamento: " + (error.message || "Conexão interrompida"));
+      console.error('Erro Final na Integração:', error.message);
+      
+      // Tradução de mensagens comuns para o usuário
+      let userMsg = error.message;
+      if (userMsg.includes("Failed to send a request")) {
+          userMsg = "Não foi possível conectar ao servidor de pagamentos. Verifique sua internet ou tente novamente mais tarde.";
+      }
+
+      alert("Erro ao gerar pagamento: " + userMsg);
       return null;
     }
   }
