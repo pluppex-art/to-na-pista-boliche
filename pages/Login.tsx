@@ -119,7 +119,7 @@ const Login: React.FC = () => {
       setSuccess('');
       setIsLoading(true);
       try {
-          const { success: resetSuccess, error: resetError } = await db.clients.forgotPassword(email);
+          const { error: resetError } = await db.clients.forgotPassword(email);
           if (resetError) {
               setError(resetError);
           } else {
