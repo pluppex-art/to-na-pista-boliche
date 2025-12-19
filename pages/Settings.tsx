@@ -3,7 +3,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { db } from '../services/mockBackend';
 import { AppSettings, UserRole, User, DayConfig } from '../types';
 import { PERMISSION_KEYS } from '../constants';
-import { Save, UserPlus, Clock, LogOut, X, Trash2, CreditCard, Loader2, DollarSign, MapPin, Upload, Camera, CheckCircle, AlertTriangle, Key, Link2, ShieldCheck, ChevronDown, Lock, Pencil, Shield, CalendarOff, Plus, Eye, EyeOff } from 'lucide-react';
+import { Save, UserPlus, Clock, LogOut, X, Trash2, CreditCard, Loader2, DollarSign, MapPin, Upload, Camera, CheckCircle, AlertTriangle, Key, Link2, ShieldCheck, ChevronDown, Lock, Pencil, Shield, CalendarOff, Plus, Eye, EyeOff, Calendar } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -90,6 +90,27 @@ const Settings: React.FC = () => {
       } catch (error: any) { showError(error.message || "Erro ao salvar horários."); }
       finally { setIsSavingHours(false); }
     }
+  };
+
+  const handleAddBlockedDate = () => {
+      if (!newBlockedDate || !settings) return;
+      if (settings.blockedDates.includes(newBlockedDate)) {
+          alert("Esta data já está bloqueada.");
+          return;
+      }
+      setSettings({
+          ...settings,
+          blockedDates: [...settings.blockedDates, newBlockedDate].sort()
+      });
+      setNewBlockedDate('');
+  };
+
+  const handleRemoveBlockedDate = (date: string) => {
+      if (!settings) return;
+      setSettings({
+          ...settings,
+          blockedDates: settings.blockedDates.filter(d => d !== date)
+      });
   };
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -219,7 +240,7 @@ const Settings: React.FC = () => {
 
       <div className="bg-slate-800 rounded-xl p-4 md:p-6 border border-slate-700 shadow-lg">
         {activeTab === 'general' && (
-             <div className="text-center py-6 md:py-10 animate-fade-in text-left space-y-8">
+             <div className="animate-fade-in space-y-8">
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                     <div className="flex flex-col items-center gap-4">
                         <input type="file" ref={fileInputRef} onChange={handleLogoUpload} className="hidden" accept="image/*" />
@@ -240,7 +261,9 @@ const Settings: React.FC = () => {
                         </div>
                     </div>
                  </div>
+
                  <div className="h-px bg-slate-700"></div>
+
                  <div className="space-y-4">
                     <h3 className="text-xl font-bold text-white flex items-center gap-2"><DollarSign size={20} className="text-neon-green"/> Preços e Pistas</h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -249,8 +272,50 @@ const Settings: React.FC = () => {
                         <div><label className="block text-xs text-slate-400 mb-1">Preço Sex-Dom (Hora)</label><input type="number" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white" value={settings.weekendPrice} onChange={e => setSettings({...settings, weekendPrice: parseFloat(e.target.value)})} /></div>
                     </div>
                  </div>
-                 <div className="flex justify-end pt-2"><button onClick={handleSaveGeneral} disabled={isSavingGeneral} className="bg-neon-orange hover:bg-orange-500 text-white px-8 py-3 rounded-lg font-bold flex gap-2 transition shadow-lg">{isSavingGeneral ? <Loader2 className="animate-spin"/> : <Save size={20}/>} Salvar Dados Gerais</button></div>
+
+                 {/* SEÇÃO DE BLOQUEIO DE DATAS REINTRODUZIDA */}
                  <div className="h-px bg-slate-700"></div>
+                 <div className="space-y-4">
+                    <h3 className="text-xl font-bold text-white flex items-center gap-2"><CalendarOff size={20} className="text-red-500"/> Bloqueio de Datas (Fechado)</h3>
+                    <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700 space-y-4">
+                        <div className="flex gap-2">
+                            <input 
+                                type="date" 
+                                className="flex-1 bg-slate-800 border border-slate-600 rounded-lg p-2 text-white outline-none focus:border-neon-blue"
+                                value={newBlockedDate}
+                                onChange={e => setNewBlockedDate(e.target.value)}
+                            />
+                            <button 
+                                onClick={handleAddBlockedDate}
+                                className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 font-bold transition"
+                            >
+                                <Plus size={18}/> Bloquear
+                            </button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {settings.blockedDates.length === 0 ? (
+                                <p className="text-xs text-slate-500 italic">Nenhuma data bloqueada manualmente.</p>
+                            ) : (
+                                settings.blockedDates.map(date => (
+                                    <div key={date} className="bg-red-900/20 text-red-400 border border-red-500/30 px-3 py-1.5 rounded-full flex items-center gap-2 text-xs font-bold">
+                                        <Calendar size={14}/>
+                                        {date.split('-').reverse().join('/')}
+                                        <button onClick={() => handleRemoveBlockedDate(date)} className="hover:text-white transition"><X size={14}/></button>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                 </div>
+
+                 <div className="flex justify-end pt-2">
+                    <button onClick={handleSaveGeneral} disabled={isSavingGeneral} className="bg-neon-orange hover:bg-orange-500 text-white px-8 py-3 rounded-lg font-bold flex gap-2 transition shadow-lg">
+                        {isSavingGeneral ? <Loader2 className="animate-spin"/> : <Save size={20}/>} Salvar Configurações Gerais
+                    </button>
+                 </div>
+
+                 <div className="h-px bg-slate-700"></div>
+
                  <div className="space-y-4">
                      <h3 className="text-xl font-bold text-white flex items-center gap-2"><Clock size={20} className="text-neon-blue"/> Horários de Funcionamento</h3>
                      <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700 space-y-2">

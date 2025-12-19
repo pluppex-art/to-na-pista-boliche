@@ -53,17 +53,12 @@ export const checkHourCapacity = (
     if (r.status === ReservationStatus.CANCELADA) return false;
     if (r.id === excludeReservationId) return false;
 
-    // 2. REGRA DE 30 MINUTOS (Verificação Dupla)
-    // Se estiver Pendente, sem pagamento no local (payOnSite), e criada há mais de 30min,
-    // consideramos o horário LIBERADO para cálculo de capacidade, 
-    // mesmo que o status no banco ainda esteja como 'Pendente'.
+    // 2. REGRA DE 30 MINUTOS
     if (r.status === ReservationStatus.PENDENTE && !r.payOnSite && r.createdAt) {
         const created = new Date(r.createdAt);
         const diffMinutes = (now.getTime() - created.getTime()) / (1000 * 60);
-        
-        // Se passou de 30 minutos (com tolerância de alguns segundos), ignora esta reserva na contagem
         if (diffMinutes >= 30) {
-            return false; // Trata como se a reserva não existisse (libera a vaga)
+            return false;
         }
     }
 
@@ -75,21 +70,20 @@ export const checkHourCapacity = (
   dayReservations.forEach(r => {
     const rStart = parseInt(r.time.split(':')[0]);
     const rEnd = rStart + r.duration;
-    // Verifica se a hora solicitada cai dentro desta reserva
     if (hourInt >= rStart && hourInt < rEnd) {
       occupied += r.laneCount;
     }
   });
 
   const left = totalLanes - occupied;
-  const available = left > 0; // Disponibilidade básica (pelo menos 1 vaga)
+  const available = left > 0; 
 
   return { occupied, left, available };
 };
 
 /**
- * Gera todos os slots de horário para um dia, com status de disponibilidade e tempo
- * Agora aceita isStaff para aplicar regra de tolerância
+ * Gera todos os slots de horário para um dia, com status de disponibilidade e tempo.
+ * Retorna lista vazia se o dia estiver bloqueado (blockedDates).
  */
 export const generateDailySlots = (
   dateStr: string,
@@ -100,13 +94,15 @@ export const generateDailySlots = (
 ): TimeSlot[] => {
   const dayConfig = getDayConfiguration(dateStr, settings);
   
-  // Se fechado ou sem config
-  if (!dayConfig || !dayConfig.isOpen) return [];
+  // VERIFICAÇÃO DE DATA BLOQUEADA
+  const isBlocked = settings?.blockedDates?.includes(dateStr);
+
+  // Se o dia estiver configurado como fechado OU estiver na lista de datas bloqueadas
+  if (!dayConfig || !dayConfig.isOpen || isBlocked) return [];
 
   let start = dayConfig.start;
   let end = dayConfig.end;
   
-  // Lógica de virada de noite (Ex: 18h as 02h)
   if (end === 0) end = 24;
   if (end < start) end += 24;
 
@@ -118,12 +114,10 @@ export const generateDailySlots = (
   const slots: TimeSlot[] = [];
 
   for (let h = start; h < end; h++) {
-    // Normaliza para exibição (25:00 -> 01:00)
     const displayHourInt = h >= 24 ? h - 24 : h;
     const timeLabel = `${displayHourInt}:00`;
-    const timeValue = `${displayHourInt}:00`; // Formato salvo no banco
+    const timeValue = `${displayHourInt}:00`; 
 
-    // Checa capacidade física
     const { left, available } = checkHourCapacity(
       displayHourInt,
       dateStr,
@@ -132,19 +126,15 @@ export const generateDailySlots = (
       excludeReservationId
     );
 
-    // LÓGICA DE PASSADO COM TOLERÂNCIA
     let isPast = false;
     if (isToday) {
         if (displayHourInt < currentHour) {
             isPast = true;
         } else if (displayHourInt === currentHour) {
-            // Se for a hora atual:
-            // Cliente: Bloqueado
-            // Staff: Liberado até X minutos (ex: 5 min)
             if (isStaff) {
-                isPast = currentMinute > 5; // Tolerância de 5 minutos
+                isPast = currentMinute > 5; 
             } else {
-                isPast = true; // Cliente não pode agendar hora atual
+                isPast = true; 
             }
         }
     }
@@ -152,7 +142,7 @@ export const generateDailySlots = (
     slots.push({
       time: timeValue,
       label: timeLabel,
-      available: available && !isPast, // Disponível apenas se tiver vaga E não for passado
+      available: available && !isPast, 
       left,
       isPast
     });

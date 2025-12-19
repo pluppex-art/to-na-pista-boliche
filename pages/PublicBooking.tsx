@@ -554,8 +554,17 @@ const PublicBooking: React.FC = () => {
 
   const createPendingReservations = async () => {
       if (createdReservationIds.length > 0) { setCurrentStep(4); return; }
+      
       setIsSaving(true);
       try {
+          // --- TRAVA DE SEGURANÇA FINAL: DATA BLOQUEADA ---
+          if (settings?.blockedDates?.includes(selectedDate)) {
+              alert("Atenção: O estabelecimento está fechado nesta data devido a um fechamento excepcional. Por favor, escolha outro dia.");
+              setCurrentStep(0); // Volta para o calendário
+              setIsSaving(false);
+              return;
+          }
+
           const blocks = getReservationBlocks();
           const allRes = await db.reservations.getAll();
           
