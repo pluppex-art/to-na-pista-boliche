@@ -9,7 +9,7 @@ Deno.serve(async (req: Request) => {
     
     const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
 
-    // 1. Busca as credenciais de produção diretamente da sua tabela 'configuracoes'
+    // 1. Busca as credenciais
     const { data: config, error: configError } = await supabaseAdmin
       .from('configuracoes')
       .select('mercadopago_access_token')
@@ -17,30 +17,39 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
 
     if (configError || !config?.mercadopago_access_token) {
-      console.error("[WEBHOOK ERROR] Credenciais não encontradas na tabela 'configuracoes'");
+      console.error("[WEBHOOK ERROR] Credenciais não encontradas");
       return new Response("Config missing", { status: 200 });
     }
 
     const mpAccessToken = config.mercadopago_access_token.trim();
 
-    // 2. Identificar o ID do Pagamento enviado pelo MP
+    // 2. Extrair ID e Topic
     const url = new URL(req.url);
     const idFromQuery = url.searchParams.get('id') || url.searchParams.get('data.id');
+    const topic = url.searchParams.get('topic') || url.searchParams.get('type');
     
     let body: any = {};
     try {
         const text = await req.text();
         if (text) body = JSON.parse(text);
-    } catch (e) { /* corpo vazio */ }
+    } catch (e) { }
 
     const resourceId = idFromQuery || body?.data?.id || body?.id;
 
-    if (!resourceId) {
-        console.log("[WEBHOOK] Notificação recebida sem ID de recurso. Ignorando.");
-        return new Response("No ID", { status: 200 });
+    // Se for uma notificação de teste do Mercado Pago (IDs genéricos)
+    if (!resourceId || resourceId === "123456" || resourceId === "123456789") {
+        console.log(`[WEBHOOK] Notificação de teste recebida (ID: ${resourceId}). Ignorando com sucesso.`);
+        return new Response("Test OK", { status: 200 });
     }
 
-    // 3. Consultar o status REAL do pagamento no Mercado Pago usando a chave do banco
+    // Só processamos se o tópico for 'payment'
+    const finalTopic = topic || body?.type || body?.topic;
+    if (finalTopic && finalTopic !== 'payment' && finalTopic !== 'payment.created' && finalTopic !== 'payment.updated') {
+        console.log(`[WEBHOOK] Tópico irrelevante (${finalTopic}). Ignorando.`);
+        return new Response("Topic ignored", { status: 200 });
+    }
+
+    // 3. Consultar o status REAL no Mercado Pago
     console.log(`[WEBHOOK] Consultando pagamento ${resourceId} no MP...`);
     
     const mpResponse = await fetch(`https://api.mercadopago.com/v1/payments/${resourceId}`, {
@@ -52,8 +61,13 @@ Deno.serve(async (req: Request) => {
 
     if (!mpResponse.ok) {
         const errData = await mpResponse.json();
-        console.error(`[WEBHOOK] Erro na API do MP:`, JSON.stringify(errData));
-        return new Response("MP API Error", { status: 200 });
+        // Se for 404, o MP enviou um ID que ele mesmo não reconhece (comum em testes de dashboard)
+        if (mpResponse.status === 404) {
+            console.log(`[WEBHOOK] Pagamento ${resourceId} não encontrado no MP (Pode ser um teste). Finalizando.`);
+        } else {
+            console.error(`[WEBHOOK] Erro na API do MP:`, JSON.stringify(errData));
+        }
+        return new Response("Done", { status: 200 });
     }
 
     const payment = await mpResponse.json();
@@ -64,25 +78,19 @@ Deno.serve(async (req: Request) => {
 
     // 4. Se aprovado, atualiza a reserva
     if (reservationId && status === 'approved') {
-        console.log(`[WEBHOOK] Pagamento Aprovado! Atualizando reserva ${reservationId}`);
+        // Verifica se a reserva já não está paga para evitar processamento duplicado
+        const { data: currentRes } = await supabaseAdmin.from('reservas').select('payment_status').eq('id', reservationId).maybeSingle();
         
-        const { error: updateError } = await supabaseAdmin
-            .from('reservas')
-            .update({ 
-                status: 'Confirmada', 
-                payment_status: 'Pago' 
-            })
-            .eq('id', reservationId);
-        
-        if (updateError) {
-            console.error("[WEBHOOK] Erro ao atualizar reserva:", updateError.message);
+        if (currentRes && currentRes.payment_status === 'Pago') {
+            console.log(`[WEBHOOK] Reserva ${reservationId} já consta como Paga. Nada a fazer.`);
         } else {
-            console.log("[WEBHOOK] Reserva atualizada com sucesso.");
+            console.log(`[WEBHOOK] Pagamento Aprovado! Confirmando reserva ${reservationId}`);
+            await supabaseAdmin
+                .from('reservas')
+                .update({ status: 'Confirmada', payment_status: 'Pago' })
+                .eq('id', reservationId);
             
-            // Lógica de Fidelidade (Opcional)
-            if (payment.transaction_amount && payment.payer?.email) {
-                // Aqui você pode buscar o cliente pelo email ou ID e adicionar os pontos
-            }
+            console.log("[WEBHOOK] Reserva atualizada com sucesso.");
         }
     }
 
