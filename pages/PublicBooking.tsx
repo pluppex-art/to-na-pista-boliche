@@ -8,10 +8,10 @@ import { useApp } from '../contexts/AppContext';
 import { generateDailySlots, checkHourCapacity } from '../utils/availability';
 import { EventType, ReservationStatus, PaymentStatus, Reservation, FunnelStage, UserRole } from '../types';
 import { EVENT_TYPES, INITIAL_SETTINGS } from '../constants';
-import { CheckCircle, Calendar as CalendarIcon, Clock, Users, ChevronRight, DollarSign, ChevronLeft, Lock, LayoutDashboard, Loader2, UserPlus, Mail, Phone, User as UserIcon, AlertCircle, XCircle, ShieldCheck, CreditCard, ArrowRight, Cake, Utensils, MessageCircle, LogIn, AlertTriangle, Store, Settings, PenTool, Shield, ArrowLeft } from 'lucide-react';
+import { CheckCircle, Calendar as CalendarIcon, Clock, Users, ChevronRight, DollarSign, ChevronLeft, Lock, LayoutDashboard, Loader2, UserPlus, Mail, Phone, User as UserIcon, AlertCircle, XCircle, ShieldCheck, CreditCard, ArrowRight, Cake, Utensils, MessageCircle, LogIn, AlertTriangle, Store, Settings, PenTool, Shield, ArrowLeft, Hash, Zap } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
-const steps = ['Data', 'Configuração & Horário', 'Seus Dados', 'Resumo', 'Pagamento'];
+const steps = ['Data', 'Configuração', 'Identificação', 'Resumo', 'Pagamento'];
 
 const PublicBooking: React.FC = () => {
   const navigate = useNavigate();
@@ -62,7 +62,7 @@ const PublicBooking: React.FC = () => {
     whatsapp: '',
     email: '',
     password: '', 
-    createAccount: true, // Sempre true para clientes agora
+    createAccount: true,
     hasSecondResponsible: false,
     secondName: '',
     secondWhatsapp: '',
@@ -89,7 +89,6 @@ const PublicBooking: React.FC = () => {
               console.error("Error parsing client auth", e);
           }
       } else {
-          // Se for staff, createAccount pode ser false por padrão
           if (staffUser) {
               setFormData(prev => ({ ...prev, createAccount: false }));
           }
@@ -309,6 +308,13 @@ const PublicBooking: React.FC = () => {
       const newErrors: Record<string, boolean> = {};
       let isValid = true;
 
+      if (currentStep === 0) {
+          if (!selectedDate) {
+              alert("Por favor, selecione uma data.");
+              return false;
+          }
+      }
+
       if (currentStep === 1) { 
           if (formData.wantsTable) {
               if (formData.type === EventType.ANIVERSARIO) {
@@ -341,8 +347,6 @@ const PublicBooking: React.FC = () => {
                 if (!formData.email.trim() || !isValidEmail(formData.email)) newErrors.email = true;
                 if (!formData.whatsapp.trim() || !isValidPhone(formData.whatsapp)) newErrors.whatsapp = true;
             }
-            
-            // SENHA OBRIGATÓRIA PARA CLIENTES AGORA
             if (!clientUser && !staffUser && !formData.password.trim()) {
                 newErrors.password = true;
             }
@@ -408,7 +412,6 @@ const PublicBooking: React.FC = () => {
                  return;
             }
 
-            // OBRIGATÓRIO SE NÃO FOR STAFF
             const forceAccount = !staffUser;
 
             if (forceAccount && !clientUser) {
@@ -425,7 +428,6 @@ const PublicBooking: React.FC = () => {
                     setCurrentStep(c => c + 1);
                 }
             } else {
-                // FLUXO STAFF OU CLIENTE JÁ LOGADO
                 const phoneClean = formData.whatsapp.replace(/\D/g, '');
                 const hasContact = phoneClean.length > 0 || formData.email.trim().length > 0;
                 
@@ -557,10 +559,9 @@ const PublicBooking: React.FC = () => {
       
       setIsSaving(true);
       try {
-          // --- TRAVA DE SEGURANÇA FINAL: DATA BLOQUEADA ---
           if (settings?.blockedDates?.includes(selectedDate)) {
               alert("Atenção: O estabelecimento está fechado nesta data devido a um fechamento excepcional. Por favor, escolha outro dia.");
-              setCurrentStep(0); // Volta para o calendário
+              setCurrentStep(0);
               setIsSaving(false);
               return;
           }
@@ -663,109 +664,127 @@ const PublicBooking: React.FC = () => {
       <main className="flex-1 p-4 md:p-8 relative">
         <div className="max-w-3xl mx-auto">
           {currentStep < 5 && (
-            <div className="mb-8">
-                <div className="flex justify-between mb-2">
-                {steps.map((step, i) => (clientUser && i === 2) ? null : <div key={i} className={`text-[10px] md:text-sm font-medium ${i <= currentStep ? 'text-neon-blue' : 'text-slate-600'}`}>{step}</div>)}
+            <div className="mb-8 overflow-x-auto pb-2 no-scrollbar">
+                <div className="flex justify-between min-w-[500px] mb-2 px-1">
+                {steps.map((step, i) => (clientUser && i === 2) ? null : <div key={i} className={`text-[10px] md:text-xs font-bold uppercase tracking-wider ${i <= currentStep ? 'text-neon-blue' : 'text-slate-600'}`}>{step}</div>)}
                 </div>
-                <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden mx-1">
                 <div className="h-full bg-gradient-to-r from-neon-orange to-neon-blue transition-all duration-500" style={{ width: `${((currentStep + 1) / steps.length) * 100}%` }}></div>
                 </div>
             </div>
           )}
 
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 md:p-8 shadow-lg min-h-[400px]">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-10 shadow-2xl min-h-[450px]">
             {currentStep === 0 && (
               <div className="animate-fade-in">
-                <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><CalendarIcon className="text-neon-orange" /> Escolha a Data</h2>
+                <h2 className="text-xl md:text-2xl font-bold text-white mb-6 flex items-center gap-2 uppercase tracking-tight"><CalendarIcon className="text-neon-orange" /> Escolha a Data</h2>
                 {renderCalendar()}
-                <div className="mt-8 flex justify-between">
-                   <div className="text-slate-400">{selectedDate ? `Data: ${formattedDateDisplay}` : 'Selecione uma data'}</div>
-                   <button disabled={!selectedDate} onClick={handleNext} className="px-8 py-3 bg-neon-blue text-white font-bold rounded-lg hover:bg-blue-400 transition">Próximo</button>
+                <div className="mt-8 flex justify-between items-center">
+                   <div className="text-slate-400 font-bold">{selectedDate ? `Data: ${formattedDateDisplay}` : 'Selecione uma data'}</div>
+                   <button disabled={!selectedDate} onClick={handleNext} className="px-10 py-3 bg-neon-blue text-white font-bold rounded-xl hover:bg-blue-400 transition shadow-lg">PRÓXIMO</button>
                 </div>
               </div>
             )}
 
             {currentStep === 1 && (
               <div className="animate-fade-in">
-                <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><Clock className="text-neon-orange" /> Configuração e Horário</h2>
-                <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 mb-6">
+                <h2 className="text-xl md:text-2xl font-bold text-white mb-6 flex items-center gap-2 uppercase tracking-tight"><Clock className="text-neon-orange" /> Configuração e Horário</h2>
+                <div className="bg-slate-800/50 p-5 rounded-2xl border border-slate-700 mb-6 space-y-4">
+                    
+                    {/* STAFF MANUAL MODE TOGGLE */}
+                    {staffUser && (
+                        <div className="flex items-center justify-between p-3 bg-neon-blue/10 border border-neon-blue/30 rounded-xl mb-2">
+                            <div className="flex items-center gap-2">
+                                <Zap className="text-neon-blue" size={18}/>
+                                <div>
+                                    <span className="text-xs font-bold text-white uppercase block">Agendamento Manual</span>
+                                    <span className="text-[10px] text-slate-400 uppercase">Configurar horários e valor manualmente</span>
+                                </div>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" className="sr-only peer" checked={isManualMode} onChange={(e) => setIsManualMode(e.target.checked)}/>
+                                <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-neon-blue"></div>
+                            </label>
+                        </div>
+                    )}
+
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div><label className="block text-xs text-slate-500 mb-1">Nº Pessoas</label><input type="number" className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-white" value={peopleInput} onChange={e => handlePeopleChange(e.target.value)} onBlur={handlePeopleBlur} /></div>
-                        <div><label className="block text-xs text-slate-500 mb-1">Nº Pistas</label><input type="number" className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-white" value={lanesInput} onChange={e => handleLanesChange(e.target.value)} onBlur={handleLanesBlur} /></div>
-                        <div><label className="block text-xs text-slate-500 mb-1">Tipo</label><select className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-white" value={formData.type} onChange={e => handleInputChange('type', e.target.value)}>{EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+                        <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Pessoas</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white" value={peopleInput} onChange={e => handlePeopleChange(e.target.value)} onBlur={handlePeopleBlur} /></div>
+                        <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Pistas</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white" value={lanesInput} onChange={e => handleLanesChange(e.target.value)} onBlur={handleLanesBlur} /></div>
+                        <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Tipo de Evento</label><select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white" value={formData.type} onChange={e => handleInputChange('type', e.target.value)}>{EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
                     </div>
-                    <div className="mt-4"><label className="block text-xs text-slate-500 mb-1">Observações</label><textarea className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-white h-20" value={formData.obs} onChange={e => handleInputChange('obs', e.target.value)} /></div>
-                    <div className="mt-4 bg-slate-900/50 p-3 rounded border border-slate-700">
-                        <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" className="w-4 h-4 accent-neon-orange" checked={formData.wantsTable} onChange={e => handleInputChange('wantsTable', e.target.checked)} /><span className="text-sm font-bold text-white flex items-center gap-2"><Utensils size={16}/> Reservar Mesa?</span></label>
+
+                    {/* MANUAL FIELDS */}
+                    {isManualMode && (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-slate-700 animate-scale-in">
+                            <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Início (HH:MM)</label><input type="time" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white" value={manualStartTime} onChange={e => setManualStartTime(e.target.value)} /></div>
+                            <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Fim (HH:MM)</label><input type="time" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white" value={manualEndTime} onChange={e => setManualEndTime(e.target.value)} /></div>
+                            <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Valor Total (R$)</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white font-bold text-neon-green" placeholder="0,00" value={manualPrice} onChange={e => setManualPrice(e.target.value)} /></div>
+                        </div>
+                    )}
+
+                    <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Observações</label><textarea className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white h-20 text-sm" value={formData.obs} onChange={e => handleInputChange('obs', e.target.value)} /></div>
+                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700">
+                        <label className="flex items-center gap-3 cursor-pointer"><input type="checkbox" className="w-5 h-5 accent-neon-orange" checked={formData.wantsTable} onChange={e => handleInputChange('wantsTable', e.target.checked)} /><span className="text-sm font-bold text-white flex items-center gap-2 uppercase tracking-tighter"><Utensils size={18} className="text-neon-orange"/> Reservar Mesa no Restaurante?</span></label>
                         {formData.wantsTable && (
-                            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 pl-6 border-l-2 border-slate-700">
-                                <div><label className="block text-xs text-slate-500 mb-1">Qtd. Lugares (Máx 25)</label><input type="number" className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-white" value={seatInput} onChange={e => handleSeatChange(e.target.value)} onBlur={handleSeatBlur} /></div>
-                                {(formData.type === EventType.ANIVERSARIO) && (<div><label className="block text-xs text-slate-500 mb-1">Nome do Aniversariante</label><input type="text" className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-white" value={formData.birthdayName} onChange={e => handleInputChange('birthdayName', e.target.value)} /></div>)}
+                            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 pl-6 border-l-2 border-neon-orange/30 animate-scale-in">
+                                <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Cadeiras (Máx 25)</label><input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white" value={seatInput} onChange={e => handleSeatChange(e.target.value)} onBlur={handleSeatBlur} /></div>
+                                {(formData.type === EventType.ANIVERSARIO) && (<div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Nome do Aniversariante</label><input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white" value={formData.birthdayName} onChange={e => handleInputChange('birthdayName', e.target.value)} /></div>)}
                             </div>
                         )}
                     </div>
                 </div>
                 {!isManualMode && (
-                    <div className="mb-6">
-                        <h3 className="text-sm font-bold text-slate-300 uppercase mb-3">Horários Disponíveis</h3>
+                    <div className="mb-8">
+                        <h3 className="text-xs font-bold text-slate-500 uppercase mb-4 tracking-widest border-b border-slate-800 pb-2">Horários Disponíveis</h3>
                         <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
                             {timeSlots.map(slot => (
-                                <button key={slot.time} disabled={!slot.available} onClick={() => toggleTimeSelection(slot.time)} className={`p-2 rounded text-xs font-bold border transition ${selectedTimes.includes(slot.time) ? 'bg-neon-blue text-white border-neon-blue' : !slot.available ? 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed' : 'bg-slate-800 text-slate-300 border-slate-600 hover:border-slate-400'}`}>{slot.label}</button>
+                                <button key={slot.time} disabled={!slot.available} onClick={() => toggleTimeSelection(slot.time)} className={`p-3 rounded-lg text-xs font-bold border transition-all ${selectedTimes.includes(slot.time) ? 'bg-neon-blue text-white border-neon-blue shadow-lg scale-105' : !slot.available ? 'bg-slate-900 text-slate-700 border-slate-800 cursor-not-allowed opacity-50' : 'bg-slate-800 text-slate-300 border-slate-700 hover:border-slate-500'}`}>{slot.label}</button>
                             ))}
                         </div>
                     </div>
                 )}
-                <div className="flex justify-between">
-                    <button onClick={handleBack} className="px-6 py-3 rounded-lg border border-slate-700 text-slate-300">Voltar</button>
-                    <button onClick={handleNext} className="px-6 py-3 bg-neon-blue text-white font-bold rounded-lg hover:bg-blue-500 shadow-lg">Continuar</button>
+                <div className="flex justify-between items-center pt-6 border-t border-slate-800">
+                    <button onClick={handleBack} className="px-6 py-3 rounded-xl border border-slate-700 text-slate-500 font-bold hover:text-white transition uppercase text-xs">Voltar</button>
+                    <button onClick={handleNext} className="px-10 py-3 bg-neon-blue text-white font-bold rounded-xl hover:bg-blue-500 shadow-xl transition uppercase text-xs">Continuar</button>
                 </div>
               </div>
             )}
 
             {currentStep === 2 && (
                 <div className="animate-fade-in">
-                    <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><UserIcon className="text-neon-orange" /> Seus Dados</h2>
+                    <h2 className="text-xl md:text-2xl font-bold text-white mb-6 flex items-center gap-2 uppercase tracking-tight"><UserIcon className="text-neon-orange" /> Seus Dados</h2>
                     
                     {!staffUser && !clientUser && (
-                        <div className="flex border-b border-slate-700 mb-6">
-                            <button 
-                                onClick={() => { setAuthMode('LOGIN'); setIsForgotPassMode(false); }}
-                                className={`flex-1 py-3 text-sm font-bold transition border-b-2 ${authMode === 'LOGIN' ? 'border-neon-orange text-white' : 'border-transparent text-slate-500 hover:text-white'}`}
-                            >
-                                Já tenho conta
-                            </button>
-                            <button 
-                                onClick={() => setAuthMode('REGISTER')}
-                                className={`flex-1 py-3 text-sm font-bold transition border-b-2 ${authMode === 'REGISTER' ? 'border-neon-blue text-white' : 'border-transparent text-slate-500 hover:text-white'}`}
-                            >
-                                Novo Cadastro
-                            </button>
+                        <div className="flex border-b border-slate-700 mb-8">
+                            <button onClick={() => { setAuthMode('LOGIN'); setIsForgotPassMode(false); }} className={`flex-1 py-4 text-xs font-bold uppercase transition border-b-2 ${authMode === 'LOGIN' ? 'border-neon-orange text-white' : 'border-transparent text-slate-500 hover:text-white'}`}>Já tenho conta</button>
+                            <button onClick={() => setAuthMode('REGISTER')} className={`flex-1 py-4 text-xs font-bold uppercase transition border-b-2 ${authMode === 'REGISTER' ? 'border-neon-blue text-white' : 'border-transparent text-slate-500 hover:text-white'}`}>Novo Cadastro</button>
                         </div>
                     )}
 
                     {authMode === 'LOGIN' && !staffUser && !clientUser ? (
                         !isForgotPassMode ? (
-                            <form onSubmit={handleInlineLogin} className="space-y-4 max-w-md mx-auto">
-                                <div><label className="block text-xs text-slate-500 mb-1">E-mail Cadastrado</label><input type="email" required className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white focus:border-neon-orange outline-none" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} /></div>
+                            <form onSubmit={handleInlineLogin} className="space-y-5 max-w-md mx-auto">
+                                <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">E-mail Cadastrado</label><input type="email" required className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white focus:border-neon-orange outline-none" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} /></div>
                                 <div>
-                                    <label className="block text-xs text-slate-500 mb-1">Senha</label>
-                                    <input type="password" required className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white focus:border-neon-orange outline-none" value={loginPass} onChange={e => setLoginPass(e.target.value)} />
-                                    <button type="button" onClick={() => setIsForgotPassMode(true)} className="text-[10px] text-neon-blue hover:underline mt-1">Esqueci minha senha</button>
+                                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Senha</label>
+                                    <input type="password" required className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white focus:border-neon-orange outline-none" value={loginPass} onChange={e => setLoginPass(e.target.value)} />
+                                    <button type="button" onClick={() => setIsForgotPassMode(true)} className="text-[10px] text-neon-blue hover:underline mt-2 font-bold uppercase">Esqueci minha senha</button>
                                 </div>
-                                <button type="submit" disabled={isLoggingIn} className="w-full bg-neon-orange hover:bg-orange-600 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">{isLoggingIn ? <Loader2 className="animate-spin"/> : <LogIn size={18} />}</button>
+                                <button type="submit" disabled={isLoggingIn} className="w-full bg-neon-orange hover:bg-orange-600 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg transition uppercase text-sm">{isLoggingIn ? <Loader2 className="animate-spin"/> : <LogIn size={18} />} ENTRAR</button>
                             </form>
                         ) : (
-                            <form onSubmit={handleRequestReset} className="space-y-4 max-w-md mx-auto animate-fade-in">
-                                <h3 className="text-white font-bold flex items-center gap-2"><Mail size={16} className="text-neon-blue"/> Recuperar Senha</h3>
+                            <form onSubmit={handleRequestReset} className="space-y-5 max-w-md mx-auto animate-fade-in">
+                                <h3 className="text-white font-bold flex items-center gap-2 uppercase text-sm"><Mail size={16} className="text-neon-blue"/> Recuperar Senha</h3>
                                 {resetSent ? (
-                                    <div className="p-4 bg-green-500/10 border border-green-500/30 text-green-400 rounded-lg text-sm text-center font-medium">Link enviado! Verifique seu e-mail para criar uma nova senha.</div>
+                                    <div className="p-4 bg-green-500/10 border border-green-500/30 text-green-400 rounded-xl text-xs text-center font-bold">LINK ENVIADO! VERIFIQUE SEU E-MAIL.</div>
                                 ) : (
                                     <>
-                                        <p className="text-xs text-slate-400">Informe seu e-mail cadastrado para receber as instruções.</p>
-                                        <div><label className="block text-xs text-slate-500 mb-1">E-mail</label><input type="email" required className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white focus:border-neon-blue outline-none" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} /></div>
-                                        <div className="flex gap-2">
-                                            <button type="button" onClick={() => setIsForgotPassMode(false)} className="flex-1 bg-slate-700 text-white font-bold py-3 rounded-lg">Voltar</button>
-                                            <button type="submit" disabled={isLoggingIn} className="flex-[2] bg-neon-blue text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">{isLoggingIn ? <Loader2 className="animate-spin"/> : 'Enviar Link'}</button>
+                                        <p className="text-xs text-slate-400">Informe seu e-mail cadastrado para receber as instruções de redefinição.</p>
+                                        <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">E-mail</label><input type="email" required className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white focus:border-neon-blue outline-none" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} /></div>
+                                        <div className="flex gap-3">
+                                            <button type="button" onClick={() => setIsForgotPassMode(false)} className="flex-1 bg-slate-700 text-white font-bold py-3 rounded-xl uppercase text-xs">Voltar</button>
+                                            <button type="submit" disabled={isLoggingIn} className="flex-[2] bg-neon-blue text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 uppercase text-xs shadow-lg">{isLoggingIn ? <Loader2 className="animate-spin"/> : 'Enviar Link'}</button>
                                         </div>
                                     </>
                                 )}
@@ -773,30 +792,24 @@ const PublicBooking: React.FC = () => {
                         )
                     ) : (
                         <div className="space-y-4">
-                            <div><label className="block text-xs text-slate-500 mb-1">Nome Completo *</label><input type="text" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.name ? 'border-red-500' : 'border-slate-600'}`} value={formData.name} onChange={e => handleInputChange('name', e.target.value)} /></div>
+                            <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Nome Completo *</label><input type="text" className={`w-full bg-slate-800 border rounded-xl p-3 text-white outline-none focus:border-neon-blue ${errors.name ? 'border-red-500' : 'border-slate-700'}`} value={formData.name} onChange={e => handleInputChange('name', e.target.value)} /></div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div><label className="block text-xs text-slate-500 mb-1">WhatsApp *</label><input type="tel" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.whatsapp ? 'border-red-500' : 'border-slate-600'}`} value={formData.whatsapp} onChange={e => handlePhoneChange(e, 'whatsapp')} /></div>
-                                <div><label className="block text-xs text-slate-500 mb-1">E-mail *</label><input type="email" className={`w-full bg-slate-800 border rounded-lg p-3 text-white ${errors.email ? 'border-red-500' : 'border-slate-600'}`} value={formData.email} onChange={e => handleInputChange('email', e.target.value)} /></div>
+                                <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">WhatsApp *</label><input type="tel" className={`w-full bg-slate-800 border rounded-xl p-3 text-white outline-none focus:border-neon-blue ${errors.whatsapp ? 'border-red-500' : 'border-slate-700'}`} value={formData.whatsapp} onChange={e => handlePhoneChange(e, 'whatsapp')} /></div>
+                                <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">E-mail *</label><input type="email" className={`w-full bg-slate-800 border rounded-xl p-3 text-white outline-none focus:border-neon-blue ${errors.email ? 'border-red-500' : 'border-slate-700'}`} value={formData.email} onChange={e => handleInputChange('email', e.target.value)} /></div>
                             </div>
                             
                             {!clientUser && !staffUser && (
-                                <div className="bg-slate-800 p-5 rounded-lg border border-slate-700 mt-4 relative overflow-hidden">
-                                    <div className="absolute top-0 right-0 p-3 opacity-10"><Shield size={40}/></div>
-                                    <h4 className="text-sm font-bold text-white mb-2 flex items-center gap-2"><Lock size={16} className="text-neon-blue"/> Crie uma senha para sua conta</h4>
-                                    <p className="text-[10px] text-slate-400 mb-4">O cadastro é obrigatório para garantir sua vaga e acumular pontos de fidelidade.</p>
-                                    <input 
-                                        type="password" 
-                                        placeholder="Sua senha segura" 
-                                        className={`w-full bg-slate-900 border rounded-lg p-3 text-white focus:border-neon-blue outline-none ${errors.password ? 'border-red-500' : 'border-slate-600'}`} 
-                                        value={formData.password} 
-                                        onChange={e => handleInputChange('password', e.target.value)} 
-                                    />
+                                <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 mt-6 relative overflow-hidden">
+                                    <div className="absolute top-0 right-0 p-4 opacity-10"><Shield size={48}/></div>
+                                    <h4 className="text-sm font-bold text-white mb-2 flex items-center gap-2 uppercase tracking-tighter"><Lock size={16} className="text-neon-blue"/> Crie uma senha de acesso</h4>
+                                    <p className="text-[10px] text-slate-500 mb-4 font-bold uppercase">O cadastro garante sua vaga e histórico de fidelidade.</p>
+                                    <input type="password" placeholder="Sua senha segura" className={`w-full bg-slate-900 border rounded-xl p-3 text-white focus:border-neon-blue outline-none transition ${errors.password ? 'border-red-500' : 'border-slate-700'}`} value={formData.password} onChange={e => handleInputChange('password', e.target.value)} />
                                 </div>
                             )}
 
-                            <div className="flex justify-between mt-8">
-                                <button onClick={handleBack} className="px-6 py-3 rounded-lg border border-slate-700 text-slate-300">Voltar</button>
-                                <button onClick={handleNext} disabled={isSaving} className="px-6 py-3 bg-neon-blue text-white font-bold rounded-lg flex items-center gap-2">{isSaving ? <Loader2 className="animate-spin" /> : 'Continuar'}</button>
+                            <div className="flex justify-between items-center mt-10 pt-6 border-t border-slate-800">
+                                <button onClick={handleBack} className="px-6 py-3 rounded-xl border border-slate-700 text-slate-500 font-bold hover:text-white transition uppercase text-xs">Voltar</button>
+                                <button onClick={handleNext} disabled={isSaving} className="px-10 py-3 bg-neon-blue text-white font-bold rounded-xl flex items-center gap-2 shadow-xl hover:bg-blue-500 transition uppercase text-xs">{isSaving ? <Loader2 className="animate-spin" /> : 'Continuar'}</button>
                             </div>
                         </div>
                     )}
@@ -805,27 +818,55 @@ const PublicBooking: React.FC = () => {
 
             {currentStep === 3 && (
                 <div className="animate-fade-in">
-                    <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><CheckCircle className="text-neon-orange" /> Resumo</h2>
-                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 space-y-4">
-                        <div className="flex justify-between border-b border-slate-700 pb-2"><span>Data</span><span className="text-white font-bold">{formattedDateDisplay}</span></div>
-                        <div className="flex justify-between border-b border-slate-700 pb-2"><span>Horário(s)</span><span className="text-white font-bold text-right">{reservationBlocks.map((b, i) => <div key={i}>{b.time} ({b.duration}h)</div>)}</span></div>
-                        <div className="flex justify-between items-center pt-2"><span className="text-lg font-bold text-slate-300">Total</span><span className="text-2xl font-bold text-neon-green">{totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></div>
+                    <h2 className="text-xl md:text-2xl font-bold text-white mb-6 flex items-center gap-2 uppercase tracking-tight"><CheckCircle className="text-neon-orange" /> Resumo Final</h2>
+                    <div className="bg-slate-800 p-8 rounded-2xl border border-slate-700 space-y-5">
+                        <div className="flex justify-between items-center border-b border-slate-700 pb-3"><span className="text-xs font-bold text-slate-500 uppercase">Data</span><span className="text-white font-bold">{formattedDateDisplay}</span></div>
+                        <div className="flex justify-between items-start border-b border-slate-700 pb-3"><span className="text-xs font-bold text-slate-500 uppercase">Horário(s)</span><span className="text-white font-bold text-right">{reservationBlocks.map((b, i) => <div key={i}>{b.time} ({b.duration}h)</div>)}</span></div>
+                        <div className="flex justify-between items-center border-b border-slate-700 pb-3"><span className="text-xs font-bold text-slate-500 uppercase">Configuração</span><span className="text-white font-bold">{formData.lanes} Pista(s) • {formData.people} Pessoas</span></div>
+                        <div className="flex justify-between items-center pt-4"><span className="text-lg font-bold text-white uppercase tracking-tighter">Total a Pagar</span><span className="text-3xl font-bold text-neon-green">{totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></div>
                     </div>
-                    <div className="flex justify-between mt-8">
-                        <button onClick={handleBack} className="px-6 py-3 rounded-lg border border-slate-700 text-slate-300">Voltar</button>
-                        <button onClick={handleNext} disabled={isSaving} className="px-8 py-3 bg-neon-green text-black font-bold rounded-lg flex items-center gap-2">{isSaving ? <Loader2 className="animate-spin" /> : 'Confirmar'}</button>
+                    <div className="flex justify-between items-center mt-10 pt-6 border-t border-slate-800">
+                        <button onClick={handleBack} className="px-6 py-3 rounded-xl border border-slate-700 text-slate-500 font-bold hover:text-white transition uppercase text-xs">Voltar</button>
+                        <button onClick={handleNext} disabled={isSaving} className="px-10 py-3 bg-neon-green text-black font-bold rounded-xl flex items-center gap-2 shadow-xl hover:bg-green-400 transition uppercase text-xs">{isSaving ? <Loader2 className="animate-spin" /> : 'CONFIRMAR AGENDAMENTO'}</button>
                     </div>
                 </div>
             )}
 
             {currentStep === 4 && (
-                <div className="animate-fade-in text-center py-10">
-                    <div className="w-20 h-20 bg-neon-green/20 rounded-full flex items-center justify-center mx-auto mb-6 text-neon-green border border-neon-green/50"><CheckCircle size={40} /></div>
-                    <h2 className="text-3xl font-bold text-white mb-2">Agendado!</h2>
-                    {!staffUser ? <button onClick={() => handlePaymentProcess('ONLINE')} disabled={isSaving} className="w-full max-w-sm py-4 bg-gradient-to-r from-neon-orange to-orange-600 text-white font-bold rounded-xl flex items-center justify-center gap-2">{isSaving ? <Loader2 className="animate-spin" /> : <CreditCard />}</button> : (
-                        <div className="max-w-md mx-auto space-y-3">
-                            <button onClick={() => handlePaymentProcess('CONFIRM_NOW')} className="w-full py-4 bg-green-600 text-white font-bold rounded-xl">Confirmar Pgto Agora</button>
-                            <button onClick={() => handlePaymentProcess('PAY_ON_SITE')} className="w-full py-4 bg-slate-800 text-slate-300 font-bold rounded-xl border border-slate-700">Pagar no Local</button>
+                <div className="animate-fade-in py-4 text-center">
+                    <div className="w-20 h-20 bg-neon-green/20 rounded-full flex items-center justify-center mx-auto mb-6 text-neon-green border border-neon-green/50 shadow-[0_0_20px_rgba(34,197,94,0.3)] animate-bounce"><CheckCircle size={44} /></div>
+                    <h2 className="text-3xl font-bold text-white mb-2 tracking-tight uppercase">Reserva Iniciada!</h2>
+                    <p className="text-slate-400 mb-8 max-w-sm mx-auto text-sm">Quase lá! Para garantir sua pista, precisamos que conclua o pagamento abaixo.</p>
+
+                    {/* ALERTA DE 30 MINUTOS */}
+                    <div className="bg-red-500/10 border border-red-500/30 p-5 rounded-2xl mb-8 flex flex-col items-center gap-3 animate-pulse max-w-md mx-auto">
+                        <AlertTriangle className="text-red-500" size={32} />
+                        <div>
+                            <p className="text-red-400 font-bold text-sm uppercase mb-1">Atenção: Prazo de Pagamento</p>
+                            <p className="text-[11px] text-red-300 uppercase font-medium leading-relaxed">
+                                Você tem <strong>30 minutos</strong> para concluir o pagamento. Caso contrário, sua reserva será cancelada e o horário liberado automaticamente.
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* RESUMO RÁPIDO NO CHECKOUT */}
+                    <div className="bg-slate-800 border border-slate-700 p-6 rounded-2xl mb-8 max-w-sm mx-auto space-y-3 text-left">
+                        <div className="flex items-center gap-3 text-slate-300 text-sm"><CalendarIcon size={16} className="text-neon-blue"/><span className="font-bold">{formattedDateDisplay} às {reservationBlocks[0]?.time}</span></div>
+                        <div className="flex items-center gap-3 text-slate-300 text-sm"><Hash size={16} className="text-neon-blue"/><span className="font-bold">{formData.lanes} Pista(s) • {formData.people} Pessoas</span></div>
+                        <div className="flex items-center gap-3 text-neon-green font-bold text-xl pt-2 border-t border-slate-700"><DollarSign size={20}/><span className="text-2xl">{totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></div>
+                    </div>
+
+                    {!staffUser ? (
+                        <div className="max-w-sm mx-auto">
+                            <button onClick={() => handlePaymentProcess('ONLINE')} disabled={isSaving} className="w-full py-5 bg-gradient-to-r from-neon-orange to-orange-600 text-white font-bold rounded-2xl flex items-center justify-center gap-3 shadow-2xl hover:scale-105 transition-all uppercase text-sm tracking-widest">
+                                {isSaving ? <Loader2 className="animate-spin" /> : <><CreditCard /> EFETUAR PAGAMENTO AGORA</>}
+                            </button>
+                            <p className="mt-4 text-[10px] text-slate-500 uppercase font-bold tracking-widest flex items-center justify-center gap-2"><ShieldCheck size={14}/> Pagamento Seguro via Mercado Pago</p>
+                        </div>
+                    ) : (
+                        <div className="max-w-sm mx-auto space-y-4">
+                            <button onClick={() => handlePaymentProcess('CONFIRM_NOW')} className="w-full py-4 bg-green-600 text-white font-bold rounded-2xl shadow-lg uppercase text-xs tracking-widest">Confirmar Pagamento Agora</button>
+                            <button onClick={() => handlePaymentProcess('PAY_ON_SITE')} className="w-full py-4 bg-slate-800 text-slate-300 font-bold rounded-2xl border border-slate-700 uppercase text-xs tracking-widest">Lançar na Comanda / Local</button>
                         </div>
                     )}
                 </div>
