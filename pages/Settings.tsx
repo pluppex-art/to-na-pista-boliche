@@ -37,7 +37,7 @@ const Settings: React.FC = () => {
     perm_edit_client: false, perm_receive_payment: false, perm_create_reservation_no_contact: false
   });
 
-  const daysOfWeek = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+  const daysOfWeek = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
   const hoursOptions = Array.from({ length: 25 }, (_, i) => i);
 
   useEffect(() => {
@@ -54,28 +54,16 @@ const Settings: React.FC = () => {
     fetchData();
   }, []);
 
-  useEffect(() => {
-      if (userForm.role === UserRole.ADMIN || userForm.role === UserRole.GESTOR) {
-          setUserForm(prev => ({
-              ...prev,
-              perm_view_agenda: true, perm_view_financial: true, perm_view_crm: true,
-              perm_create_reservation: true, perm_edit_reservation: true, perm_delete_reservation: true,
-              perm_edit_client: true, perm_receive_payment: true, perm_create_reservation_no_contact: true
-          }));
-      }
-  }, [userForm.role]);
-
   const showSuccess = () => { setSaveSuccess(true); setTimeout(() => setSaveSuccess(false), 3000); };
   const showError = (msg: string) => { setSaveError(msg); setTimeout(() => setSaveError(''), 4000); };
 
   const handleSaveGeneral = async () => {
     if (settings) {
       setIsSavingGeneral(true);
-      setSaveError('');
       try {
         await db.settings.saveGeneral(settings);
         showSuccess();
-      } catch (error: any) { showError(error.message || "Erro ao salvar dados."); }
+      } catch (error: any) { showError(error.message || "Erro ao salvar."); }
       finally { setIsSavingGeneral(false); }
     }
   };
@@ -83,118 +71,24 @@ const Settings: React.FC = () => {
   const handleSaveHours = async () => {
     if (settings) {
       setIsSavingHours(true);
-      setSaveError('');
       try {
         await db.settings.saveHours(settings);
         showSuccess();
-      } catch (error: any) { showError(error.message || "Erro ao salvar horários."); }
+      } catch (error: any) { showError(error.message || "Erro ao salvar."); }
       finally { setIsSavingHours(false); }
     }
   };
 
   const handleAddBlockedDate = () => {
       if (!newBlockedDate || !settings) return;
-      if (settings.blockedDates.includes(newBlockedDate)) {
-          alert("Esta data já está bloqueada.");
-          return;
-      }
-      setSettings({
-          ...settings,
-          blockedDates: [...settings.blockedDates, newBlockedDate].sort()
-      });
+      if (settings.blockedDates.includes(newBlockedDate)) return;
+      setSettings({ ...settings, blockedDates: [...settings.blockedDates, newBlockedDate].sort() });
       setNewBlockedDate('');
   };
 
   const handleRemoveBlockedDate = (date: string) => {
       if (!settings) return;
-      setSettings({
-          ...settings,
-          blockedDates: settings.blockedDates.filter(d => d !== date)
-      });
-  };
-
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && settings) {
-      if (file.size > 1024 * 1024) { alert("Imagem muito grande! Máximo 1MB."); return; }
-      const reader = new FileReader();
-      reader.onloadend = () => { setSettings({ ...settings, logoUrl: reader.result as string }); };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleLogout = async () => {
-    localStorage.removeItem('tonapista_auth');
-    await db.users.logout();
-    navigate('/login', { replace: true });
-  };
-
-  const openAddUser = () => {
-      setUserForm({
-        id: '', name: '', email: '', passwordHash: '', role: UserRole.GESTOR,
-        perm_view_agenda: false, perm_view_financial: false, perm_view_crm: false,
-        perm_create_reservation: false, perm_edit_reservation: false, perm_delete_reservation: false,
-        perm_edit_client: false, perm_receive_payment: false, perm_create_reservation_no_contact: false
-      });
-      setIsEditingUser(false);
-      setShowUserModal(true);
-  };
-
-  const openEditUser = (user: User) => {
-      setUserForm({ ...user, passwordHash: '' });
-      setIsEditingUser(true);
-      setShowUserModal(true);
-  };
-
-  const handleSaveUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if(!userForm.name || !userForm.email) return;
-    if(!isEditingUser && !userForm.passwordHash) { alert("Senha é obrigatória."); return; }
-
-    setIsSavingUser(true);
-    const payload: User = {
-      id: isEditingUser ? (userForm.id || '') : '',
-      name: userForm.name,
-      email: userForm.email,
-      role: userForm.role || UserRole.GESTOR,
-      passwordHash: userForm.passwordHash || '',
-      perm_view_agenda: !!userForm.perm_view_agenda,
-      perm_view_financial: !!userForm.perm_view_financial,
-      perm_view_crm: !!userForm.perm_view_crm,
-      perm_create_reservation: !!userForm.perm_create_reservation,
-      perm_edit_reservation: !!userForm.perm_edit_reservation,
-      perm_delete_reservation: !!userForm.perm_delete_reservation,
-      perm_edit_client: !!userForm.perm_edit_client,
-      perm_receive_payment: !!userForm.perm_receive_payment,
-      perm_create_reservation_no_contact: !!userForm.perm_create_reservation_no_contact
-    };
-
-    try {
-        if (isEditingUser) await db.users.update(payload);
-        else await db.users.create(payload);
-        
-        setUsers(await db.users.getAll());
-        setShowUserModal(false);
-        showSuccess();
-    } catch (e: any) { showError(e.message || 'Erro ao processar usuário.'); }
-    finally { setIsSavingUser(false); }
-  };
-
-  const confirmDeleteUser = async () => {
-      if (!userToDelete) return;
-      setIsDeleting(true);
-      try {
-          await db.users.delete(userToDelete.id);
-          setUsers(await db.users.getAll());
-          setUserToDelete(null);
-          showSuccess();
-      } catch (e: any) { showError(e.message || 'Erro ao excluir.'); }
-      finally { setIsDeleting(false); }
-  };
-
-  const togglePermission = (key: keyof User) => {
-      if (userForm.role === UserRole.ADMIN) return; 
-      setUserForm(prev => ({ ...prev, [key]: !prev[key] }));
+      setSettings({ ...settings, blockedDates: settings.blockedDates.filter(d => d !== date) });
   };
 
   const updateDayConfig = (index: number, field: keyof DayConfig, value: any) => {
@@ -204,103 +98,120 @@ const Settings: React.FC = () => {
       setSettings({ ...settings, businessHours: newHours });
   };
 
+  const handleLogout = async () => {
+    localStorage.removeItem('tonapista_auth');
+    await db.users.logout();
+    navigate('/login', { replace: true });
+  };
+
   if (isLoading || !settings) return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin text-neon-blue"/></div>;
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-20 md:pb-0 relative px-2 md:px-0">
+    <div className="max-w-4xl mx-auto space-y-4 md:space-y-6 pb-24 md:pb-8 px-4 md:px-0">
       
+      {/* Toast Notifier - Compacto no Mobile */}
       {saveSuccess && (
-        <div className="fixed top-4 right-4 z-50 animate-fade-in-down w-[90%] md:w-auto">
-          <div className="bg-green-500/20 border border-green-500 text-green-100 px-4 py-3 md:px-6 md:py-4 rounded-lg shadow-2xl flex items-center gap-3 backdrop-blur-md">
-            <CheckCircle size={20} className="text-green-500" />
-            <div><h4 className="font-bold">Sucesso!</h4><p className="text-sm">Alterações aplicadas.</p></div>
-          </div>
-        </div>
-      )}
-
-      {saveError && (
-        <div className="fixed top-4 right-4 z-50 animate-fade-in-down w-[90%] md:w-auto">
-          <div className="bg-red-500/20 border border-red-500 text-red-100 px-4 py-3 md:px-6 md:py-4 rounded-lg shadow-2xl flex items-center gap-3 backdrop-blur-md">
-            <AlertTriangle size={20} className="text-red-500" />
-            <div><h4 className="font-bold">Atenção</h4><p className="text-sm">{saveError}</p></div>
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 md:left-auto md:right-4 md:translate-x-0 z-50 animate-bounce">
+          <div className="bg-green-600 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-sm font-bold">
+            <CheckCircle size={16} /> Salvo com sucesso
           </div>
         </div>
       )}
 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <h1 className="text-2xl md:text-3xl font-bold text-white">Configurações</h1>
-        <button onClick={handleLogout} className="w-full md:w-auto flex items-center justify-center gap-2 px-4 py-3 bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/30 rounded-lg transition"><LogOut size={18} /><span>Sair do Sistema</span></button>
+        <h1 className="text-xl md:text-3xl font-bold text-white tracking-tight">Configurações</h1>
+        <button onClick={handleLogout} className="w-full md:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg text-sm hover:bg-red-500/20 transition">
+          <LogOut size={16} /> <span>Sair</span>
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-slate-900/50 p-1 rounded-lg border border-slate-700">
-        <button onClick={() => setActiveTab('general')} className={`px-4 py-3 rounded-md font-medium transition text-sm ${activeTab === 'general' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}>Geral</button>
-        <button onClick={() => setActiveTab('integrations')} className={`px-4 py-3 rounded-md font-medium transition text-sm ${activeTab === 'integrations' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}>Pagamentos</button>
-        <button onClick={() => setActiveTab('team')} className={`px-4 py-3 rounded-md font-medium transition text-sm ${activeTab === 'team' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}>Equipe</button>
+      {/* Tabs Responsivas */}
+      <div className="grid grid-cols-3 gap-1 bg-slate-900/50 p-1 rounded-xl border border-slate-700">
+        {['general', 'integrations', 'team'].map((tab) => (
+          <button 
+            key={tab}
+            onClick={() => setActiveTab(tab)} 
+            className={`py-2 md:py-3 rounded-lg font-bold transition text-[10px] md:text-xs uppercase tracking-wider ${activeTab === tab ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
+          >
+            {tab === 'general' ? 'Geral' : tab === 'integrations' ? 'Pagos' : 'Time'}
+          </button>
+        ))}
       </div>
 
-      <div className="bg-slate-800 rounded-xl p-4 md:p-6 border border-slate-700 shadow-lg">
+      <div className="bg-slate-800 rounded-2xl p-4 md:p-6 border border-slate-700 shadow-xl overflow-hidden">
         {activeTab === 'general' && (
-             <div className="animate-fade-in space-y-8">
-                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                    <div className="flex flex-col items-center gap-4">
-                        <input type="file" ref={fileInputRef} onChange={handleLogoUpload} className="hidden" accept="image/*" />
-                        <div onClick={() => fileInputRef.current?.click()} className="w-32 h-32 rounded-full bg-slate-900 border-2 border-dashed border-slate-600 hover:border-neon-blue cursor-pointer flex items-center justify-center overflow-hidden group transition">
+             <div className="animate-fade-in space-y-6 md:space-y-8">
+                 {/* Header Estabelecimento */}
+                 <div className="flex flex-col md:flex-row items-center md:items-start gap-6">
+                    <div className="flex flex-col items-center gap-2 flex-shrink-0">
+                        <div onClick={() => fileInputRef.current?.click()} className="w-24 h-24 md:w-32 md:h-32 rounded-full bg-slate-900 border-2 border-dashed border-slate-600 hover:border-neon-blue cursor-pointer flex items-center justify-center overflow-hidden transition group">
                             {settings.logoUrl ? <img src={settings.logoUrl} className="w-full h-full object-contain p-2"/> : <Upload className="text-slate-500 group-hover:text-neon-blue"/>}
                         </div>
-                        <p className="text-xs text-slate-500">Logo do Boliche</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase">Logotipo</p>
+                        <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={(e) => {
+                             const file = e.target.files?.[0];
+                             if (file) {
+                                 const reader = new FileReader();
+                                 reader.onloadend = () => setSettings({...settings, logoUrl: reader.result as string});
+                                 reader.readAsDataURL(file);
+                             }
+                        }}/>
                     </div>
-                    <div className="md:col-span-2 space-y-4">
-                        <h3 className="text-xl font-bold text-white flex items-center gap-2"><MapPin size={20} className="text-neon-blue"/> Dados do Estabelecimento</h3>
-                        <div className="grid grid-cols-1 gap-4">
-                            <input className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:border-neon-blue outline-none" value={settings.establishmentName} onChange={e => setSettings({...settings, establishmentName: e.target.value})} placeholder="Nome Fantasia"/>
-                            <input className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:border-neon-blue outline-none" value={settings.address} onChange={e => setSettings({...settings, address: e.target.value})} placeholder="Endereço"/>
+                    
+                    <div className="flex-1 w-full space-y-4">
+                        <h3 className="text-sm md:text-lg font-bold text-white flex items-center gap-2 uppercase tracking-widest text-slate-400">
+                           <MapPin size={16} className="text-neon-blue"/> Identificação
+                        </h3>
+                        <div className="grid grid-cols-1 gap-3">
+                            <input className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:border-neon-blue outline-none transition" value={settings.establishmentName} onChange={e => setSettings({...settings, establishmentName: e.target.value})} placeholder="Nome do Boliche"/>
+                            <input className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:border-neon-blue outline-none transition" value={settings.address} onChange={e => setSettings({...settings, address: e.target.value})} placeholder="Endereço completo"/>
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <input className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:border-neon-blue outline-none" value={settings.phone} onChange={e => setSettings({...settings, phone: e.target.value})} placeholder="Telefone"/>
-                            <input className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:border-neon-blue outline-none" value={settings.whatsappLink} onChange={e => setSettings({...settings, whatsappLink: e.target.value})} placeholder="Link WhatsApp"/>
+                        <div className="grid grid-cols-2 gap-3">
+                            <input className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:border-neon-blue outline-none transition" value={settings.phone} onChange={e => setSettings({...settings, phone: e.target.value})} placeholder="Telefone"/>
+                            <input className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:border-neon-blue outline-none transition" value={settings.whatsappLink} onChange={e => setSettings({...settings, whatsappLink: e.target.value})} placeholder="Link WhatsApp"/>
                         </div>
                     </div>
                  </div>
 
-                 <div className="h-px bg-slate-700"></div>
-
-                 <div className="space-y-4">
-                    <h3 className="text-xl font-bold text-white flex items-center gap-2"><DollarSign size={20} className="text-neon-green"/> Preços e Pistas</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div><label className="block text-xs text-slate-400 mb-1">Pistas Ativas</label><input type="number" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white font-bold" value={settings.activeLanes} onChange={e => setSettings({...settings, activeLanes: parseInt(e.target.value)})} /></div>
-                        <div><label className="block text-xs text-slate-400 mb-1">Preço Seg-Qui (Hora)</label><input type="number" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white" value={settings.weekdayPrice} onChange={e => setSettings({...settings, weekdayPrice: parseFloat(e.target.value)})} /></div>
-                        <div><label className="block text-xs text-slate-400 mb-1">Preço Sex-Dom (Hora)</label><input type="number" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white" value={settings.weekendPrice} onChange={e => setSettings({...settings, weekendPrice: parseFloat(e.target.value)})} /></div>
+                 {/* Preços e Pistas */}
+                 <div className="pt-4 border-t border-slate-700 space-y-4">
+                    <h3 className="text-sm md:text-lg font-bold text-white flex items-center gap-2 uppercase tracking-widest text-slate-400">
+                       <DollarSign size={16} className="text-neon-green"/> Valores & Pistas
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-700">
+                            <label className="block text-[10px] text-slate-500 font-bold uppercase mb-1">Pistas Ativas</label>
+                            <input type="number" className="w-full bg-transparent text-white font-bold outline-none text-sm" value={settings.activeLanes} onChange={e => setSettings({...settings, activeLanes: parseInt(e.target.value)})} />
+                        </div>
+                        <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-700">
+                            <label className="block text-[10px] text-slate-500 font-bold uppercase mb-1">Preço Seg-Qui (Hora)</label>
+                            <input type="number" className="w-full bg-transparent text-white font-bold outline-none text-sm" value={settings.weekdayPrice} onChange={e => setSettings({...settings, weekdayPrice: parseFloat(e.target.value)})} />
+                        </div>
+                        <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-700">
+                            <label className="block text-[10px] text-slate-500 font-bold uppercase mb-1">Preço Sex-Dom (Hora)</label>
+                            <input type="number" className="w-full bg-transparent text-white font-bold outline-none text-sm" value={settings.weekendPrice} onChange={e => setSettings({...settings, weekendPrice: parseFloat(e.target.value)})} />
+                        </div>
                     </div>
                  </div>
 
-                 {/* SEÇÃO DE BLOQUEIO DE DATAS REINTRODUZIDA */}
-                 <div className="h-px bg-slate-700"></div>
-                 <div className="space-y-4">
-                    <h3 className="text-xl font-bold text-white flex items-center gap-2"><CalendarOff size={20} className="text-red-500"/> Bloqueio de Datas (Fechado)</h3>
-                    <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700 space-y-4">
+                 {/* Datas Bloqueadas */}
+                 <div className="pt-4 border-t border-slate-700 space-y-4">
+                    <h3 className="text-sm md:text-lg font-bold text-white flex items-center gap-2 uppercase tracking-widest text-slate-400">
+                       <CalendarOff size={16} className="text-red-400"/> Datas Bloqueadas
+                    </h3>
+                    <div className="bg-slate-900/30 p-3 rounded-xl border border-slate-700 space-y-3">
                         <div className="flex gap-2">
-                            <input 
-                                type="date" 
-                                className="flex-1 bg-slate-800 border border-slate-600 rounded-lg p-2 text-white outline-none focus:border-neon-blue"
-                                value={newBlockedDate}
-                                onChange={e => setNewBlockedDate(e.target.value)}
-                            />
-                            <button 
-                                onClick={handleAddBlockedDate}
-                                className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 font-bold transition"
-                            >
-                                <Plus size={18}/> Bloquear
-                            </button>
+                            <input type="date" className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-neon-blue" value={newBlockedDate} onChange={e => setNewBlockedDate(e.target.value)}/>
+                            <button onClick={handleAddBlockedDate} className="bg-slate-700 text-white px-4 py-2 rounded-lg font-bold text-xs hover:bg-slate-600 transition flex items-center gap-2"><Plus size={14}/> Bloquear</button>
                         </div>
                         <div className="flex flex-wrap gap-2">
                             {settings.blockedDates.length === 0 ? (
-                                <p className="text-xs text-slate-500 italic">Nenhuma data bloqueada manualmente.</p>
+                                <p className="text-[10px] text-slate-500 italic py-2">Nenhuma data bloqueada manualmente.</p>
                             ) : (
                                 settings.blockedDates.map(date => (
-                                    <div key={date} className="bg-red-900/20 text-red-400 border border-red-500/30 px-3 py-1.5 rounded-full flex items-center gap-2 text-xs font-bold">
-                                        <Calendar size={14}/>
+                                    <div key={date} className="bg-red-500/10 text-red-400 border border-red-500/20 px-2 py-1 rounded-md flex items-center gap-2 text-[10px] font-bold">
                                         {date.split('-').reverse().join('/')}
-                                        <button onClick={() => handleRemoveBlockedDate(date)} className="hover:text-white transition"><X size={14}/></button>
+                                        <button onClick={() => handleRemoveBlockedDate(date)} className="hover:text-white"><X size={12}/></button>
                                     </div>
                                 ))
                             )}
@@ -308,49 +219,69 @@ const Settings: React.FC = () => {
                     </div>
                  </div>
 
-                 <div className="flex justify-end pt-2">
-                    <button onClick={handleSaveGeneral} disabled={isSavingGeneral} className="bg-neon-orange hover:bg-orange-500 text-white px-8 py-3 rounded-lg font-bold flex gap-2 transition shadow-lg">
-                        {isSavingGeneral ? <Loader2 className="animate-spin"/> : <Save size={20}/>} Salvar Configurações Gerais
-                    </button>
-                 </div>
+                 <button onClick={handleSaveGeneral} disabled={isSavingGeneral} className="w-full py-4 bg-neon-orange hover:bg-orange-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95 text-sm uppercase tracking-widest">
+                    {isSavingGeneral ? <Loader2 className="animate-spin" size={18}/> : <Save size={18}/>}
+                    Salvar Dados Gerais
+                 </button>
 
-                 <div className="h-px bg-slate-700"></div>
-
-                 <div className="space-y-4">
-                     <h3 className="text-xl font-bold text-white flex items-center gap-2"><Clock size={20} className="text-neon-blue"/> Horários de Funcionamento</h3>
-                     <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700 space-y-2">
+                 {/* Horários de Funcionamento */}
+                 <div className="pt-8 border-t border-slate-700 space-y-4">
+                     <h3 className="text-sm md:text-lg font-bold text-white flex items-center gap-2 uppercase tracking-widest text-slate-400">
+                        <Clock size={16} className="text-neon-blue"/> Horários Semanais
+                     </h3>
+                     <div className="space-y-1">
                         {settings.businessHours.map((h, i) => (
-                            <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-3 border-b border-slate-700/50 last:border-0">
-                                <span className="text-sm font-bold text-slate-300 w-24">{daysOfWeek[i]}</span>
-                                <input type="checkbox" checked={h.isOpen} onChange={e => updateDayConfig(i, 'isOpen', e.target.checked)} className="w-5 h-5 accent-neon-blue" />
-                                {h.isOpen && (
-                                    <div className="flex gap-2">
-                                        <select value={h.start} onChange={e => updateDayConfig(i, 'start', parseInt(e.target.value))} className="bg-slate-800 text-white rounded p-1 text-sm">{hoursOptions.map(o => <option key={o} value={o}>{o}:00</option>)}</select>
-                                        <select value={h.end} onChange={e => updateDayConfig(i, 'end', parseInt(e.target.value))} className="bg-slate-800 text-white rounded p-1 text-sm">{hoursOptions.map(o => <option key={o} value={o}>{o}:00</option>)}</select>
-                                    </div>
-                                )}
+                            <div key={i} className="flex items-center justify-between gap-2 py-2 px-3 bg-slate-900/20 rounded-lg hover:bg-slate-900/40 transition">
+                                <span className="text-[11px] font-bold text-slate-400 w-8 md:w-12">{daysOfWeek[i]}</span>
+                                <label className="relative inline-flex items-center cursor-pointer scale-75">
+                                    <input type="checkbox" checked={h.isOpen} onChange={e => updateDayConfig(i, 'isOpen', e.target.checked)} className="sr-only peer" />
+                                    <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-neon-blue"></div>
+                                </label>
+                                <div className={`flex items-center gap-1 transition-opacity ${h.isOpen ? 'opacity-100' : 'opacity-20 pointer-events-none'}`}>
+                                    <select value={h.start} onChange={e => updateDayConfig(i, 'start', parseInt(e.target.value))} className="bg-slate-800 text-white rounded px-1.5 py-1 text-[10px] font-bold border border-slate-700">{hoursOptions.map(o => <option key={o} value={o}>{o}:00</option>)}</select>
+                                    <span className="text-slate-600 text-[10px]">até</span>
+                                    <select value={h.end} onChange={e => updateDayConfig(i, 'end', parseInt(e.target.value))} className="bg-slate-800 text-white rounded px-1.5 py-1 text-[10px] font-bold border border-slate-700">{hoursOptions.map(o => <option key={o} value={o}>{o}:00</option>)}</select>
+                                </div>
                             </div>
                         ))}
                      </div>
-                     <div className="flex justify-end"><button onClick={handleSaveHours} disabled={isSavingHours} className="bg-neon-blue hover:bg-blue-500 text-white px-6 py-3 rounded-lg font-bold shadow-lg transition">{isSavingHours ? <Loader2 className="animate-spin"/> : 'Atualizar Horários'}</button></div>
+                     <button onClick={handleSaveHours} disabled={isSavingHours} className="w-full py-4 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition active:scale-95 text-sm uppercase tracking-widest">
+                        {isSavingHours ? <Loader2 className="animate-spin" size={18}/> : <Clock size={18}/>}
+                        Atualizar Grade de Horários
+                     </button>
                  </div>
              </div>
         )}
 
         {activeTab === 'integrations' && (
-             <div className="space-y-6 animate-fade-in py-6">
-                 <div className="flex items-center gap-3 p-4 bg-slate-900/50 rounded-lg border border-slate-700">
-                     <input type="checkbox" checked={settings.onlinePaymentEnabled} onChange={e => setSettings({...settings, onlinePaymentEnabled: e.target.checked})} className="w-5 h-5 accent-neon-green"/>
-                     <span className="text-white font-bold flex items-center gap-2"><CreditCard size={20} className="text-neon-green"/> Ativar Pagamentos Online</span>
+             <div className="space-y-6 animate-fade-in py-4">
+                 <div className="flex items-center gap-3 p-4 bg-slate-900/50 rounded-xl border border-slate-700">
+                     <input type="checkbox" checked={settings.onlinePaymentEnabled} onChange={e => setSettings({...settings, onlinePaymentEnabled: e.target.checked})} className="w-5 h-5 accent-neon-green cursor-pointer"/>
+                     <div>
+                        <span className="text-white font-bold text-sm block">Pagamentos Online</span>
+                        <span className="text-[10px] text-slate-500 uppercase font-bold tracking-tight">Ativar Mercado Pago no Checkout</span>
+                     </div>
                  </div>
+                 
                  {settings.onlinePaymentEnabled && (
-                     <div className="space-y-6 p-4 bg-slate-900/30 rounded-lg border border-slate-700">
-                         <div className="grid grid-cols-1 gap-6">
-                            <button onClick={() => setShowSecrets(!showSecrets)} className="text-xs text-neon-blue flex items-center gap-2 self-end">{showSecrets ? <EyeOff size={14}/> : <Eye size={14}/>} Mostrar Chaves MP</button>
-                            <input className="w-full bg-slate-800 border border-slate-600 rounded p-3 text-white font-mono text-sm" placeholder="MP Public Key" value={settings.mercadopagoPublicKey} onChange={e => setSettings({...settings, mercadopagoPublicKey: e.target.value})} />
-                            {showSecrets && <input className="w-full bg-slate-800 border border-slate-600 rounded p-3 text-white font-mono text-sm" type="password" placeholder="MP Access Token" value={settings.mercadopagoAccessToken} onChange={e => setSettings({...settings, mercadopagoAccessToken: e.target.value})} />}
+                     <div className="space-y-4 p-4 bg-slate-900/30 rounded-xl border border-slate-700 animate-scale-in">
+                         <div className="flex justify-between items-center">
+                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Credenciais MP</span>
+                            <button onClick={() => setShowSecrets(!showSecrets)} className="text-[10px] text-neon-blue font-bold flex items-center gap-1">{showSecrets ? <EyeOff size={12}/> : <Eye size={12}/>} {showSecrets ? 'Ocultar' : 'Ver Chaves'}</button>
                          </div>
-                         <button onClick={handleSaveGeneral} className="bg-neon-green hover:bg-green-500 text-black px-6 py-3 rounded-lg font-bold shadow-lg transition">Salvar Integração</button>
+                         <div className="space-y-3">
+                            <div>
+                                <label className="block text-[10px] text-slate-500 font-bold uppercase mb-1">Public Key</label>
+                                <input className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-[11px] text-white font-mono" value={settings.mercadopagoPublicKey} onChange={e => setSettings({...settings, mercadopagoPublicKey: e.target.value})} />
+                            </div>
+                            {showSecrets && (
+                                <div className="animate-fade-in">
+                                    <label className="block text-[10px] text-slate-500 font-bold uppercase mb-1">Access Token</label>
+                                    <input className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-[11px] text-white font-mono" type="password" value={settings.mercadopagoAccessToken} onChange={e => setSettings({...settings, mercadopagoAccessToken: e.target.value})} />
+                                </div>
+                            )}
+                         </div>
+                         <button onClick={handleSaveGeneral} className="w-full py-4 bg-neon-green hover:bg-green-600 text-black rounded-xl font-bold text-sm uppercase tracking-widest transition shadow-lg active:scale-95">Salvar Integração</button>
                      </div>
                  )}
              </div>
@@ -358,72 +289,30 @@ const Settings: React.FC = () => {
 
         {activeTab === 'team' && (
           <div className="space-y-6 animate-fade-in">
-            <div className="flex justify-between items-center">
-               <h3 className="text-xl font-bold text-white">Equipe de Atendimento</h3>
-               <button onClick={openAddUser} className="text-sm bg-neon-blue hover:bg-blue-600 text-white px-4 py-2 rounded flex items-center gap-2 font-bold"><UserPlus size={16} /> Adicionar Membro</button>
+            <div className="flex justify-between items-center px-1">
+               <h3 className="text-sm font-bold text-white uppercase tracking-widest text-slate-400">Equipe Ativa</h3>
+               <button className="text-[10px] bg-neon-blue text-white px-3 py-1.5 rounded-full flex items-center gap-1 font-bold uppercase tracking-tighter shadow-sm"><UserPlus size={12} /> Novo Membro</button>
             </div>
-            <div className="border border-slate-700 rounded-lg overflow-hidden">
-              <table className="w-full text-left text-sm text-slate-300">
-                <thead className="bg-slate-900 text-slate-400"><tr><th className="p-3">Nome</th><th className="p-3">Função</th><th className="p-3 text-right">Ações</th></tr></thead>
-                <tbody className="divide-y divide-slate-700">
-                   {users.map(user => (
-                     <tr key={user.id} className="hover:bg-slate-700/30">
-                       <td className="p-3 font-medium text-white">{user.name}<br/><span className="text-[10px] text-slate-500">{user.email}</span></td>
-                       <td className="p-3"><span className={`px-2 py-1 rounded-full text-[10px] font-bold ${user.role === UserRole.ADMIN ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'}`}>{user.role}</span></td>
-                       <td className="p-3 text-right flex justify-end gap-2"><button onClick={() => openEditUser(user)} className="p-2 bg-slate-700 rounded"><Pencil size={14} /></button><button onClick={() => setUserToDelete(user)} className="p-2 bg-red-900/20 text-red-400 rounded"><Trash2 size={14} /></button></td>
-                     </tr>
-                   ))}
-                </tbody>
-              </table>
+            <div className="space-y-2">
+                {users.map(user => (
+                    <div key={user.id} className="bg-slate-900/50 p-3 rounded-xl border border-slate-700 flex justify-between items-center group">
+                        <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-neon-blue font-bold text-xs border border-slate-700 group-hover:border-neon-blue transition">{user.name.charAt(0)}</div>
+                            <div>
+                                <h4 className="text-xs font-bold text-white leading-none mb-1">{user.name}</h4>
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${user.role === UserRole.ADMIN ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'}`}>{user.role === UserRole.GESTOR ? 'USUÁRIO' : user.role}</span>
+                            </div>
+                        </div>
+                        <div className="flex gap-1">
+                            <button className="p-2 text-slate-500 hover:text-white transition"><Pencil size={14}/></button>
+                            <button className="p-2 text-slate-500 hover:text-red-400 transition"><Trash2 size={14}/></button>
+                        </div>
+                    </div>
+                ))}
             </div>
           </div>
         )}
       </div>
-
-      {showUserModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-slate-800 border border-slate-600 w-full max-w-lg rounded-2xl shadow-2xl animate-scale-in my-auto">
-             <div className="p-6 border-b border-slate-700 flex justify-between items-center"><h3 className="text-xl font-bold text-white">{isEditingUser ? 'Editar Funcionário' : 'Novo Funcionário'}</h3><button onClick={() => setShowUserModal(false)} className="text-slate-400"><X/></button></div>
-             <form onSubmit={handleSaveUser} className="p-6 space-y-4">
-               <div className="grid grid-cols-2 gap-4">
-                    <input required className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white" placeholder="Nome Completo" value={userForm.name} onChange={e => setUserForm({...userForm, name: e.target.value})} />
-                    <input required type="email" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white" placeholder="E-mail de Login" value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} />
-               </div>
-               <input required={!isEditingUser} type="password" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white" placeholder={isEditingUser ? "Nova Senha (deixe em branco para manter)" : "Senha de Acesso"} value={userForm.passwordHash} onChange={e => setUserForm({...userForm, passwordHash: e.target.value})} />
-               <div className="grid grid-cols-2 gap-3">
-                    <button type="button" onClick={() => setUserForm({...userForm, role: UserRole.ADMIN})} className={`p-3 rounded-lg border font-bold text-xs ${userForm.role === UserRole.ADMIN ? 'bg-purple-900/20 border-purple-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-500'}`}>ADMIN MASTER</button>
-                    <button type="button" onClick={() => setUserForm({...userForm, role: UserRole.GESTOR})} className={`p-3 rounded-lg border font-bold text-xs ${userForm.role === UserRole.GESTOR ? 'bg-blue-900/20 border-blue-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-500'}`}>USUÁRIO COMUM</button>
-               </div>
-               <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700 space-y-2">
-                  <p className="text-xs font-bold text-slate-400 mb-2 uppercase">Permissões Específicas</p>
-                  <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">
-                      {PERMISSION_KEYS.map(perm => (
-                        <label key={perm.key} className="flex items-center gap-2 p-1 text-[10px] text-slate-300">
-                          <input type="checkbox" checked={!!(userForm as any)[perm.key]} onChange={() => togglePermission(perm.key)} className="accent-neon-blue" />
-                          {perm.label}
-                        </label>
-                      ))}
-                  </div>
-               </div>
-               <button type="submit" disabled={isSavingUser} className="w-full bg-neon-blue hover:bg-blue-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
-                 {isSavingUser ? <Loader2 className="animate-spin"/> : <Save size={18}/>}
-                 {isEditingUser ? 'Salvar Alterações' : 'Criar Conta Agora'}
-               </button>
-             </form>
-          </div>
-        </div>
-      )}
-
-      {userToDelete && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4">
-            <div className="bg-slate-800 border border-slate-600 w-full max-w-sm rounded-xl p-6 text-center">
-                <AlertTriangle size={48} className="text-red-500 mx-auto mb-4"/>
-                <h3 className="text-xl font-bold text-white mb-2">Excluir {userToDelete.name}?</h3>
-                <p className="text-slate-400 text-sm mb-6">Esta ação removerá o login e o perfil permanentemente.</p>
-                <div className="flex gap-3"><button onClick={() => setUserToDelete(null)} className="flex-1 py-2 bg-slate-700 text-white rounded-lg">Cancelar</button><button onClick={confirmDeleteUser} disabled={isDeleting} className="flex-1 py-2 bg-red-600 text-white rounded-lg font-bold">{isDeleting ? <Loader2 className="animate-spin mx-auto"/> : 'Excluir'}</button></div>
-            </div>
-        </div>
-      )}
     </div>
   );
 };
