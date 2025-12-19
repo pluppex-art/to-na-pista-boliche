@@ -1,5 +1,5 @@
 
-import { AppSettings, Client, FunnelCard, Interaction, Reservation, User, ReservationStatus, PaymentStatus, UserRole, FunnelStage, LoyaltyTransaction, AuditLog, StaffPerformance } from '../types';
+import { AppSettings, Client, FunnelCard, Interaction, Reservation, ReservationStatus, PaymentStatus, UserRole, FunnelStage, LoyaltyTransaction, AuditLog, StaffPerformance, User, EventType } from '../types';
 import { supabase } from './supabaseClient';
 import { INITIAL_SETTINGS, FUNNEL_STAGES } from '../constants';
 import { v4 as uuidv4 } from 'uuid';
@@ -18,7 +18,6 @@ const safeTags = (tags: any): string[] => {
 };
 
 export const db = {
-  // --- SERVIÇO DE AUDITORIA ---
   audit: {
       log: async (userId: string, userName: string, actionType: string, details: string, entityId?: string) => {
           try {
@@ -75,7 +74,6 @@ export const db = {
   users: {
     login: async (email: string, password: string): Promise<{ user?: User; isFirstAccess?: boolean; error?: string }> => {
       try {
-        // 1. Autenticação no Supabase Auth
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
             email: email,
             password: password
@@ -84,7 +82,6 @@ export const db = {
         if (authError) return { error: 'Credenciais inválidas (Supabase Auth).' };
         if (!authData.user) return { error: 'Usuário não encontrado.' };
 
-        // 2. Busca Perfil na tabela pública 'usuarios' pelo EMAIL
         const { data, error } = await supabase
           .from('usuarios')
           .select('*')
@@ -99,12 +96,10 @@ export const db = {
         const roleNormalized = (data.role || '').toUpperCase() as UserRole;
         const isAdmin = roleNormalized === UserRole.ADMIN;
         
-        const isFirstAccess = false; 
-
         db.audit.log(data.id, data.nome, 'LOGIN', 'Usuário realizou login via Auth');
 
         return {
-          isFirstAccess, 
+          isFirstAccess: false, 
           user: {
             id: data.id, 
             name: data.nome,
@@ -213,43 +208,18 @@ export const db = {
         perm_receive_payment: user.perm_receive_payment,
         perm_create_reservation_no_contact: user.perm_create_reservation_no_contact
       };
+      
+      // Se houver passwordHash, atualiza no Auth
+      if (user.passwordHash) {
+          await supabase.auth.updateUser({ password: user.passwordHash });
+      }
+
       const { error } = await supabase.from('usuarios').update(payload).eq('id', user.id);
       if (error) throw new Error(error.message);
     },
     delete: async (id: string) => {
       const { error } = await supabase.from('usuarios').delete().eq('id', id);
       if (error) throw new Error(error.message || "Erro ao excluir usuário.");
-    },
-    getPerformance: async (startDate: string, endDate: string): Promise<StaffPerformance[]> => {
-        try {
-            const { data: periodReservations, error } = await supabase
-                .from('reservas')
-                .select('created_by, total_value, status, payment_status')
-                .gte('date', startDate)
-                .lte('date', endDate)
-                .neq('status', ReservationStatus.CANCELADA);
-
-            if(error) throw error;
-
-            const users = await db.users.getAll();
-            const stats = users.map(u => {
-                const createdByMe = periodReservations?.filter((r: any) => r.created_by === u.id) || [];
-                const sales = createdByMe.reduce((acc: number, curr: any) => acc + (curr.payment_status === PaymentStatus.PAGO ? curr.total_value : 0), 0);
-                
-                return {
-                    userId: u.id,
-                    userName: u.name,
-                    reservationsCreated: createdByMe.length,
-                    totalSales: sales,
-                    reservationsConfirmed: createdByMe.filter((r: any) => r.status === ReservationStatus.CONFIRMADA).length,
-                    lastActivity: new Date().toISOString()
-                };
-            });
-            return stats.sort((a, b) => b.totalSales - a.totalSales);
-        } catch (e) {
-            console.error("Erro ao calcular performance:", e);
-            return [];
-        }
     }
   },
   
@@ -263,51 +233,44 @@ export const db = {
         if (authError) return { error: 'E-mail ou senha incorretos.' };
         if (!authData.user) return { error: 'Usuário não encontrado.' };
 
-        let { data, error } = await supabase
+        const { data, error } = await supabase
           .from('clientes')
           .select('*')
           .eq('client_id', authData.user.id)
           .maybeSingle();
         
-        if (!data && !error) {
-             const { data: dataByEmail, error: errorEmail } = await supabase
-                .from('clientes')
-                .select('*')
-                .eq('email', email)
-                .maybeSingle();
-             
-             if (dataByEmail) {
-                 data = dataByEmail;
-             } else {
-                 error = errorEmail;
-             }
-        }
-
-        if (error) {
-            console.error("Login DB Error:", error);
-            if (error.code === '42501') return { error: 'Erro de permissão no banco de dados. Contate o suporte.' };
-            return { error: `Erro técnico: ${error.message}` };
-        }
+        if (error) return { error: `Erro técnico: ${error.message}` };
         if (!data) return { error: 'Cadastro de cliente incompleto no sistema (DB).' };
 
         return {
             client: {
-            id: data.client_id,
-            name: data.name,
-            phone: data.phone,
-            email: data.email,
-            photoUrl: data.photo_url,
-            tags: safeTags(data.tags),
-            createdAt: data.created_at,
-            lastContactAt: data.last_contact_at,
-            funnelStage: data.funnel_stage,
-            loyaltyBalance: data.loyalty_balance || 0
+                id: data.client_id,
+                name: data.name,
+                phone: data.phone,
+                email: data.email,
+                photoUrl: data.photo_url,
+                tags: safeTags(data.tags),
+                createdAt: data.created_at,
+                lastContactAt: data.last_contact_at,
+                funnelStage: data.funnel_stage,
+                loyaltyBalance: data.loyalty_balance || 0
             }
         };
-
       } catch (err) {
         return { error: 'Erro inesperado.' };
       }
+    },
+    forgotPassword: async (email: string): Promise<{ success?: boolean; error?: string }> => {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+            redirectTo: `${window.location.origin}/#/redefinir-senha`,
+        });
+        if (error) return { error: error.message };
+        return { success: true };
+    },
+    updatePassword: async (newPassword: string): Promise<{ success?: boolean; error?: string }> => {
+        const { error } = await supabase.auth.updateUser({ password: newPassword });
+        if (error) return { error: error.message };
+        return { success: true };
     },
     logout: async () => {
         await supabase.auth.signOut();
@@ -324,7 +287,7 @@ export const db = {
 
             if (authError) {
                 if (authError.message.includes('already registered')) {
-                    return { error: 'Este e-mail já está cadastrado. Por favor, clique em "Fazer Login".' };
+                    return { error: 'Este e-mail já está cadastrado.' };
                 }
                 return { error: authError.message };
             }
@@ -339,9 +302,9 @@ export const db = {
             if (existing) {
                 await supabase.from('clientes').update({ 
                     email: client.email,
-                }).eq('client_id', existing.client_id);
-                
-                return { client: { ...client, id: existing.client_id } };
+                    client_id: authId 
+                }).eq('phone', phoneClean);
+                return { client: { ...client, id: authId } };
             }
 
             const dbClient = {
@@ -362,7 +325,6 @@ export const db = {
             if (error) return { error: error.message };
             
             return { client: { ...client, id: authId } };
-
         } catch (e: any) {
             return { error: String(e) };
         }
@@ -370,45 +332,18 @@ export const db = {
     getAll: async (): Promise<Client[]> => {
       const { data, error } = await supabase.from('clientes').select('*');
       if (error) return [];
-      
-      return data.map((c: any) => {
-        const tags = safeTags(c.tags);
-        const stageFromTag = tags.find((t: string) => FUNNEL_STAGES.includes(t as FunnelStage));
-        const finalStage = (c.funnel_stage as FunnelStage) || (stageFromTag as FunnelStage) || FunnelStage.NOVO;
-
-        return {
+      return data.map((c: any) => ({
           id: c.client_id, 
           name: c.name || 'Sem Nome', 
           phone: c.phone || '',
           email: c.email,
           photoUrl: c.photo_url,
-          tags: tags,
-          createdAt: c.created_at || new Date().toISOString(),
-          lastContactAt: c.last_contact_at || new Date().toISOString(),
-          funnelStage: finalStage,
+          tags: safeTags(data.tags),
+          createdAt: c.created_at,
+          lastContactAt: c.last_contact_at,
+          funnelStage: c.funnel_stage || FunnelStage.NOVO,
           loyaltyBalance: c.loyalty_balance || 0
-        };
-      });
-    },
-    getByPhone: async (phone: string): Promise<Client | null> => {
-      const cleanedPhone = cleanPhone(phone);
-      if (!cleanedPhone) return null;
-      
-      const { data, error } = await supabase.from('clientes').select('*').or(`phone.eq.${phone},phone.eq.${cleanedPhone}`).maybeSingle();
-      if (error || !data) return null;
-
-      return {
-        id: data.client_id, 
-        name: data.name,
-        phone: data.phone,
-        email: data.email,
-        photoUrl: data.photo_url,
-        tags: safeTags(data.tags),
-        createdAt: data.created_at,
-        lastContactAt: data.last_contact_at,
-        funnelStage: data.funnel_stage || FunnelStage.NOVO,
-        loyaltyBalance: data.loyalty_balance || 0
-      };
+      }));
     },
     getById: async (id: string): Promise<Client | null> => {
       const { data, error } = await supabase.from('clientes').select('*').eq('client_id', id).maybeSingle();
@@ -426,45 +361,43 @@ export const db = {
         loyaltyBalance: data.loyalty_balance || 0
       };
     },
+    getByPhone: async (phone: string): Promise<Client | null> => {
+      const phoneClean = cleanPhone(phone);
+      const { data, error } = await supabase.from('clientes').select('*').eq('phone', phoneClean).maybeSingle();
+      if (error || !data) return null;
+      return {
+        id: data.client_id,
+        name: data.name,
+        phone: data.phone,
+        email: data.email,
+        photoUrl: data.photo_url,
+        tags: safeTags(data.tags),
+        createdAt: data.created_at,
+        lastContactAt: data.last_contact_at,
+        funnelStage: data.funnel_stage || FunnelStage.NOVO,
+        loyaltyBalance: data.loyalty_balance || 0
+      };
+    },
     create: async (client: Client, createdBy?: string): Promise<Client> => {
       const phoneClean = cleanPhone(client.phone);
-      const hasEmail = client.email && client.email.trim().length > 0;
+      const { data: existing } = await supabase.from('clientes').select('*').eq('phone', phoneClean).maybeSingle();
 
-      if (!phoneClean && !hasEmail) return client; 
-
-      let query = supabase.from('clientes').select('*');
-      const conditions = [];
-      if (phoneClean) conditions.push(`phone.eq.${phoneClean}`);
-      if (hasEmail) conditions.push(`email.eq.${client.email}`);
-      
-      let existingClient = null;
-      if (conditions.length > 0) {
-          const { data } = await query.or(conditions.join(',')).maybeSingle();
-          existingClient = data;
-      }
-
-      if (existingClient) {
-          // UPDATE
-          const updatePayload: any = {
-              name: client.name || existingClient.name,
-              email: (client.email && client.email.trim() !== '') ? client.email : existingClient.email,
-              phone: phoneClean || existingClient.phone,
-              tags: client.tags, 
-              last_contact_at: client.lastContactAt,
-              funnel_stage: client.funnelStage || FunnelStage.NOVO,
-              photo_url: client.photoUrl || existingClient.photo_url
+      if (existing) {
+          const updatePayload = {
+              name: client.name,
+              email: client.email || existing.email,
+              tags: client.tags,
+              funnel_stage: client.funnelStage || FunnelStage.NOVO
           };
-          
-          await supabase.from('clientes').update(updatePayload).eq('client_id', existingClient.client_id);
-          return { ...client, id: existingClient.client_id, ...updatePayload };
+          await supabase.from('clientes').update(updatePayload).eq('client_id', existing.client_id);
+          return { ...client, id: existing.client_id };
       }
 
-      // CREATE
       const dbClient = {
         client_id: client.id, 
         name: client.name,
         phone: phoneClean,
-        email: (client.email && client.email.trim() !== '') ? client.email : null,
+        email: client.email || null,
         photo_url: client.photoUrl,
         tags: client.tags || [],
         last_contact_at: client.lastContactAt,
@@ -474,68 +407,38 @@ export const db = {
       };
       
       const { error } = await supabase.from('clientes').insert(dbClient);
-      if (error) {
-          if (error.code === '23505') { 
-             const { data: retry } = await supabase.from('clientes').select('*').or(`phone.eq.${phoneClean},email.eq.${client.email}`).maybeSingle();
-             if (retry) return { ...client, id: retry.client_id };
-          }
-          throw error;
-      }
+      if (error) throw error;
       if (createdBy) db.audit.log(createdBy, 'STAFF', 'CREATE_CLIENT', `Criou cliente ${client.name}`, client.id);
-      return { ...client, phone: phoneClean, email: dbClient.email || '' };
+      return client;
     },
     update: async (client: Client, updatedBy?: string) => {
       const dbClient: any = {
         name: client.name,
         phone: cleanPhone(client.phone),
-        email: (client.email && client.email.trim() !== '') ? client.email : null,
+        email: client.email || null,
         tags: client.tags,
         last_contact_at: client.lastContactAt,
         photo_url: client.photoUrl,
         funnel_stage: client.funnelStage
       };
-      if (client.password) dbClient.password = client.password;
-
       await supabase.from('clientes').update(dbClient).eq('client_id', client.id);
       if (updatedBy) db.audit.log(updatedBy, 'STAFF', 'UPDATE_CLIENT', `Atualizou ${client.name}`, client.id);
     },
-    updateLastContact: async (clientId: string) => {
-      await supabase.from('clientes').update({ last_contact_at: new Date().toISOString() }).eq('client_id', clientId);
-    },
     updateStage: async (clientId: string, newStage: FunnelStage) => {
-        let { data } = await supabase.from('clientes').select('tags').eq('client_id', clientId).single();
-        if (!data) return;
-        let tags: string[] = safeTags(data.tags);
-        tags = tags.filter(t => !FUNNEL_STAGES.includes(t as FunnelStage));
-        await supabase.from('clientes').update({ funnel_stage: newStage, tags: tags }).eq('client_id', clientId);
+        await supabase.from('clientes').update({ funnel_stage: newStage }).eq('client_id', clientId);
     }
   },
 
   loyalty: {
       getHistory: async (clientId: string): Promise<LoyaltyTransaction[]> => {
-          const { data, error } = await supabase
-              .from('loyalty_transactions')
-              .select('*')
-              .eq('client_id', clientId)
-              .order('created_at', { ascending: false });
-          
+          const { data, error } = await supabase.from('loyalty_transactions').select('*').eq('client_id', clientId).order('created_at', { ascending: false });
           if (error) return [];
           return data.map((t: any) => ({
-              id: t.id,
-              clientId: t.client_id,
-              amount: t.amount,
-              description: t.description,
-              createdAt: t.created_at,
-              reservationId: t.reservation_id
+              id: t.id, clientId: t.client_id, amount: t.amount, description: t.description, createdAt: t.created_at, reservationId: t.reservation_id
           }));
       },
       addTransaction: async (clientId: string, amount: number, description: string, userId?: string) => {
-          const { error } = await supabase.from('loyalty_transactions').insert({
-              client_id: clientId,
-              amount: amount,
-              description: description,
-              created_by: userId
-          });
+          const { error } = await supabase.from('loyalty_transactions').insert({ client_id: clientId, amount, description, created_by: userId });
           if (error) throw new Error(error.message);
 
           const { data: client } = await supabase.from('clientes').select('loyalty_balance').eq('client_id', clientId).single();
@@ -547,111 +450,53 @@ export const db = {
 
   reservations: {
     getByClient: async (clientId: string): Promise<Reservation[]> => {
-        const { data, error } = await supabase
-            .from('reservas')
-            .select('*')
-            .eq('client_id', clientId)
-            .order('created_at', { ascending: false });
-
-        if (error) {
-            console.error("Erro ao buscar reservas do cliente:", error);
-            return [];
-        }
+        const { data, error } = await supabase.from('reservas').select('*').eq('client_id', clientId).order('created_at', { ascending: false });
+        if (error) return [];
         return db.reservations._mapReservations(data);
     },
-
     getByDateRange: async (startDate: string, endDate: string): Promise<Reservation[]> => {
-        const { data, error } = await supabase
-            .from('reservas')
-            .select('*')
-            .gte('date', startDate)
-            .lte('date', endDate);
-            
-        if (error) {
-            console.error("Erro ao buscar reservas por data:", error);
-            return [];
-        }
+        const { data, error } = await supabase.from('reservas').select('*').gte('date', startDate).lte('date', endDate);
+        if (error) return [];
         return db.reservations._mapReservations(data);
     },
-
     getAll: async (): Promise<Reservation[]> => {
       const { data, error } = await supabase.from('reservas').select('*');
       if (error) return [];
       return db.reservations._mapReservations(data);
     },
-
     _mapReservations: (data: any[]): Reservation[] => {
-        const now = new Date();
-        const expiredIds: string[] = [];
-        
-        const mapped = data.map((r: any) => {
-            // CORREÇÃO CRÍTICA DE MAPEAMENTO (CASE SENSITIVE & TRIM)
-            // Normaliza qualquer input de 'pago', 'PAGO', 'Pago ', ' pago' para PaymentStatus.PAGO
-            let safePaymentStatus = PaymentStatus.PENDENTE;
-            
-            if (r.payment_status) {
-                const normalized = String(r.payment_status).trim().toLowerCase();
-                
-                if (normalized === 'pago') {
-                    safePaymentStatus = PaymentStatus.PAGO;
-                } else if (normalized === 'reembolsado') {
-                    safePaymentStatus = PaymentStatus.REEMBOLSADO;
-                }
-            }
-
-            return {
-                id: r.id,
-                clientId: r.client_id || '',
-                clientName: r.client_name || 'Cliente',
-                date: r.date, 
-                time: r.time, 
-                peopleCount: r.people_count, 
-                laneCount: r.lane_count, 
-                duration: r.duration, 
-                totalValue: r.total_value, 
-                eventType: r.event_type, 
-                observations: r.observations, 
-                status: (r.status as ReservationStatus) || ReservationStatus.PENDENTE,
-                paymentStatus: safePaymentStatus, 
-                createdAt: r.created_at, 
-                guests: r.guests || [],
-                lanes: r.lanes || [],
-                checkedInIds: r.checked_in_ids || [], 
-                noShowIds: r.no_show_ids || [],
-                hasTableReservation: r.has_table_reservation,
-                birthdayName: r.birthday_name,
-                tableSeatCount: r.table_seat_count,
-                payOnSite: r.pay_on_site,
-                comandaId: r.comanda_id,
-                createdBy: r.created_by,
-                lanesAssigned: r.pistas_usadas || []
-            };
-        });
-
-        mapped.forEach((r: Reservation) => {
-            if (r.payOnSite) return;
-            if (r.status === ReservationStatus.PENDENTE && r.createdAt) {
-                const created = new Date(r.createdAt);
-                const diffMinutes = (now.getTime() - created.getTime()) / (1000 * 60);
-                if (diffMinutes > 30) {
-                    expiredIds.push(r.id);
-                    r.status = ReservationStatus.CANCELADA;
-                    r.observations = (r.observations || '') + ' [Tempo excedido]';
-                }
-            }
-        });
-
-        if (expiredIds.length > 0) {
-            supabase.from('reservas').update({ status: ReservationStatus.CANCELADA, observations: 'Cancelado: Tempo excedido' }).in('id', expiredIds).then();
-        }
-
-        return mapped;
+        return data.map((r: any) => ({
+            id: r.id,
+            clientId: r.client_id || '',
+            clientName: r.client_name || 'Cliente',
+            date: r.date, 
+            time: r.time, 
+            peopleCount: r.people_count, 
+            laneCount: r.lane_count, 
+            duration: r.duration, 
+            totalValue: r.total_value, 
+            eventType: r.event_type as EventType, 
+            observations: r.observations, 
+            status: (r.status as ReservationStatus) || ReservationStatus.PENDENTE,
+            paymentStatus: (r.payment_status as PaymentStatus) || PaymentStatus.PENDENTE, 
+            createdAt: r.created_at, 
+            guests: r.guests || [],
+            lanes: r.lanes || [],
+            checkedInIds: r.checked_in_ids || [], 
+            noShowIds: r.no_show_ids || [],
+            hasTableReservation: r.has_table_reservation,
+            birthdayName: r.birthday_name,
+            tableSeatCount: r.table_seat_count,
+            payOnSite: r.pay_on_site,
+            comandaId: r.comanda_id,
+            createdBy: r.created_by,
+            lanesAssigned: r.pistas_usadas || []
+        }));
     },
-
     create: async (res: Reservation, createdByUserId?: string) => {
       const dbRes: any = {
         id: res.id,
-        client_id: (res.clientId && res.clientId.trim() !== '') ? res.clientId : null, 
+        client_id: res.clientId || null, 
         client_name: res.clientName,
         date: res.date,
         time: res.time,
@@ -673,21 +518,11 @@ export const db = {
         table_seat_count: res.tableSeatCount,
         pay_on_site: res.payOnSite,
         comanda_id: res.comandaId,
-        created_by: (createdByUserId && createdByUserId.trim() !== '') ? createdByUserId : null,
+        created_by: createdByUserId || null,
         pistas_usadas: res.lanesAssigned
       };
-      
-      let { error } = await supabase.from('reservas').insert(dbRes);
-      
-      if (error && error.code === '23503' && error.message.includes('created_by')) {
-          console.warn("[AUTO-HEAL] ID de staff inválido detectado. Tentando criar sem vínculo.");
-          dbRes.created_by = null;
-          const retry = await supabase.from('reservas').insert(dbRes);
-          error = retry.error;
-      }
-
+      const { error } = await supabase.from('reservas').insert(dbRes);
       if (error) throw new Error(error.message);
-      
       if (dbRes.created_by) db.audit.log(dbRes.created_by, 'STAFF', 'CREATE_RESERVATION', `Criou reserva ${res.clientName}`, res.id);
       return res;
     },
@@ -713,10 +548,8 @@ export const db = {
         comanda_id: res.comandaId,
         pistas_usadas: res.lanesAssigned
       };
-      
       const { error } = await supabase.from('reservas').update(dbRes).eq('id', res.id);
       if (error) throw new Error(error.message);
-      
       if (updatedByUserId) db.audit.log(updatedByUserId, 'STAFF', 'UPDATE_RESERVATION', actionDetail || `Atualizou ${res.clientName}`, res.id);
     }
   },
@@ -735,20 +568,6 @@ export const db = {
     },
     update: async (cards: FunnelCard[]) => { },
     add: async (card: FunnelCard) => { await db.clients.updateStage(card.clientId, card.stage); }
-  },
-
-  interactions: {
-    getAll: async (): Promise<Interaction[]> => {
-      const { data } = await supabase.from('interacoes').select('*');
-      return (data || []).map((i: any) => ({
-        id: i.id, clientId: i.client_id, date: i.date, channel: i.channel, note: i.note
-      }));
-    },
-    add: async (interaction: Interaction) => {
-      await supabase.from('interacoes').insert({
-        id: interaction.id, client_id: interaction.clientId, date: interaction.date, channel: interaction.channel, note: interaction.note
-      });
-    }
   },
 
   settings: {
@@ -803,7 +622,6 @@ export const db = {
         mercadopago_client_secret: s.mercadopagoClientSecret,
         blocked_dates: s.blockedDates
       };
-      
       const { error } = await supabase.from('configuracoes').upsert(dbSettings);
       window.dispatchEvent(new Event('settings_updated'));
       if (error) throw error;

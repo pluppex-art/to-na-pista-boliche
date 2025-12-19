@@ -11,6 +11,7 @@ import CRM from './pages/CRM';
 import Settings from './pages/Settings';
 import Financeiro from './pages/Financeiro';
 import ClientDashboard from './pages/ClientDashboard';
+import ResetPassword from './pages/ResetPassword';
 import { UserRole, User } from './types';
 
 // Protected Route Wrapper
@@ -29,12 +30,10 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles,
     return <Navigate to="/login" replace />;
   }
 
-  // 1. Check Roles first (optional)
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     return <Navigate to="/agenda" replace />; 
   }
 
-  // 2. Check Specific Permission
   if (requiredPermission && user.role !== UserRole.ADMIN) {
      const hasPermission = user[requiredPermission];
      if (hasPermission !== true) {
@@ -45,16 +44,13 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles,
   return <>{children}</>;
 };
 
-// Componente Wrapper para injetar lógica global (como Favicon)
 const AppContent: React.FC = () => {
     const { settings } = useApp();
 
-    // Atualiza o Favicon dinamicamente
     useEffect(() => {
         const link = (document.querySelector("link[rel*='icon']") || document.createElement('link')) as HTMLLinkElement;
         link.type = 'image/x-icon';
         link.rel = 'shortcut icon';
-        // Alterado: Fallback para /logo.png em vez de /vite.svg
         link.href = settings.logoUrl || '/logo.png'; 
         document.getElementsByTagName('head')[0].appendChild(link);
     }, [settings.logoUrl]);
@@ -66,6 +62,7 @@ const AppContent: React.FC = () => {
                 <Route path="/login" element={<Login />} />
                 <Route path="/agendamento" element={<PublicBooking />} />
                 <Route path="/checkout" element={<Checkout />} />
+                <Route path="/redefinir-senha" element={<ResetPassword />} />
                 <Route path="/" element={<Navigate to="/agendamento" />} />
 
                 {/* Client Routes */}
