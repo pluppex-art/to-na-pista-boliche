@@ -1,5 +1,4 @@
 
-// Fix: Fixed property access error in update method by changing funnel_stage access to funnelStage
 import { AppSettings, Client, FunnelCard, Reservation, ReservationStatus, PaymentStatus, UserRole, FunnelStage, FunnelStageConfig, LoyaltyTransaction, AuditLog, User, EventType } from '../types';
 import { supabase } from './supabaseClient';
 import { INITIAL_SETTINGS } from '../constants';
@@ -45,17 +44,14 @@ export const db = {
       getAll: async (): Promise<FunnelStageConfig[]> => {
           const { data, error } = await supabase.from('etapas_funil').select('*').order('ordem', { ascending: true });
           if (error) {
-              console.error("[ERRO BUSCA ETAPAS]:", error.message, error.details);
-              return [];
+              console.error("[ERRO CRÍTICO ETAPAS]:", error);
+              throw new Error(`Falha ao carregar etapas: ${error.message}`);
           }
-          return data.map(d => ({ id: d.id, nome: d.nome, ordem: d.ordem }));
+          return (data || []).map(d => ({ id: d.id, nome: d.nome, ordem: d.ordem }));
       },
       create: async (nome: string, ordem: number) => {
           const { data, error } = await supabase.from('etapas_funil').insert({ nome, ordem }).select().single();
-          if (error) {
-              console.error("[ERRO AO CRIAR ETAPA]:", error.message);
-              throw error;
-          }
+          if (error) throw error;
           return { id: data.id, nome: data.nome, ordem: data.ordem };
       },
       update: async (id: string, nome: string, ordem: number) => {
@@ -177,7 +173,8 @@ export const db = {
     },
     logout: async () => { await supabase.auth.signOut(); },
     getAll: async (): Promise<Client[]> => {
-      const { data } = await supabase.from('clientes').select('*');
+      const { data, error } = await supabase.from('clientes').select('*');
+      if (error) throw error;
       return (data || []).map((c: any) => ({
           id: c.client_id, name: c.name || 'Sem Nome', phone: c.phone || '', email: c.email, photoUrl: c.photo_url,
           tags: safeTags(c.tags), createdAt: c.created_at, lastContactAt: c.last_contact_at,
@@ -224,15 +221,16 @@ export const db = {
       };
     },
     update: async (client: Client, updatedBy?: string) => {
-      await supabase.from('clientes').update({
+      const { error } = await supabase.from('clientes').update({
         name: client.name, phone: cleanPhone(client.phone), email: client.email || null,
-        // Fix: Changed incorrect camelCase funnel_stage to funnelStage to match Client interface definition
         last_contact_at: client.lastContactAt, photo_url: client.photoUrl, funnel_stage: client.funnelStage
       }).eq('client_id', client.id);
+      if (error) throw error;
       if (updatedBy) db.audit.log(updatedBy, 'STAFF', 'UPDATE_CLIENT', `Atualizou ${client.name}`, client.id);
     },
     updateStage: async (clientId: string, newStage: string) => {
-        await supabase.from('clientes').update({ funnel_stage: newStage }).eq('client_id', clientId);
+        const { error } = await supabase.from('clientes').update({ funnel_stage: newStage }).eq('client_id', clientId);
+        if (error) throw error;
     }
   },
 
@@ -263,7 +261,7 @@ export const db = {
     },
     getAll: async (): Promise<Reservation[]> => {
       const { data, error } = await supabase.from('reservas').select('*');
-      if (error) return [];
+      if (error) throw error;
       return db.reservations._mapReservations(data);
     },
     _mapReservations: (data: any[]): Reservation[] => {
@@ -296,31 +294,36 @@ export const db = {
         }));
     },
     create: async (res: Reservation, createdByUserId?: string) => {
-      await supabase.from('reservas').insert({
+      const { error } = await supabase.from('reservas').insert({
         id: res.id, client_id: res.clientId || null, client_name: res.clientName, date: res.date, time: res.time,
         people_count: res.peopleCount, lane_count: res.laneCount, duration: res.duration, total_value: res.totalValue,
         event_type: res.eventType, observations: res.observations, status: res.status, payment_status: res.paymentStatus,
         created_at: res.createdAt, has_table_reservation: res.hasTableReservation, birthday_name: res.birthdayName,
         table_seat_count: res.tableSeatCount, created_by: createdByUserId || null
       });
+      if (error) throw error;
       return res;
     },
-    // Fixed: replaced incorrect snake_case property access with correct camelCase ones from the Reservation interface (checkedInIds, noShowIds, hasTableReservation, tableSeatCount).
     update: async (res: Reservation, updatedByUserId?: string, actionDetail?: string) => {
-      await supabase.from('reservas').update({
+      const { error } = await supabase.from('reservas').update({
         date: res.date, time: res.time, people_count: res.peopleCount, lane_count: res.laneCount, duration: res.duration,
         total_value: res.totalValue, event_type: res.eventType, observations: res.observations, status: res.status,
         payment_status: res.paymentStatus, checked_in_ids: res.checkedInIds || [], 
         no_show_ids: res.noShowIds || [], has_table_reservation: res.hasTableReservation, 
         table_seat_count: res.tableSeatCount, pistas_usadas: res.lanesAssigned
       }).eq('id', res.id);
+      if (error) throw error;
     }
   },
 
   settings: {
     get: async (): Promise<AppSettings> => {
-      const { data: configData } = await supabase.from('configuracoes').select('*').limit(1).maybeSingle();
-      const { data: hoursData } = await supabase.from('configuracao_horarios').select('*').order('day_of_week', { ascending: true });
+      const { data: configData, error: configError } = await supabase.from('configuracoes').select('*').limit(1).maybeSingle();
+      const { data: hoursData, error: hoursError } = await supabase.from('configuracao_horarios').select('*').order('day_of_week', { ascending: true });
+      
+      if (configError) console.error("Erro config:", configError);
+      if (hoursError) console.error("Erro horários:", hoursError);
+
       let businessHours = [...INITIAL_SETTINGS.businessHours];
       if (hoursData?.length) {
          hoursData.forEach((row: any) => {
@@ -343,20 +346,22 @@ export const db = {
       };
     },
     saveGeneral: async (s: AppSettings) => {
-      await supabase.from('configuracoes').upsert({
+      const { error } = await supabase.from('configuracoes').upsert({
         id: 1, establishment_name: s.establishmentName, address: s.address, phone: s.phone,
         whatsapp_link: s.whatsappLink, logo_url: s.logoUrl, active_lanes: s.activeLanes,
         weekday_price: s.weekdayPrice, weekend_price: s.weekendPrice,
         online_payment_enabled: s.onlinePaymentEnabled, mercadopago_public_key: s.mercadopagoPublicKey,
         blocked_dates: s.blockedDates
       });
+      if (error) throw error;
       window.dispatchEvent(new Event('settings_updated'));
     },
     saveHours: async (s: AppSettings) => {
       const hoursPayload = s.businessHours.map((h, index) => ({
           config_id: 1, day_of_week: index, is_open: h.isOpen, start_hour: h.start, end_hour: h.end
       }));
-      await supabase.from('configuracao_horarios').upsert(hoursPayload, { onConflict: 'config_id,day_of_week' });
+      const { error } = await supabase.from('configuracao_horarios').upsert(hoursPayload, { onConflict: 'config_id,day_of_week' });
+      if (error) throw error;
     }
   }
 };

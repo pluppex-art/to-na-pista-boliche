@@ -17,6 +17,7 @@ const CRM: React.FC = () => {
   const [clientHistory, setClientHistory] = useState<Reservation[]>([]);
   const [clientMetrics, setClientMetrics] = useState<Record<string, { count: number, tier: ClientTier }>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   
   const [funnelStages, setFunnelStages] = useState<FunnelStageConfig[]>([]);
   const [editingStage, setEditingStage] = useState<FunnelStageConfig | null>(null);
@@ -42,16 +43,16 @@ const CRM: React.FC = () => {
   const canCreateReservation = isAdmin || currentUser?.perm_create_reservation;
 
   const fetchData = async (isBackground = false) => {
-    if (!isBackground) setLoading(true);
+    if (!isBackground) {
+        setLoading(true);
+        setLoadError(null);
+    }
     try {
-        console.log("[CRM] Iniciando busca de dados...");
         const [clientsData, reservationsData, stagesData] = await Promise.all([
             db.clients.getAll(),
             db.reservations.getAll(),
             db.funnelStages.getAll()
         ]);
-        
-        console.log(`[CRM] Dados recebidos: ${clientsData.length} clientes, ${stagesData.length} etapas.`);
         
         setClients(clientsData);
         setFunnelStages(stagesData.sort((a, b) => a.ordem - b.ordem));
@@ -74,7 +75,8 @@ const CRM: React.FC = () => {
         });
         setClientMetrics(metrics);
     } catch (e: any) { 
-        console.error("[CRM ERROR] Falha ao carregar dados:", e.message || e);
+        console.error("[CRM ERROR]:", e);
+        setLoadError(e.message || "Erro desconhecido ao carregar dados.");
     } 
     finally { if (!isBackground) setLoading(false); }
   };
@@ -241,7 +243,17 @@ const CRM: React.FC = () => {
                     </div>
                 ) : (
                     <div className="flex-1 overflow-x-auto custom-scrollbar h-full bg-slate-900/10 rounded-2xl border border-slate-800/50">
-                        {loading ? <div className="flex justify-center items-center h-full"><Loader2 className="animate-spin text-neon-blue" size={48} /></div> : funnelStages.length === 0 ? (
+                        {loading ? <div className="flex justify-center items-center h-full"><Loader2 className="animate-spin text-neon-blue" size={48} /></div> : loadError ? (
+                             <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-8">
+                                <AlertTriangle size={48} className="text-red-500"/>
+                                <div>
+                                    <h3 className="text-white font-bold text-lg">Erro no Banco de Dados</h3>
+                                    <p className="text-red-400 text-sm mt-2 font-mono bg-slate-900 p-3 rounded-lg border border-red-500/30">{loadError}</p>
+                                    <p className="text-slate-400 text-xs mt-4">Isso geralmente é causado por travas de segurança (RLS) ou conexão instável.</p>
+                                </div>
+                                <button onClick={() => fetchData()} className="mt-4 px-6 py-3 bg-slate-700 text-white rounded-xl font-bold hover:bg-slate-600 transition flex items-center gap-2">Tentar Novamente</button>
+                            </div>
+                        ) : funnelStages.length === 0 ? (
                             <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-8">
                                 <AlertTriangle size={48} className="text-yellow-500 opacity-50"/>
                                 <div>
