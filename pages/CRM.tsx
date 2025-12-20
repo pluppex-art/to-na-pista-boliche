@@ -48,7 +48,6 @@ const CRM: React.FC = () => {
         setLoadError(null);
     }
     try {
-        console.log("[CRM] Buscando dados...");
         const [clientsData, reservationsData, stagesData] = await Promise.all([
             db.clients.getAll(),
             db.reservations.getAll(),
@@ -76,7 +75,6 @@ const CRM: React.FC = () => {
         });
         setClientMetrics(metrics);
     } catch (e: any) { 
-        console.error("[CRM ERROR]:", e);
         setLoadError(e.message || "Erro ao conectar com o banco de dados.");
     } 
     finally { if (!isBackground) setLoading(false); }
@@ -84,7 +82,7 @@ const CRM: React.FC = () => {
 
   useEffect(() => {
     fetchData();
-    const channel = supabase.channel('crm-realtime-v15')
+    const channel = supabase.channel('crm-realtime-v17')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => fetchData(true))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => fetchData(true))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'etapas_funil' }, () => fetchData(true))
@@ -96,7 +94,6 @@ const CRM: React.FC = () => {
     const fetchDetails = async () => {
       if (selectedClient) {
         const history = await db.reservations.getByClient(selectedClient.id);
-        // Ordenação: Criadas mais recentemente no TOPO
         const sortedHistory = history.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         setClientHistory(sortedHistory);
 
@@ -130,7 +127,7 @@ const CRM: React.FC = () => {
         await db.clients.updateStage(clientId, newStage);
         setClients(prev => prev.map(c => c.id === clientId ? { ...c, funnelStage: newStage } : c));
         if (selectedClient?.id === clientId) setSelectedClient(prev => prev ? { ...prev, funnelStage: newStage } : null);
-    } catch (e) { alert("Erro ao atualizar fase. Verifique o RLS no Supabase."); } 
+    } catch (e) { alert("Erro ao atualizar fase."); } 
     finally { setIsUpdatingStage(false); }
   };
 
@@ -154,22 +151,10 @@ const CRM: React.FC = () => {
             { n: 'Pós Venda', o: 4 },
             { n: 'No Show', o: 5 }
         ];
-        
-        for (const d of defaults) {
-            await db.funnelStages.create(d.n, d.o);
-        }
-        
+        for (const d of defaults) await db.funnelStages.create(d.n, d.o);
         await fetchData();
         alert("Funil inicializado!");
-    } catch (e: any) { 
-        console.error("[CRM ERROR] Erro na inicialização:", e);
-        const msg = e.message || 'Erro de segurança';
-        if (msg.includes('row-level security')) {
-            alert(`ATENÇÃO: O banco de dados bloqueou a criação. \n\nVocê deve executar o script SQL de destravamento no painel do Supabase para que este botão funcione.`);
-        } else {
-            alert(`Erro ao inicializar: ${msg}`);
-        }
-    }
+    } catch (e: any) { alert(`Erro: ${e.message}`); }
     finally { setIsSavingStage(false); }
   };
 
@@ -231,7 +216,7 @@ const CRM: React.FC = () => {
                         <div className="p-4 border-b border-slate-700 bg-slate-900/50 flex-shrink-0">
                             <div className="relative">
                                 <Search className="absolute left-3 top-3.5 text-slate-500" size={18} />
-                                <input type="text" placeholder="Buscar..." className="w-full bg-slate-700 border border-slate-600 text-white pl-10 pr-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-neon-blue/20 transition-all text-sm font-medium" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                                <input type="text" placeholder="Buscar..." className="w-full bg-slate-700 border border-slate-600 text-white pl-10 pr-4 py-3 rounded-xl focus:outline-none transition-all text-sm font-medium" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                             </div>
                         </div>
                         <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-800/20">
@@ -258,23 +243,14 @@ const CRM: React.FC = () => {
                                 <div>
                                     <h3 className="text-white font-bold text-lg">Erro no Banco de Dados</h3>
                                     <p className="text-red-400 text-sm mt-2 font-mono bg-slate-900 p-3 rounded-lg border border-red-500/30">{loadError}</p>
-                                    <p className="text-slate-400 text-xs mt-4">Rode o script SQL no Supabase para liberar o acesso às tabelas.</p>
                                 </div>
                                 <button onClick={() => fetchData()} className="mt-4 px-6 py-3 bg-slate-700 text-white rounded-xl font-bold hover:bg-slate-600 transition flex items-center gap-2">Tentar Novamente</button>
                             </div>
                         ) : funnelStages.length === 0 ? (
                             <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-8">
                                 <AlertTriangle size={48} className="text-yellow-500 opacity-50"/>
-                                <div>
-                                    <h3 className="text-white font-bold">Funil não configurado</h3>
-                                    <p className="text-slate-400 text-xs mt-1">Não encontramos etapas no banco de dados.</p>
-                                </div>
-                                {isAdmin && (
-                                    <button onClick={initDefaultStages} disabled={isSavingStage} className="mt-4 px-6 py-3 bg-neon-blue text-white rounded-xl font-bold flex items-center gap-2 hover:bg-blue-600 transition shadow-lg">
-                                        {isSavingStage ? <Loader2 className="animate-spin"/> : <Zap size={18}/>}
-                                        INICIALIZAR ETAPAS
-                                    </button>
-                                )}
+                                <div><h3 className="text-white font-bold">Funil não configurado</h3></div>
+                                {isAdmin && <button onClick={initDefaultStages} disabled={isSavingStage} className="mt-4 px-6 py-3 bg-neon-blue text-white rounded-xl font-bold flex items-center gap-2 hover:bg-blue-600 transition shadow-lg">{isSavingStage ? <Loader2 className="animate-spin"/> : <Zap size={18}/>} INICIALIZAR ETAPAS</button>}
                             </div>
                         ) : (
                             <div className="flex gap-4 h-full min-w-max pb-4 px-2">
@@ -299,7 +275,7 @@ const CRM: React.FC = () => {
                                                 <div key={client.id} draggable onDragStart={(e) => { e.dataTransfer.setData('clientId', client.id); }} onClick={() => { setSelectedClient(client); setIsEditing(false); setDetailTab('INFO'); }} className={`bg-slate-700/80 p-4 rounded-xl shadow-md border transition-all group relative cursor-pointer ${selectedClient?.id === client.id ? 'border-neon-blue ring-2 ring-neon-blue/20 bg-slate-700' : 'border-slate-600 hover:border-slate-500 hover:bg-slate-700'}`}>
                                                     <div className="flex justify-between items-start mb-1 gap-2">
                                                         <h4 className={`font-bold text-sm truncate leading-tight flex-1 ${selectedClient?.id === client.id ? 'text-neon-blue' : 'text-white'}`}>{client.name}</h4>
-                                                        <GripVertical className="text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" size={14} />
+                                                        <GripVertical className="text-slate-600 opacity-0 group-hover:opacity-100 transition flex-shrink-0" size={14} />
                                                     </div>
                                                     <p className="text-[11px] text-slate-400 font-mono">{client.phone}</p>
                                                 </div>
@@ -314,55 +290,67 @@ const CRM: React.FC = () => {
                 )}
             </div>
 
+            {/* PAINEL DE DETALHES - BOTÕES EMPILHADOS PARA LIBERAR ESPAÇO AO NOME */}
             <div className={`${!selectedClient ? 'hidden' : 'flex'} flex-col bg-slate-800 border lg:border-l border-slate-700 rounded-2xl lg:rounded-none lg:rounded-tr-2xl lg:rounded-br-2xl shadow-2xl overflow-hidden h-full animate-scale-in transition-all duration-300 ${viewMode === 'LIST' ? 'flex-1' : 'w-full lg:w-[550px] absolute lg:relative right-0 top-0 z-30'} min-h-0`}>
                 {selectedClient ? (
                 <>
-                    <div className="p-4 sm:p-6 md:p-8 border-b border-slate-700 bg-slate-900/60 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-6 flex-shrink-0">
-                        <div className="flex-1 min-w-0 w-full">
-                            <div className="flex items-center gap-3 sm:gap-4 mb-3">
-                                <button onClick={() => setSelectedClient(null)} className="p-2 bg-slate-700/50 text-slate-400 hover:text-white rounded-xl border border-slate-600 transition-colors shadow-sm flex-shrink-0" title="Voltar"><X size={20}/></button>
-                                <div className="h-10 w-[1px] bg-slate-700 mx-1 hidden sm:block"></div>
-                                <div className="min-w-0">
+                    <div className="p-4 sm:p-6 border-b border-slate-700 bg-slate-900/60 flex flex-row items-start justify-between gap-4 flex-shrink-0">
+                        
+                        {/* Container do Nome: Prioridade total de largura */}
+                        <div className="flex-1 min-w-0">
+                            <div className="flex items-start gap-3 sm:gap-4 mb-1">
+                                <button onClick={() => setSelectedClient(null)} className="p-2 bg-slate-700/50 text-slate-400 hover:text-white rounded-xl border border-slate-600 transition-colors shadow-sm flex-shrink-0 mt-0.5" title="Voltar"><X size={18}/></button>
+                                
+                                <div className="min-w-0 flex-1">
                                     {!isEditing ? (
-                                        <>
-                                            <div className="flex items-center gap-2">
-                                                <h2 className="text-xl sm:text-2xl md:text-3xl font-extrabold text-white truncate tracking-tight">{selectedClient.name}</h2>
-                                                {canEditClient && <button onClick={() => { setEditForm({ name: selectedClient.name, email: selectedClient.email, phone: selectedClient.phone }); setIsEditing(true); }} className="text-slate-500 hover:text-neon-blue transition-colors p-1.5 bg-slate-800/50 rounded-lg border border-slate-700 flex-shrink-0"><Pencil size={14}/></button>}
+                                        <div className="flex flex-col">
+                                            <div className="flex items-start gap-2">
+                                                {/* NOME DO CLIENTE: break-words e line-clamp-2 garantem visualização total */}
+                                                <h2 className="text-lg sm:text-2xl font-bold text-white tracking-tight leading-tight break-words line-clamp-2 pr-2">{selectedClient.name}</h2>
+                                                {canEditClient && <button onClick={() => { setEditForm({ name: selectedClient.name, email: selectedClient.email, phone: selectedClient.phone }); setIsEditing(true); }} className="text-slate-500 hover:text-neon-blue transition-colors p-1.5 bg-slate-800/50 rounded-lg border border-slate-700 flex-shrink-0 mt-0.5"><Pencil size={12}/></button>}
                                             </div>
-                                            <p className="text-xs sm:text-sm text-slate-400 font-medium truncate">{selectedClient.email || 'Sem e-mail'}</p>
-                                        </>
-                                    ) : <h2 className="text-lg sm:text-xl font-bold text-white uppercase tracking-wider text-neon-blue">Editando</h2>}
+                                            <p className="text-[10px] sm:text-xs text-slate-500 font-medium truncate mt-1">{selectedClient.email || 'Sem e-mail cadastrado'}</p>
+                                        </div>
+                                    ) : <h2 className="text-lg font-bold text-neon-blue uppercase tracking-wider">Editando Perfil</h2>}
                                 </div>
                             </div>
                         </div>
+
+                        {/* CONTAINER DE BOTÕES: EMPILHADOS VERTICALMENTE */}
                         {!isEditing ? (
-                            <div className="flex gap-2 sm:gap-3 w-full sm:w-auto">
-                                <button onClick={() => openWhatsApp(selectedClient.phone)} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-bold transition shadow-lg text-xs sm:text-sm"><MessageCircle size={18} /> WhatsApp</button>
-                                {canCreateReservation && <button onClick={() => navigate('/agendamento', { state: { prefilledClient: selectedClient } })} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-neon-orange hover:bg-orange-600 text-white px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-bold transition shadow-lg text-xs sm:text-sm"><CalendarPlus size={18} /> Reservar</button>}
+                            <div className="flex flex-col gap-2 flex-shrink-0 w-28 sm:w-32">
+                                <button onClick={() => openWhatsApp(selectedClient.phone)} className="w-full flex items-center justify-center gap-1.5 bg-green-600 hover:bg-green-500 text-white py-2 rounded-xl font-bold transition shadow-lg text-[10px] uppercase tracking-tighter">
+                                    <MessageCircle size={14} /> WhatsApp
+                                </button>
+                                {canCreateReservation && (
+                                    <button onClick={() => navigate('/agendamento', { state: { prefilledClient: selectedClient } })} className="w-full flex items-center justify-center gap-1.5 bg-neon-orange hover:bg-orange-600 text-white py-2 rounded-xl font-bold transition shadow-lg text-[10px] uppercase tracking-tighter">
+                                        <CalendarPlus size={14} /> Reservar
+                                    </button>
+                                )}
                             </div>
                         ) : (
-                            <div className="flex gap-2 sm:gap-3 w-full sm:w-auto">
-                                <button onClick={() => setIsEditing(false)} className="flex-1 sm:flex-none bg-slate-700 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold text-xs sm:text-sm uppercase">Cancelar</button>
-                                <button onClick={handleSaveClient} className="flex-1 sm:flex-none bg-neon-blue text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg text-xs sm:text-sm uppercase"><Save size={18} /> Salvar</button>
+                            <div className="flex flex-col gap-2 flex-shrink-0 w-28 sm:w-32">
+                                <button onClick={handleSaveClient} className="w-full bg-neon-blue text-white py-2 rounded-xl font-bold flex items-center justify-center gap-1.5 shadow-lg text-[10px] uppercase tracking-widest"><Save size={14} /> Salvar</button>
+                                <button onClick={() => setIsEditing(false)} className="w-full bg-slate-700 text-white py-2 rounded-xl font-bold text-[10px] uppercase tracking-widest">Sair</button>
                             </div>
                         )}
                     </div>
 
                     {!isEditing && (
                         <div className="flex border-b border-slate-700 bg-slate-800/50 p-1 flex-shrink-0">
-                            <button onClick={() => setDetailTab('INFO')} className={`flex-1 py-3 sm:py-4 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all rounded-xl ${detailTab === 'INFO' ? 'bg-slate-700 text-white shadow-inner border border-slate-600' : 'text-slate-500 hover:text-slate-300'}`}>Histórico</button>
-                            <button onClick={() => setDetailTab('LOYALTY')} className={`flex-1 py-3 sm:py-4 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all rounded-xl flex items-center justify-center gap-1 sm:gap-2 ${detailTab === 'LOYALTY' ? 'bg-slate-700 text-white shadow-inner border border-slate-600' : 'text-slate-500 hover:text-slate-300'}`}><Gift size={16}/> Fidelidade <span className="bg-slate-900 text-[10px] px-2 py-0.5 rounded-full text-neon-orange border border-neon-orange/20 font-bold">{selectedClient.loyaltyBalance || 0} pts</span></button>
+                            <button onClick={() => setDetailTab('INFO')} className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-wider transition-all rounded-xl ${detailTab === 'INFO' ? 'bg-slate-700 text-white shadow-inner border border-slate-600' : 'text-slate-500 hover:text-slate-300'}`}>Histórico</button>
+                            <button onClick={() => setDetailTab('LOYALTY')} className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-wider transition-all rounded-xl flex items-center justify-center gap-1 sm:gap-2 ${detailTab === 'LOYALTY' ? 'bg-slate-700 text-white shadow-inner border border-slate-600' : 'text-slate-500 hover:text-slate-300'}`}><Gift size={16}/> Fidelidade <span className="bg-slate-900 text-[10px] px-2 py-0.5 rounded-full text-neon-orange border border-neon-orange/20 font-bold">{selectedClient.loyaltyBalance || 0} pts</span></button>
                         </div>
                     )}
 
                     <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 custom-scrollbar bg-slate-900/10 min-h-0">
                         {isEditing ? (
                             <div className="space-y-6 animate-fade-in max-w-2xl mx-auto">
-                                <div className="bg-slate-900/40 p-6 rounded-2xl border border-slate-700 space-y-4">
-                                    <div><label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Nome</label><input className="w-full bg-slate-800 border border-slate-600 rounded-xl p-4 text-white font-medium" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} /></div>
+                                <div className="bg-slate-900/40 p-6 rounded-2xl border border-slate-700 space-y-4 shadow-xl">
+                                    <div><label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Nome Completo</label><input className="w-full bg-slate-800 border border-slate-600 rounded-xl p-4 text-white font-medium focus:border-neon-blue outline-none transition" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} /></div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div><label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">WhatsApp</label><input className="w-full bg-slate-800 border border-slate-600 rounded-xl p-4 text-white font-mono" value={editForm.phone} onChange={e => setEditForm({...editForm, phone: e.target.value})} /></div>
-                                        <div><label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">E-mail</label><input className="w-full bg-slate-800 border border-slate-600 rounded-xl p-4 text-white" value={editForm.email} onChange={e => setEditForm({...editForm, email: e.target.value})} /></div>
+                                        <div><label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">WhatsApp</label><input className="w-full bg-slate-800 border border-slate-600 rounded-xl p-4 text-white font-mono focus:border-neon-blue outline-none transition" value={editForm.phone} onChange={e => setEditForm({...editForm, phone: e.target.value})} /></div>
+                                        <div><label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">E-mail</label><input className="w-full bg-slate-800 border border-slate-600 rounded-xl p-4 text-white focus:border-neon-blue outline-none transition" value={editForm.email} onChange={e => setEditForm({...editForm, email: e.target.value})} /></div>
                                     </div>
                                 </div>
                             </div>
@@ -375,16 +363,15 @@ const CRM: React.FC = () => {
 
                                 <div>
                                     <h3 className="text-[10px] font-bold text-slate-400 mb-4 uppercase tracking-widest flex items-center gap-2 border-l-4 border-neon-orange pl-3">Fase do Funil</h3>
-                                    <div className="flex flex-wrap gap-2">{funnelStages.map(stage => { const isActive = selectedClient.funnelStage === stage.nome; return (<button key={stage.id} disabled={!canEditClient || isUpdatingStage} onClick={() => updateClientStage(selectedClient.id, stage.nome)} className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all border shadow-sm ${isActive ? 'bg-neon-orange text-white border-neon-orange' : 'bg-slate-900 text-slate-500 border-slate-700 hover:border-slate-500 hover:text-slate-300'}`}>{isActive && <Check size={14} className="inline mr-1"/>}{stage.nome}</button>);})}</div>
+                                    <div className="flex flex-wrap gap-2">{funnelStages.map(stage => { const isActive = selectedClient.funnelStage === stage.nome; return (<button key={stage.id} disabled={!canEditClient || isUpdatingStage} onClick={() => updateClientStage(selectedClient.id, stage.nome)} className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all border shadow-sm ${isActive ? 'bg-neon-orange text-white border-neon-orange shadow-lg' : 'bg-slate-900 text-slate-500 border-slate-700 hover:border-slate-500 hover:text-slate-300'}`}>{isActive && <Check size={14} className="inline mr-1"/>}{stage.nome}</button>);})}</div>
                                 </div>
 
                                 <div>
                                     <h3 className="text-[10px] font-bold text-slate-400 mb-4 uppercase tracking-widest flex items-center gap-2 border-l-4 border-neon-blue pl-3">Histórico de Visitas</h3>
                                     <div className="space-y-4">
-                                    {clientHistory.length === 0 ? <div className="text-center py-12 bg-slate-900/20 border border-slate-700 rounded-3xl text-slate-600 text-xs font-bold uppercase">Nenhuma reserva</div> : clientHistory.map(res => {
+                                    {clientHistory.length === 0 ? <div className="text-center py-12 bg-slate-900/20 border border-slate-700 rounded-3xl text-slate-600 text-xs font-bold uppercase">Nenhuma reserva registrada</div> : clientHistory.map(res => {
                                         const isCheckedIn = res.checkedInIds && res.checkedInIds.length > 0;
                                         const isNoShow = res.noShowIds && res.noShowIds.length > 0;
-                                        
                                         return (
                                         <div key={res.id} className={`p-4 rounded-xl border shadow-lg transition ${isCheckedIn ? 'border-green-500/30 bg-slate-900' : 'border-slate-700 bg-slate-800'}`}>
                                             <div className="flex justify-between items-start">
@@ -394,7 +381,7 @@ const CRM: React.FC = () => {
                                                         <span className="text-neon-blue font-bold text-sm">{res.time}</span>
                                                     </div>
                                                     <div className="flex gap-2 mt-2">
-                                                       {isCheckedIn ? <span className="text-[9px] font-bold text-green-400 bg-green-500/20 px-1.5 py-0.5 rounded border border-green-500/30">CHECK-IN</span> : isNoShow ? <span className="text-[9px] font-bold text-red-400 bg-red-600/20 px-1.5 py-0.5 rounded border border-red-500/30">NO-SHOW</span> : <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40' : 'text-slate-400 bg-slate-800'}`}>{res.status}</span>}
+                                                       {isCheckedIn ? <span className="text-[9px] font-bold text-green-400 bg-green-500/20 px-1.5 py-0.5 rounded border border-green-500/30">CHECK-IN</span> : isNoShow ? <span className="text-[9px] font-bold text-red-400 bg-red-600/20 px-1.5 py-0.5 rounded border border-red-500/30">NO-SHOW</span> : <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border-neon-blue/30' : 'text-slate-400 bg-slate-800 border-slate-700'}`}>{res.status}</span>}
                                                     </div>
                                                 </div>
                                                 <div className="text-right">
@@ -411,16 +398,16 @@ const CRM: React.FC = () => {
                                 <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-8 rounded-3xl border border-neon-orange/20 shadow-2xl flex flex-col items-center justify-center gap-6">
                                     <div className="w-16 h-16 bg-neon-orange/10 rounded-2xl flex items-center justify-center text-neon-orange border border-neon-orange/20 shadow-inner"><Coins size={44}/></div>
                                     <div className="text-center">
-                                        <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest mb-2">Saldo</p>
+                                        <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest mb-2">Saldo de Fidelidade</p>
                                         <div className="flex items-baseline justify-center gap-2">
-                                            <h3 className="text-5xl font-extrabold text-white">{selectedClient.loyaltyBalance || 0}</h3>
-                                            <span className="text-sm text-neon-orange font-bold uppercase">pts</span>
+                                            <h3 className="text-5xl font-bold text-white">{selectedClient.loyaltyBalance || 0}</h3>
+                                            <span className="text-sm text-neon-orange font-bold uppercase">pontos</span>
                                         </div>
                                     </div>
                                 </div>
                                 <div className="space-y-4">
-                                    <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2 border-l-2 border-slate-600 pl-3">Movimentações</h3>
-                                    <div className="bg-slate-900/50 rounded-2xl border border-slate-700/50 overflow-hidden">{loyaltyHistory.length === 0 ? (<div className="text-center py-16 text-slate-600 uppercase text-xs tracking-widest">Sem movimentações</div>) : (<div className="divide-y divide-slate-800">{loyaltyHistory.map(t => (
+                                    <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2 border-l-2 border-slate-600 pl-3">Extrato Recente</h3>
+                                    <div className="bg-slate-900/50 rounded-2xl border border-slate-700/50 overflow-hidden shadow-xl">{loyaltyHistory.length === 0 ? (<div className="text-center py-16 text-slate-600 uppercase text-xs tracking-widest">Sem movimentações</div>) : (<div className="divide-y divide-slate-800">{loyaltyHistory.map(t => (
                                         <div key={t.id} className="p-4 flex justify-between items-center hover:bg-slate-800/40 transition-colors">
                                             <div className="min-w-0 pr-4"><p className="text-white font-bold text-sm mb-1 truncate">{t.description}</p><p className="text-[10px] text-slate-500 font-bold uppercase">{new Date(t.createdAt).toLocaleDateString('pt-BR')}</p></div>
                                             <div className={`font-mono font-bold text-lg flex items-center gap-1 ${t.amount > 0 ? 'text-green-400' : 'text-red-400'}`}>{t.amount > 0 ? <ArrowUp size={18}/> : <ArrowDown size={18}/>}{Math.abs(t.amount)}</div>
@@ -433,10 +420,10 @@ const CRM: React.FC = () => {
                 </>
                 ) : (
                 <div className="flex-1 flex flex-col items-center justify-center text-slate-700 p-12 text-center h-full">
-                    <div className="w-24 h-24 bg-slate-800/50 rounded-full flex items-center justify-center mb-6 border border-slate-700/50">
+                    <div className="w-24 h-24 bg-slate-800/50 rounded-full flex items-center justify-center mb-6 border border-slate-700/50 shadow-inner">
                         <Users size={48} className="opacity-10" />
                     </div>
-                    <p className="font-bold uppercase tracking-widest text-xs text-slate-600 max-w-xs leading-loose">Selecione um cliente para ver os detalhes</p>
+                    <p className="font-bold uppercase tracking-widest text-[10px] text-slate-600 max-w-xs leading-loose">Selecione um cliente no funil ou na lista para gerenciar dados e histórico</p>
                 </div>
                 )}
             </div>

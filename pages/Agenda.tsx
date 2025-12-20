@@ -5,7 +5,7 @@ import { supabase } from '../services/supabaseClient';
 import { Reservation, ReservationStatus, EventType, UserRole, PaymentStatus } from '../types';
 import { useApp } from '../contexts/AppContext'; 
 import { generateDailySlots, checkHourCapacity } from '../utils/availability'; 
-import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, X, MessageCircle, Clock, Store, LayoutGrid, DollarSign, FileText, Wallet, User as UserIcon, Info, Trash2, Layout } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, X, MessageCircle, Clock, Store, LayoutGrid, DollarSign, FileText, Wallet, User as UserIcon, Info, Trash2, Layout, CheckCircle2 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { EVENT_TYPES } from '../constants';
@@ -125,8 +125,9 @@ const Agenda: React.FC = () => {
       dayReservations.forEach(r => {
           const slotCount = (r.laneCount || 1) * Math.ceil(r.duration || 1);
           total += slotCount;
-          checkIn += r.checkedInIds?.length || 0;
-          noShow += r.noShowIds?.length || 0;
+          
+          if (r.status === ReservationStatus.CHECK_IN) checkIn += (r.checkedInIds?.length || 0);
+          else if (r.status === ReservationStatus.NO_SHOW) noShow += (r.noShowIds?.length || 0);
           
           if (r.paymentStatus === PaymentStatus.PENDENTE) pending += slotCount;
           else confirmed += slotCount;
@@ -305,11 +306,36 @@ const Agenda: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-         <div className="p-4 rounded-2xl border flex items-center justify-between shadow-xl bg-slate-800 border-slate-700"><div className="flex items-center gap-3"><div className="p-2 bg-slate-500/10 rounded-xl text-slate-500"><Calendar size={20} /></div><span className="text-[10px] uppercase font-black text-slate-500 hidden sm:inline tracking-widest">Total</span></div><span className="text-2xl font-black text-slate-200">{loading ? '-' : metrics.totalSlots}</span></div>
-         <div className="p-4 rounded-2xl border flex items-center justify-between shadow-xl bg-slate-800 border-yellow-500/30"><div className="flex items-center gap-3"><div className="p-2 bg-yellow-500/10 rounded-xl text-yellow-500"><AlertCircle size={20} /></div><span className="text-[10px] uppercase font-black text-yellow-500 hidden sm:inline tracking-widest">Pendente</span></div><span className="text-2xl font-black text-yellow-500">{loading ? '-' : metrics.pendingSlots}</span></div>
-         <div className="bg-green-900/20 p-4 rounded-2xl border border-green-500/30 flex items-center justify-between shadow-xl"><div className="flex items-center gap-3"><div className="p-2 bg-green-500/20 rounded-xl text-green-400"><Users size={20} /></div><span className="text-[10px] text-green-400 uppercase font-black hidden sm:inline tracking-widest">Check-in</span></div><span className="text-2xl font-black text-green-400">{loading ? '-' : metrics.checkInSlots}</span></div>
-         <div className="bg-red-900/20 p-4 rounded-2xl border border-red-500/30 flex items-center justify-between shadow-xl"><div className="flex items-center gap-3"><div className="p-2 bg-red-500/20 rounded-xl text-red-400"><Ban size={20} /></div><span className="text-[10px] text-red-400 uppercase font-black hidden sm:inline tracking-widest">No-Show</span></div><span className="text-2xl font-black text-red-400">{loading ? '-' : metrics.noShowSlots}</span></div>
+      {/* MÉTRICAS: Ajustado grid para 1 coluna no mobile (um em cima do outro) e rótulos conforme pedido */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+         <div className="p-4 rounded-2xl border flex items-center justify-between shadow-xl bg-slate-800 border-slate-700">
+             <div className="flex items-center gap-3">
+                 <div className="p-2 bg-slate-500/10 rounded-xl text-slate-500"><CheckCircle2 size={20} /></div>
+                 <span className="text-[10px] uppercase font-black text-slate-500 tracking-widest">Confirmada</span>
+             </div>
+             <span className="text-2xl font-black text-slate-200">{loading ? '-' : metrics.confirmedSlots}</span>
+         </div>
+         <div className="p-4 rounded-2xl border flex items-center justify-between shadow-xl bg-slate-800 border-yellow-500/30">
+             <div className="flex items-center gap-3">
+                 <div className="p-2 bg-yellow-500/10 rounded-xl text-yellow-500"><AlertCircle size={20} /></div>
+                 <span className="text-[10px] uppercase font-black text-yellow-500 tracking-widest">Pendente</span>
+             </div>
+             <span className="text-2xl font-black text-yellow-500">{loading ? '-' : metrics.pendingSlots}</span>
+         </div>
+         <div className="bg-green-900/20 p-4 rounded-2xl border border-green-500/30 flex items-center justify-between shadow-xl">
+             <div className="flex items-center gap-3">
+                 <div className="p-2 bg-green-500/20 rounded-xl text-green-400"><Users size={20} /></div>
+                 <span className="text-[10px] text-green-400 uppercase font-black tracking-widest">Check-in</span>
+             </div>
+             <span className="text-2xl font-black text-green-400">{loading ? '-' : metrics.checkInSlots}</span>
+         </div>
+         <div className="bg-red-900/20 p-4 rounded-2xl border border-red-500/30 flex items-center justify-between shadow-xl">
+             <div className="flex items-center gap-3">
+                 <div className="p-2 bg-red-500/20 rounded-xl text-red-400"><Ban size={20} /></div>
+                 <span className="text-[10px] text-red-400 uppercase font-black tracking-widest">No-Show</span>
+             </div>
+             <span className="text-2xl font-black text-red-400">{loading ? '-' : metrics.noShowSlots}</span>
+         </div>
       </div>
 
       <div className="flex-1 bg-slate-800 border border-slate-700 rounded-3xl overflow-hidden shadow-2xl flex flex-col min-h-[500px]">
@@ -343,7 +369,6 @@ const Agenda: React.FC = () => {
                                <div key={uid} onClick={() => openResModal(res)} className={`relative p-5 rounded-2xl border cursor-pointer hover:scale-[1.02] active:scale-95 transition-all shadow-lg ${isCI ? 'border-green-500 bg-slate-900 opacity-95' : isNS ? 'border-red-500 bg-red-900/10 grayscale opacity-80' : res.status === ReservationStatus.CONFIRMADA ? 'border-neon-blue bg-blue-900/10' : 'border-yellow-500/50 bg-yellow-900/10'}`}>
                                   <div className="flex justify-between items-start mb-4">
                                     <div className="min-w-0 pr-2">
-                                        {/* NOME DO CLIENTE: Otimizado de font-black para font-bold e tracking ajustado */}
                                         <h4 className={`font-bold truncate text-sm text-slate-100 uppercase tracking-wide leading-tight ${isNS ? 'line-through text-slate-500' : ''}`}>{res.clientName}</h4>
                                         {phone && <p className="text-[10px] text-slate-500 font-medium flex items-center gap-1 mt-1.5 font-mono tracking-tighter">{phone}</p>}
                                         
@@ -381,7 +406,7 @@ const Agenda: React.FC = () => {
         )}
       </div>
 
-      {/* MODAL DETALHADO DE RESERVA - OTIMIZADO MOBILE */}
+      {/* MODAL DETALHADO DE RESERVA */}
       {editingRes && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-xl p-3 md:p-4">
           <div className="bg-slate-800 border border-slate-600 w-full max-w-lg md:max-w-2xl rounded-[1.5rem] md:rounded-[2.5rem] shadow-2xl animate-scale-in flex flex-col max-h-[95vh] overflow-hidden">
