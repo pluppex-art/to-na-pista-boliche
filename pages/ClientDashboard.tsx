@@ -7,11 +7,9 @@ import { useApp } from '../contexts/AppContext';
 import { 
   LogOut, 
   User, 
-  Users, 
   Gift, 
   Clock, 
   Calendar, 
-  Coins, 
   Loader2, 
   MessageCircle, 
   Edit, 
@@ -19,15 +17,10 @@ import {
   X, 
   Camera, 
   CreditCard, 
-  Trash2, 
   DollarSign, 
-  Utensils, 
   LayoutGrid, 
-  AlertCircle, 
-  Store, 
-  Tag,
   History,
-  Archive
+  Coins
 } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
@@ -101,6 +94,13 @@ const ClientDashboard: React.FC = () => {
 
   const handlePayNow = (res: Reservation) => {
       navigate('/checkout', { state: { name: client?.name, whatsapp: client?.phone, email: client?.email, date: res.date, time: res.time, people: res.peopleCount, lanes: res.laneCount, duration: res.duration, type: res.eventType, totalValue: res.totalValue, obs: res.observations, reservationIds: [res.id] } });
+  };
+
+  const openWhatsAppAction = (res: Reservation, action: 'ALTERAR' | 'CANCELAR') => {
+      const dateFormatted = res.date.split('-').reverse().join('/');
+      const message = `Olá! Gostaria de *${action}* minha reserva do dia *${dateFormatted}* às *${res.time}*. (Ref: ${res.id.slice(0,8)})`;
+      const phone = settings.phone.replace(/\D/g, '');
+      window.open(`https://wa.me/55${phone}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
   const getExpiresIn = (res: Reservation) => {
@@ -205,10 +205,12 @@ const ClientDashboard: React.FC = () => {
                 ) : (
                     <div className="space-y-4 animate-fade-in">{displayedReservations.map(res => {
                         const expiresIn = getExpiresIn(res);
+                        const canModify = res.status !== ReservationStatus.CANCELADA && res.status !== ReservationStatus.CHECK_IN;
+                        
                         let statusStyle = 'bg-slate-800 text-slate-500 border-slate-700';
                         if (res.status === ReservationStatus.CONFIRMADA) statusStyle = 'bg-green-500/10 text-green-500 border-green-500/20';
                         else if (res.status === ReservationStatus.PENDENTE) statusStyle = res.payOnSite ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20';
-                        else if (res.status === ReservationStatus.CANCELADA) statusStyle = 'bg-red-500/10 text-red-500 border-red-500/20';
+                        else if (res.status === ReservationStatus.CANCELADA) statusStyle = 'bg-red-500/10 text-red-400 border-red-500/20';
 
                         return (
                             <div key={res.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg relative overflow-hidden group">
@@ -220,8 +222,17 @@ const ClientDashboard: React.FC = () => {
                                     <div className="bg-slate-950/50 p-3 rounded-xl border border-slate-800"><span className="text-[9px] text-slate-500 font-bold uppercase block mb-1">Configuração</span><span className="text-xs font-bold text-white flex items-center gap-2"><LayoutGrid size={14} className="text-neon-blue"/> {res.laneCount} Pista(s) • {res.peopleCount} Pessoas</span></div>
                                     <div className="bg-slate-950/50 p-3 rounded-xl border border-slate-800"><span className="text-[9px] text-slate-500 font-bold uppercase block mb-1">Valor Total</span><span className="text-xs font-bold text-green-400 flex items-center gap-2"><DollarSign size={14}/> {res.totalValue.toLocaleString('pt-BR', {style:'currency', currency: 'BRL'})}</span></div>
                                 </div>
+                                
                                 {expiresIn && activeTab === 'UPCOMING' && <div className="mb-4 bg-yellow-500/10 border border-yellow-500/20 p-3 rounded-xl text-yellow-500 text-xs flex items-center justify-between font-bold animate-pulse"><span>Pague para confirmar vaga</span><span>Expira em: {expiresIn}</span></div>}
-                                {activeTab === 'UPCOMING' && res.status === ReservationStatus.PENDENTE && !res.payOnSite && <button onClick={() => handlePayNow(res)} className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all transform active:scale-95 uppercase text-xs tracking-widest"><CreditCard size={18}/> Concluir Pagamento Agora</button>}
+                                
+                                {activeTab === 'UPCOMING' && res.status === ReservationStatus.PENDENTE && !res.payOnSite && <button onClick={() => handlePayNow(res)} className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all transform active:scale-95 uppercase text-xs tracking-widest mb-4"><CreditCard size={18}/> Concluir Pagamento Agora</button>}
+
+                                {canModify && activeTab === 'UPCOMING' && (
+                                    <div className="flex justify-center gap-6 pt-2 border-t border-slate-800 mt-2">
+                                        <button onClick={() => openWhatsAppAction(res, 'ALTERAR')} className="text-slate-500 hover:text-white transition-colors text-[11px] font-bold uppercase tracking-widest py-2">Alterar Reserva</button>
+                                        <button onClick={() => openWhatsAppAction(res, 'CANCELAR')} className="text-slate-500 hover:text-red-400 transition-colors text-[11px] font-bold uppercase tracking-widest py-2">Cancelar Reserva</button>
+                                    </div>
+                                )}
                             </div>
                         );
                     })}</div>

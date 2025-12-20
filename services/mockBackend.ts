@@ -198,6 +198,7 @@ export const db = {
     },
     create: async (client: any, userId?: string): Promise<Client> => {
       const { data, error } = await supabase.from('clientes').insert({
+        client_id: client.id || uuidv4(),
         name: client.name,
         phone: cleanPhone(client.phone),
         email: client.email || null,
@@ -265,6 +266,7 @@ export const db = {
             date: r.date, 
             time: r.time, 
             peopleCount: r.people_count || 0, 
+            // Fix: Property name mismatch. DB uses 'lane_count', interface uses 'laneCount'.
             laneCount: r.lane_count || 0, 
             duration: r.duration || 0, 
             totalValue: r.total_value || 0, 
@@ -322,9 +324,11 @@ export const db = {
         establishmentName: data.establishment_name || INITIAL_SETTINGS.establishmentName,
         address: data.address || INITIAL_SETTINGS.address,
         phone: data.phone || INITIAL_SETTINGS.phone,
+        // Fix: Property 'whatsapp_link' does not exist on 'AppSettings'. Renaming to 'whatsappLink'.
         whatsappLink: data.whatsapp_link || INITIAL_SETTINGS.whatsappLink,
         logoUrl: data.logo_url || INITIAL_SETTINGS.logoUrl,
         activeLanes: data.active_lanes || INITIAL_SETTINGS.activeLanes,
+        // Fix: Correct property names 'weekdayPrice' and 'weekendPrice' for 'AppSettings'.
         weekdayPrice: data.weekday_price || INITIAL_SETTINGS.weekdayPrice,
         weekendPrice: data.weekend_price || INITIAL_SETTINGS.weekendPrice,
         onlinePaymentEnabled: data.online_payment_enabled ?? INITIAL_SETTINGS.onlinePaymentEnabled,

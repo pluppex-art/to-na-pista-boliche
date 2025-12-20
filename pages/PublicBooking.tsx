@@ -378,16 +378,35 @@ const PublicBooking: React.FC = () => {
     } else if (currentStep === 2) {
         setIsSaving(true);
         try {
-            if (authMode === 'REGISTER' && !staffUser) {
-                const phoneClean = formData.whatsapp.replace(/\D/g, '');
-                const { data: existingClient } = await supabase
-                    .from('clientes')
-                    .select('email, client_id')
-                    .or(`phone.eq.${phoneClean},email.eq.${formData.email}`)
-                    .maybeSingle();
+            const phoneClean = formData.whatsapp.replace(/\D/g, '');
+            const emailClean = formData.email.trim();
 
-                if (existingClient) {
-                    alert("Cliente já cadastrado! Identificamos seu e-mail ou telefone em nosso sistema. Por favor, acesse sua conta para continuar.");
+            // VERIFICA SE CLIENTE JÁ EXISTE (PARA EVITAR DUPLICIDADE E ERRO 23502)
+            let filters = [];
+            if (phoneClean) filters.push(`phone.eq.${phoneClean}`);
+            if (emailClean) filters.push(`email.eq.${emailClean}`);
+            
+            let existingClient = null;
+            if (filters.length > 0) {
+                const { data } = await supabase
+                    .from('clientes')
+                    .select('client_id, name, email')
+                    .or(filters.join(','))
+                    .maybeSingle();
+                existingClient = data;
+            }
+
+            if (existingClient) {
+                if (staffUser) {
+                    // SE FOR EQUIPE, USA O CLIENTE JÁ EXISTENTE E SEGUE
+                    setClientId(existingClient.client_id);
+                    setFormData(prev => ({ ...prev, name: existingClient.name }));
+                    setCurrentStep(c => c + 1);
+                    setIsSaving(false);
+                    return;
+                } else {
+                    // SE FOR PÚBLICO, OBRIGA LOGIN
+                    alert("Identificamos que você já possui cadastro! Por favor, acesse sua conta para continuar.");
                     setAuthMode('LOGIN');
                     if (existingClient.email) setLoginEmail(existingClient.email);
                     setIsSaving(false);
@@ -395,6 +414,7 @@ const PublicBooking: React.FC = () => {
                 }
             }
 
+            // CRIAÇÃO DE NOVO CLIENTE (SOMENTE SE NÃO EXISTIR)
             const newClientData = {
                 id: uuidv4(),
                 name: formData.name,
@@ -405,12 +425,6 @@ const PublicBooking: React.FC = () => {
                 lastContactAt: new Date().toISOString(),
                 funnelStage: FunnelStage.NOVO
             };
-
-            if (clientId && staffUser) {
-                 setCurrentStep(c => c + 1);
-                 setIsSaving(false);
-                 return;
-            }
 
             const forceAccount = !staffUser;
 
@@ -428,9 +442,7 @@ const PublicBooking: React.FC = () => {
                     setCurrentStep(c => c + 1);
                 }
             } else {
-                const phoneClean = formData.whatsapp.replace(/\D/g, '');
-                const hasContact = phoneClean.length > 0 || formData.email.trim().length > 0;
-                
+                const hasContact = phoneClean.length > 0 || emailClean.length > 0;
                 if (staffUser && !hasContact) {
                     setClientId(''); 
                     setCurrentStep(c => c + 1);
@@ -442,7 +454,7 @@ const PublicBooking: React.FC = () => {
             }
         } catch (error) {
             console.error(error);
-            alert("Erro ao processar dados.");
+            alert("Erro ao processar dados. Verifique sua conexão.");
         } finally {
             setIsSaving(false);
         }
