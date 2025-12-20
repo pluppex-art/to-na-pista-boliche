@@ -5,12 +5,11 @@ import { supabase } from '../services/supabaseClient';
 import { Reservation, ReservationStatus, EventType, UserRole, PaymentStatus } from '../types';
 import { useApp } from '../contexts/AppContext'; 
 import { generateDailySlots, checkHourCapacity } from '../utils/availability'; 
-import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, X, MessageCircle, Clock, Store, LayoutGrid, DollarSign, FileText, Wallet, User as UserIcon, Info, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, X, MessageCircle, Clock, Store, LayoutGrid, DollarSign, FileText, Wallet, User as UserIcon, Info, Trash2, Layout } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { EVENT_TYPES } from '../constants';
 
-// Componente Interno para o Contador de 30 minutos com ação de cancelamento
 const CountdownBadge: React.FC<{ res: Reservation, onExpire?: () => void }> = ({ res, onExpire }) => {
     const [timeLeft, setTimeLeft] = useState<string>("");
     const [isExpired, setIsExpired] = useState(false);
@@ -116,7 +115,6 @@ const Agenda: React.FC = () => {
       allClients.forEach(c => { phoneMap[c.id] = c.phone; });
       setClientPhones(phoneMap);
 
-      // Ordenação: Criadas mais recentemente no TOPO
       const dayReservations = monthReservations
         .filter(r => r.date === selectedDate && r.status !== ReservationStatus.CANCELADA)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -149,7 +147,7 @@ const Agenda: React.FC = () => {
 
   useEffect(() => { 
     loadData();
-    const channel = supabase.channel('agenda-realtime-v6')
+    const channel = supabase.channel('agenda-realtime-v7')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => loadData(true))
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -202,6 +200,9 @@ const Agenda: React.FC = () => {
       await db.reservations.update(updatedRes, currentUser?.id, 'Atualizou pistas atribuídas');
       setShowLaneSelector(false);
       setLaneSelectorTargetRes(null);
+      if (editingRes && editingRes.id === updatedRes.id) {
+          setEditingRes(updatedRes);
+      }
       loadData(true);
   };
 
@@ -263,6 +264,13 @@ const Agenda: React.FC = () => {
       await db.reservations.update(finalUpdate, currentUser?.id, 'Edição completa de agendamento');
       setEditingRes(null);
       loadData(true);
+  };
+
+  const openEditLanes = () => {
+      if (!editingRes) return;
+      setLaneSelectorTargetRes(editingRes);
+      setTempSelectedLanes(editingRes.lanesAssigned || []);
+      setShowLaneSelector(true);
   };
 
   return (
@@ -340,12 +348,9 @@ const Agenda: React.FC = () => {
                                         
                                         <div className="flex items-center gap-1.5 mt-4 flex-wrap">
                                             {isCI ? <span className="text-[8px] font-black text-green-400 bg-green-500/20 px-2 py-0.5 rounded-lg border border-green-500/30 uppercase">CHECK-IN</span> : isNS ? <span className="text-[8px] font-black text-red-400 bg-red-600/20 px-2 py-0.5 rounded-lg border border-red-500/30 uppercase tracking-widest">NO-SHOW</span> : <span className={`text-[8px] font-black px-2 py-0.5 rounded-lg border uppercase tracking-widest ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border-neon-blue/30 shadow-blue-900/20 shadow-lg' : 'text-yellow-400 bg-yellow-900/40 border-yellow-500/30 shadow-yellow-900/20 shadow-lg'}`}>{res.status}</span>}
-                                            
-                                            {/* CONTAGEM DOS 30 MINUTOS E AÇÃO DE EXPIRAÇÃO */}
                                             {res.status === ReservationStatus.PENDENTE && !res.payOnSite && res.createdAt && (
                                                 <CountdownBadge res={res} onExpire={() => loadData(true)} />
                                             )}
-                                            
                                             {res.paymentStatus === PaymentStatus.PENDENTE && <span className="text-[8px] font-black text-red-400 bg-red-500/10 border border-red-500/20 px-2 py-0.5 rounded-lg animate-pulse uppercase">Pagamento Pendente</span>}
                                         </div>
                                     </div>
@@ -375,120 +380,112 @@ const Agenda: React.FC = () => {
         )}
       </div>
 
-      {/* MODAL DETALHADO DE RESERVA */}
+      {/* MODAL DETALHADO DE RESERVA - OTIMIZADO MOBILE */}
       {editingRes && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-xl p-4">
-          <div className="bg-slate-800 border border-slate-600 w-full max-w-2xl rounded-[2.5rem] shadow-2xl animate-scale-in flex flex-col max-h-[90vh] overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-xl p-3 md:p-4">
+          <div className="bg-slate-800 border border-slate-600 w-full max-w-lg md:max-w-2xl rounded-[1.5rem] md:rounded-[2.5rem] shadow-2xl animate-scale-in flex flex-col max-h-[95vh] overflow-hidden">
             
-            <div className="p-8 border-b border-slate-700 flex justify-between items-center bg-slate-900/50">
-              <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-neon-blue/10 rounded-2xl flex items-center justify-center text-neon-blue border border-neon-blue/20 shadow-inner"><Info size={24}/></div>
-                  <div>
-                      <h3 className="text-2xl font-black text-white tracking-tighter uppercase leading-none mb-1">{editingRes.clientName}</h3>
-                      <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em]">Reserva #{editingRes.id.slice(0,8)}</p>
+            {/* Header Redimensionado */}
+            <div className="p-4 md:p-8 border-b border-slate-700 flex justify-between items-center bg-slate-900/50">
+              <div className="flex items-center gap-3 md:gap-4 flex-1 min-w-0">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-neon-blue/10 rounded-xl flex items-center justify-center text-neon-blue border border-neon-blue/20 shadow-inner flex-shrink-0"><Info size={20} className="md:w-6 md:h-6"/></div>
+                  <div className="min-w-0">
+                      <h3 className="text-base md:text-2xl font-black text-white tracking-tighter uppercase leading-none mb-1 truncate">{editingRes.clientName}</h3>
+                      <p className="text-[8px] md:text-[10px] text-slate-500 font-black uppercase tracking-widest">Reserva #{editingRes.id.slice(0,8)}</p>
                   </div>
               </div>
-              <div className="flex items-center gap-3">
-                  {canEdit && <button onClick={() => setIsEditMode(!isEditMode)} className={`p-3 rounded-2xl border transition-all ${isEditMode ? 'bg-neon-blue text-white border-neon-blue shadow-lg scale-110' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`} title="Editar Agendamento"><Pencil size={20}/></button>}
-                  <button onClick={() => setEditingRes(null)} className="text-slate-400 hover:text-white p-3 bg-slate-800 rounded-2xl border border-slate-700 transition-colors"><X size={24}/></button>
+              <div className="flex items-center gap-2 md:gap-3 ml-2">
+                  {canEdit && <button onClick={() => setIsEditMode(!isEditMode)} className={`p-2.5 md:p-3 rounded-xl border transition-all ${isEditMode ? 'bg-neon-blue text-white border-neon-blue shadow-lg' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}><Pencil size={18} className="md:w-5 md:h-5"/></button>}
+                  <button onClick={() => setEditingRes(null)} className="text-slate-400 hover:text-white p-2.5 md:p-3 bg-slate-800 rounded-xl border border-slate-700 transition-colors"><X size={20} className="md:w-6 md:h-6"/></button>
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-4 md:space-y-8 custom-scrollbar">
                 
                 {isEditMode ? (
-                    <div className="space-y-8 animate-fade-in">
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                            <div className="col-span-2"><label className="text-[10px] font-black text-slate-500 uppercase block mb-2 tracking-widest">Data do Jogo</label><input type="date" className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white text-sm font-bold shadow-inner" value={editForm.date} onChange={e => setEditForm({...editForm, date: e.target.value})} /></div>
-                            <div><label className="text-[10px] font-black text-slate-500 uppercase block mb-2 tracking-widest">Horário</label><input type="time" className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white text-sm font-bold shadow-inner" value={editForm.time} onChange={e => setEditForm({...editForm, time: e.target.value})} /></div>
-                            <div><label className="text-[10px] font-black text-slate-500 uppercase block mb-2 tracking-widest">Duração (h)</label><input type="number" step="0.5" className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white text-sm font-bold shadow-inner" value={editForm.duration} onChange={e => setEditForm({...editForm, duration: parseFloat(e.target.value)})} /></div>
+                    <div className="space-y-6 animate-fade-in">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
+                            <div className="col-span-2"><label className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase block mb-1 tracking-widest">Data</label><input type="date" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 md:p-4 text-white text-xs md:text-sm font-bold" value={editForm.date} onChange={e => setEditForm({...editForm, date: e.target.value})} /></div>
+                            <div><label className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase block mb-1 tracking-widest">Hora</label><input type="time" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 md:p-4 text-white text-xs md:text-sm font-bold" value={editForm.time} onChange={e => setEditForm({...editForm, time: e.target.value})} /></div>
+                            <div><label className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase block mb-1 tracking-widest">Horas</label><input type="number" step="0.5" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 md:p-4 text-white text-xs md:text-sm font-bold" value={editForm.duration} onChange={e => setEditForm({...editForm, duration: parseFloat(e.target.value)})} /></div>
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
-                            <div><label className="text-[10px] font-black text-slate-500 uppercase block mb-2 tracking-widest">Pistas</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white text-sm font-black shadow-inner" value={editForm.laneCount} onChange={e => setEditForm({...editForm, laneCount: parseInt(e.target.value)})} /></div>
-                            <div><label className="text-[10px] font-black text-slate-500 uppercase block mb-2 tracking-widest">Pessoas</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white text-sm font-black shadow-inner" value={editForm.peopleCount} onChange={e => setEditForm({...editForm, peopleCount: parseInt(e.target.value)})} /></div>
-                            <div><label className="text-[10px] font-black text-slate-500 uppercase block mb-2 tracking-widest">Tipo Evento</label><select className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white text-sm font-bold shadow-inner" value={editForm.eventType} onChange={e => setEditForm({...editForm, eventType: e.target.value as EventType})}>{EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+                            <div><label className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase block mb-1 tracking-widest">Pistas</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 md:p-4 text-white text-xs md:text-sm font-black" value={editForm.laneCount} onChange={e => setEditForm({...editForm, laneCount: parseInt(e.target.value)})} /></div>
+                            <div><label className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase block mb-1 tracking-widest">Pessoas</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 md:p-4 text-white text-xs md:text-sm font-black" value={editForm.peopleCount} onChange={e => setEditForm({...editForm, peopleCount: parseInt(e.target.value)})} /></div>
+                            <div className="col-span-2 md:col-span-1"><label className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase block mb-1 tracking-widest">Evento</label><select className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 md:p-4 text-white text-xs md:text-sm font-bold" value={editForm.eventType} onChange={e => setEditForm({...editForm, eventType: e.target.value as EventType})}>{EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
                         </div>
-                        <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-700 space-y-6">
-                            <label className="flex items-center gap-3 cursor-pointer font-black text-white text-xs uppercase tracking-widest"><input type="checkbox" checked={editForm.hasTableReservation} onChange={e => setEditForm({...editForm, hasTableReservation: e.target.checked})} className="w-5 h-5 accent-neon-orange"/> RESERVAR MESA NO RESTAURANTE</label>
-                            {editForm.hasTableReservation && (
-                                <div className="grid grid-cols-2 gap-6 pl-8 border-l-2 border-neon-orange/20 animate-scale-in">
-                                    <div><label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Lugar na Mesa</label><input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white text-sm font-bold" value={editForm.tableSeatCount} onChange={e => setEditForm({...editForm, tableSeatCount: parseInt(e.target.value)})} /></div>
-                                    <div><label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Nome Aniversário</label><input className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white text-sm font-bold" value={editForm.birthdayName} onChange={e => setEditForm({...editForm, birthdayName: e.target.value})} /></div>
-                                </div>
-                            )}
-                        </div>
-                        <div><label className="text-[10px] font-black text-slate-500 uppercase block mb-2 tracking-widest">Notas Operacionais</label><textarea className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white text-sm h-24 font-medium shadow-inner" value={editForm.observations} onChange={e => setEditForm({...editForm, observations: e.target.value})} placeholder="Instruções para a equipe do boliche..."/></div>
-                        <button onClick={handleSaveFullEdit} className="w-full py-5 bg-neon-blue hover:bg-blue-600 text-white rounded-2xl font-black uppercase text-xs tracking-[0.2em] shadow-xl shadow-blue-900/20 flex items-center justify-center gap-3 transition-all active:scale-95"><Save size={20}/> Salvar Agendamento</button>
+                        <button onClick={handleSaveFullEdit} className="w-full py-4 md:py-5 bg-neon-blue hover:bg-blue-600 text-white rounded-xl md:rounded-2xl font-black uppercase text-[10px] md:text-xs tracking-[0.2em] shadow-xl flex items-center justify-center gap-3 transition-all active:scale-95"><Save size={18}/> Salvar Dados</button>
                     </div>
                 ) : (
-                    <div className="space-y-8 animate-fade-in">
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div className="bg-slate-900/50 p-5 rounded-3xl border border-slate-700/50 shadow-inner"><p className="text-[9px] text-slate-500 font-black uppercase mb-2 tracking-widest">Agenda</p><p className="text-white font-black text-sm">{editingRes.date.split('-').reverse().join('/')}<br/><span className="text-neon-blue text-lg">{editingRes.time}</span></p></div>
-                            <div className="bg-slate-900/50 p-5 rounded-3xl border border-slate-700/50 shadow-inner"><p className="text-[9px] text-slate-500 font-black uppercase mb-2 tracking-widest">Grade</p><p className="text-white font-black text-sm uppercase leading-tight">{editingRes.laneCount} Pistas<br/>{editingRes.duration} Horas</p></div>
-                            <div className="bg-slate-900/50 p-5 rounded-3xl border border-slate-700/50 shadow-inner"><p className="text-[9px] text-slate-500 font-black uppercase mb-2 tracking-widest">Grupo</p><p className="text-white font-black text-lg leading-tight">{editingRes.peopleCount} <span className="text-[10px] text-slate-500 block">JOGADORES</span></p></div>
-                            <div className="bg-slate-900/50 p-5 rounded-3xl border border-slate-700/50 shadow-inner"><p className="text-[9px] text-slate-500 font-black uppercase mb-2 tracking-widest">Financeiro</p><p className="text-green-400 font-black text-lg leading-tight">{editingRes.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p></div>
+                    <div className="space-y-5 md:space-y-8 animate-fade-in">
+                        {/* Grid de Informações Otimizado */}
+                        <div className="grid grid-cols-2 gap-3 md:gap-4">
+                            <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner">
+                                <p className="text-[7px] md:text-[9px] text-slate-500 font-black uppercase mb-1 md:mb-2 tracking-widest">Agenda</p>
+                                <p className="text-white font-black text-xs md:text-sm">{editingRes.date.split('-').reverse().join('/')}</p>
+                                <p className="text-neon-blue text-sm md:text-lg font-black">{editingRes.time}</p>
+                            </div>
+                            <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner">
+                                <p className="text-[7px] md:text-[9px] text-slate-500 font-black uppercase mb-1 md:mb-2 tracking-widest">Grade</p>
+                                <p className="text-white font-black text-xs md:text-sm uppercase leading-tight">{editingRes.laneCount} Pistas</p>
+                                <p className="text-slate-400 text-xs md:text-base font-bold">{editingRes.duration} Horas</p>
+                            </div>
+                            <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner">
+                                <p className="text-[7px] md:text-[9px] text-slate-500 font-black uppercase mb-1 md:mb-2 tracking-widest">Grupo</p>
+                                <p className="text-white font-black text-sm md:text-xl leading-tight">{editingRes.peopleCount} Jogadores</p>
+                            </div>
+                            <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner">
+                                <p className="text-[7px] md:text-[9px] text-slate-500 font-black uppercase mb-1 md:mb-2 tracking-widest">Financeiro</p>
+                                <p className="text-neon-green font-black text-sm md:text-xl leading-tight">{editingRes.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+                            </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="bg-slate-900/40 p-6 rounded-3xl border border-slate-700 relative overflow-hidden group hover:border-green-500/30 transition-all">
-                                <div className="absolute right-[-15px] top-[-15px] text-white opacity-5 rotate-12 group-hover:scale-110 transition-transform"><UserIcon size={120}/></div>
-                                <h4 className="text-[10px] font-black text-slate-500 uppercase mb-4 flex items-center gap-2 tracking-[0.2em]"><UserIcon size={12} className="text-neon-blue"/> Perfil do Cliente</h4>
-                                <p className="text-white font-black text-xl mb-1 tracking-tight leading-none">{editingRes.clientName}</p>
-                                <p className="text-neon-blue font-mono font-bold text-sm flex items-center gap-2 mt-1 tracking-tighter"><Phone size={14}/> {clientPhones[editingRes.clientId] || 'N/A'}</p>
-                                <button onClick={() => window.open(`https://wa.me/55${(clientPhones[editingRes.clientId]||'').replace(/\D/g,'')}`)} className="mt-6 w-full py-3 bg-green-600/10 text-green-400 border border-green-500/20 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-green-600 hover:text-white transition-all shadow-lg active:scale-95"><MessageCircle size={16}/> Chamar no WhatsApp</button>
-                            </div>
-                            <div className="bg-slate-900/40 p-6 rounded-3xl border border-slate-700 relative overflow-hidden group hover:border-orange-500/30 transition-all">
-                                <div className="absolute right-[-15px] top-[-15px] text-white opacity-5 -rotate-12 group-hover:scale-110 transition-transform"><Utensils size={120}/></div>
-                                <h4 className="text-[10px] font-black text-slate-500 uppercase mb-4 flex items-center gap-2 tracking-[0.2em]"><Store size={12} className="text-orange-500"/> Restaurante & Evento</h4>
-                                <div className="space-y-4">
-                                    <div className="flex items-center gap-3"><div className="p-2 bg-slate-800 rounded-xl text-slate-400 shadow-inner"><FileText size={16}/></div><span className="text-xs font-black text-slate-200 uppercase tracking-widest">{editingRes.eventType}</span></div>
-                                    {editingRes.hasTableReservation ? (
-                                        <>
-                                            <div className="flex items-center gap-3"><div className="p-2 bg-orange-900/30 rounded-xl text-orange-400 shadow-inner"><Utensils size={16}/></div><span className="text-xs font-black text-orange-400 uppercase tracking-widest">MESA P/ {editingRes.tableSeatCount} PESSOAS</span></div>
-                                            {editingRes.birthdayName && <div className="flex items-center gap-3"><div className="p-2 bg-blue-900/30 rounded-xl text-blue-400 shadow-inner"><Cake size={16}/></div><span className="text-xs font-black text-blue-400 uppercase tracking-widest">{editingRes.birthdayName}</span></div>}
-                                        </>
-                                    ) : <p className="text-[10px] text-slate-600 font-bold uppercase italic tracking-widest border-l-2 border-slate-700 pl-3">Sem reserva de mesa</p>}
+                        {/* Pistas Atribuídas */}
+                        {editingRes.status === ReservationStatus.CHECK_IN && (
+                             <div className="bg-slate-900/80 p-4 md:p-6 rounded-2xl border border-slate-700 shadow-xl space-y-3">
+                                <div className="flex justify-between items-center">
+                                    <h4 className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase flex items-center gap-1.5 tracking-widest"><LayoutGrid size={12} className="text-neon-blue"/> Pistas Ativas</h4>
+                                    {canEdit && <button onClick={openEditLanes} className="text-[8px] md:text-[10px] font-black text-neon-blue uppercase flex items-center gap-1 hover:underline"><Pencil size={10}/> Editar</button>}
                                 </div>
-                            </div>
-                        </div>
-
-                        {editingRes.observations && (
-                            <div className="bg-slate-900/80 p-6 rounded-3xl border-l-4 border-neon-blue shadow-2xl">
-                                <p className="text-[10px] font-black text-slate-500 uppercase mb-3 tracking-[0.2em]">Instruções da Equipe</p>
-                                <p className="text-slate-300 text-sm italic font-medium leading-relaxed">"{editingRes.observations}"</p>
-                            </div>
+                                <div className="flex flex-wrap gap-2">
+                                    {editingRes.lanesAssigned && editingRes.lanesAssigned.length > 0 ? (
+                                        editingRes.lanesAssigned.map(l => (
+                                            <div key={l} className="w-10 h-10 md:w-12 md:h-12 bg-neon-blue text-white rounded-xl flex items-center justify-center font-black text-lg md:text-xl shadow-lg border border-white/10">{l}</div>
+                                        ))
+                                    ) : <div className="text-slate-500 italic text-[10px] py-1">Nenhuma pista definida</div>}
+                                </div>
+                             </div>
                         )}
 
-                        <div className="pt-6 border-t border-slate-700/50 flex flex-col md:flex-row justify-between gap-4">
-                            <div className="flex items-center gap-4">
-                                <div className="p-3 bg-slate-900 rounded-2xl border border-slate-700 text-slate-500 shadow-inner"><Clock size={18}/></div>
-                                <div><p className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-1">Registro Criado Em</p><p className="text-xs font-bold text-slate-400">{new Date(editingRes.createdAt).toLocaleString('pt-BR')}</p></div>
+                        {/* Notas do Atendimento */}
+                        {editingRes.observations && (
+                            <div className="bg-slate-900/80 p-4 rounded-2xl border-l-4 border-neon-blue shadow-lg">
+                                <p className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase mb-2 tracking-widest">Observações Equipe</p>
+                                <p className="text-slate-300 text-xs md:text-sm italic font-medium leading-relaxed truncate-2-lines">"{editingRes.observations}"</p>
                             </div>
-                            <div className="flex items-center gap-3">
-                                <span className={`px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest border shadow-lg ${editingRes.paymentStatus === PaymentStatus.PAGO ? 'bg-green-600/10 text-green-500 border-green-500/20' : 'bg-red-600/10 text-red-500 border-red-500/20 animate-pulse'}`}>STATUS PGTO: {editingRes.paymentStatus}</span>
-                                {editingRes.comandaId && <span className="px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest border bg-slate-900 text-slate-400 border-slate-700 shadow-inner">MESA: {editingRes.comandaId}</span>}
-                            </div>
-                        </div>
+                        )}
                     </div>
                 )}
             </div>
 
-            <div className="p-8 bg-slate-900 border-t border-slate-700">
-                {!isEditMode && (
-                    <div className="flex flex-wrap gap-3">
-                        <button disabled={!canEdit} onClick={() => handleStatusChange(ReservationStatus.CONFIRMADA)} className={`px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex-1 transition-all border flex items-center justify-center gap-2 shadow-lg active:scale-95 ${editingRes.status === ReservationStatus.CONFIRMADA ? 'bg-green-600 text-white border-green-500 shadow-green-900/20' : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white'}`}><Check size={18}/> Confirmar</button>
-                        <button disabled={!canEdit} onClick={() => handleStatusChange(ReservationStatus.PENDENTE)} className={`px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex-1 transition-all border flex items-center justify-center gap-2 shadow-lg active:scale-95 ${editingRes.status === ReservationStatus.PENDENTE ? 'bg-yellow-500 text-black border-yellow-500 shadow-yellow-900/20' : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white'}`}><Clock size={18}/> Manter Pendente</button>
-                        <button disabled={!canDelete} onClick={() => setIsCancelling(true)} className="px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex-1 bg-red-600/10 text-red-500 border border-red-500/20 hover:bg-red-600 hover:text-white transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2"><Ban size={18}/> Cancelar Jogo</button>
+            {/* Footer de Ações Redimensionado */}
+            <div className="p-4 md:p-8 bg-slate-900 border-t border-slate-700">
+                {!isEditMode && !isCancelling && (
+                    <div className="flex flex-col gap-2">
+                        <button disabled={!canEdit} onClick={() => handleStatusChange(ReservationStatus.CONFIRMADA)} className={`w-full py-3.5 md:py-5 rounded-xl md:rounded-2xl text-[10px] md:text-xs font-black uppercase tracking-[0.2em] transition-all border flex items-center justify-center gap-2 shadow-xl ${editingRes.status === ReservationStatus.CONFIRMADA ? 'bg-green-600 text-white border-green-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}><Check size={18}/> Confirmar Reserva</button>
+                        <div className="flex gap-2">
+                            <button disabled={!canEdit} onClick={() => handleStatusChange(ReservationStatus.PENDENTE)} className={`flex-1 py-3 md:py-4 rounded-xl md:rounded-2xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all border flex items-center justify-center gap-2 ${editingRes.status === ReservationStatus.PENDENTE ? 'bg-yellow-500 text-black border-yellow-500' : 'bg-slate-800 text-slate-400 border-slate-700'}`}><Clock size={14}/> Pendente</button>
+                            <button disabled={!canDelete} onClick={() => setIsCancelling(true)} className="flex-1 py-3 md:py-4 rounded-xl md:rounded-2xl text-[9px] md:text-[10px] font-black uppercase tracking-widest bg-red-600/10 text-red-500 border border-red-500/20 flex items-center justify-center gap-2"><Ban size={14}/> Cancelar</button>
+                        </div>
                     </div>
                 )}
 
                 {isCancelling && (
-                    <div className="mt-4 p-6 bg-red-950/20 border border-red-500/30 rounded-3xl animate-scale-in">
-                        <label className="text-[10px] font-black text-red-400 uppercase mb-4 block tracking-[0.2em]">Motivo da Anulação</label>
-                        <textarea className="w-full bg-slate-950 border border-slate-700 rounded-2xl p-4 text-white text-sm outline-none focus:border-red-500 transition-all shadow-inner font-medium mb-6" placeholder="Descreva por que a reserva foi cancelada (Ex: Cliente desistiu)..." value={cancelReason} onChange={e => setCancelReason(e.target.value)} />
-                        <div className="flex gap-4 justify-end">
-                            <button onClick={() => setIsCancelling(false)} className="px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-800 text-white border border-slate-700 hover:bg-slate-700 transition">Voltar</button>
-                            <button onClick={async () => { if(!cancelReason.trim()) return; await db.reservations.update({...editingRes, status: ReservationStatus.CANCELADA}, currentUser?.id, `Cancelado: ${cancelReason}`); setEditingRes(null); loadData(true); }} className="px-8 py-3 rounded-xl text-xs font-black uppercase tracking-[0.2em] bg-red-600 text-white shadow-xl shadow-red-900/30 hover:bg-red-500 transition-all active:scale-95">Anular Reserva</button>
+                    <div className="space-y-4 animate-scale-in">
+                        <textarea className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 md:p-4 text-white text-xs md:text-sm focus:border-red-500 transition-all font-medium h-20 md:h-24" placeholder="Motivo do cancelamento..." value={cancelReason} onChange={e => setCancelReason(e.target.value)} />
+                        <div className="flex gap-2">
+                            <button onClick={() => setIsCancelling(false)} className="flex-1 py-3 bg-slate-800 text-white rounded-xl text-[10px] font-black uppercase">Voltar</button>
+                            <button onClick={async () => { if(!cancelReason.trim()) return; await db.reservations.update({...editingRes, status: ReservationStatus.CANCELADA}, currentUser?.id, `Cancelado: ${cancelReason}`); setEditingRes(null); loadData(true); }} className="flex-[2] py-3 bg-red-600 text-white rounded-xl text-[10px] font-black uppercase shadow-lg">Anular Reserva</button>
                         </div>
                     </div>
                 )}
@@ -499,22 +496,25 @@ const Agenda: React.FC = () => {
 
       {showLaneSelector && laneSelectorTargetRes && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/95 p-4 backdrop-blur-xl">
-              <div className="bg-slate-800 border border-slate-600 w-full max-w-sm rounded-[3rem] p-12 shadow-2xl animate-scale-in">
-                  <div className="text-center mb-10">
-                      <div className="w-20 h-20 bg-neon-blue/20 rounded-[2rem] flex items-center justify-center mx-auto mb-6 text-neon-blue border border-neon-blue/30 shadow-inner animate-pulse"><LayoutGrid size={40}/></div>
-                      <h3 className="text-2xl font-black text-white uppercase tracking-tighter leading-none mb-2">Atribuir Pista</h3>
-                      <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Iniciando jogo para {laneSelectorTargetRes.clientName}</p>
+              <div className="bg-slate-800 border border-slate-600 w-full max-w-sm rounded-[2.5rem] p-8 md:p-12 shadow-2xl animate-scale-in">
+                  <div className="text-center mb-8">
+                      <div className="w-16 h-16 md:w-20 md:h-20 bg-neon-blue/20 rounded-2xl flex items-center justify-center mx-auto mb-6 text-neon-blue border border-neon-blue/30 shadow-inner animate-pulse"><LayoutGrid size={32}/></div>
+                      <h3 className="text-xl md:text-2xl font-black text-white uppercase tracking-tighter leading-none mb-2">Atribuir Pista</h3>
+                      <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest truncate">{laneSelectorTargetRes.clientName}</p>
                   </div>
-                  <div className="grid grid-cols-3 gap-4 mb-12">
+                  <div className="grid grid-cols-3 gap-3 md:gap-4 mb-10">
                       {Array.from({ length: settings.activeLanes }).map((_, i) => { 
                           const n = i + 1; 
                           const sel = tempSelectedLanes.includes(n); 
                           return (
-                              <button key={n} onClick={() => setTempSelectedLanes(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n])} className={`h-16 rounded-2xl flex items-center justify-center text-2xl font-black transition-all border-2 shadow-lg active:scale-90 ${sel ? 'bg-neon-blue border-white text-white shadow-blue-500/50' : 'bg-slate-900 border-slate-700 text-slate-600 hover:border-slate-500'}`}>{n}</button>
+                              <button key={n} onClick={() => setTempSelectedLanes(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n])} className={`h-14 md:h-16 rounded-xl md:rounded-2xl flex items-center justify-center text-xl md:text-2xl font-black transition-all border-2 shadow-lg active:scale-90 ${sel ? 'bg-neon-blue border-white text-white shadow-blue-500/50' : 'bg-slate-900 border-slate-700 text-slate-600 hover:border-slate-500'}`}>{n}</button>
                           )
                       })}
                   </div>
-                  <button onClick={saveLaneSelection} className="w-full py-5 bg-green-600 hover:bg-green-500 text-white rounded-[2rem] font-black uppercase text-sm tracking-[0.3em] shadow-xl shadow-green-900/20 transition-all active:scale-95">SALVAR E INICIAR</button>
+                  <div className="flex gap-2">
+                      <button onClick={() => setShowLaneSelector(false)} className="flex-1 py-4 bg-slate-700 text-white rounded-xl md:rounded-2xl font-black uppercase text-[10px] tracking-widest">Voltar</button>
+                      <button onClick={saveLaneSelection} className="flex-[2] py-4 bg-green-600 hover:bg-green-500 text-white rounded-xl md:rounded-2xl font-black uppercase text-[10px] md:text-xs tracking-[0.2em] shadow-xl transition-all active:scale-95">CONFIRMAR</button>
+                  </div>
               </div>
           </div>
       )}
