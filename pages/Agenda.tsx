@@ -147,7 +147,7 @@ const Agenda: React.FC = () => {
 
   useEffect(() => { 
     loadData();
-    const channel = supabase.channel('agenda-realtime-v7')
+    const channel = supabase.channel('agenda-realtime-v8')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => loadData(true))
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -343,8 +343,9 @@ const Agenda: React.FC = () => {
                                <div key={uid} onClick={() => openResModal(res)} className={`relative p-5 rounded-2xl border cursor-pointer hover:scale-[1.02] active:scale-95 transition-all shadow-lg ${isCI ? 'border-green-500 bg-slate-900 opacity-95' : isNS ? 'border-red-500 bg-red-900/10 grayscale opacity-80' : res.status === ReservationStatus.CONFIRMADA ? 'border-neon-blue bg-blue-900/10' : 'border-yellow-500/50 bg-yellow-900/10'}`}>
                                   <div className="flex justify-between items-start mb-4">
                                     <div className="min-w-0 pr-2">
-                                        <h4 className={`font-black truncate text-sm text-white uppercase tracking-tight ${isNS ? 'line-through text-slate-500' : ''}`}>{res.clientName}</h4>
-                                        {phone && <p className="text-[10px] text-slate-500 font-bold flex items-center gap-1 mt-1 font-mono tracking-tighter">{phone}</p>}
+                                        {/* NOME DO CLIENTE: Otimizado de font-black para font-bold e tracking ajustado */}
+                                        <h4 className={`font-bold truncate text-sm text-slate-100 uppercase tracking-wide leading-tight ${isNS ? 'line-through text-slate-500' : ''}`}>{res.clientName}</h4>
+                                        {phone && <p className="text-[10px] text-slate-500 font-medium flex items-center gap-1 mt-1.5 font-mono tracking-tighter">{phone}</p>}
                                         
                                         <div className="flex items-center gap-1.5 mt-4 flex-wrap">
                                             {isCI ? <span className="text-[8px] font-black text-green-400 bg-green-500/20 px-2 py-0.5 rounded-lg border border-green-500/30 uppercase">CHECK-IN</span> : isNS ? <span className="text-[8px] font-black text-red-400 bg-red-600/20 px-2 py-0.5 rounded-lg border border-red-500/30 uppercase tracking-widest">NO-SHOW</span> : <span className={`text-[8px] font-black px-2 py-0.5 rounded-lg border uppercase tracking-widest ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border-neon-blue/30 shadow-blue-900/20 shadow-lg' : 'text-yellow-400 bg-yellow-900/40 border-yellow-500/30 shadow-yellow-900/20 shadow-lg'}`}>{res.status}</span>}
@@ -390,8 +391,8 @@ const Agenda: React.FC = () => {
               <div className="flex items-center gap-3 md:gap-4 flex-1 min-w-0">
                   <div className="w-10 h-10 md:w-12 md:h-12 bg-neon-blue/10 rounded-xl flex items-center justify-center text-neon-blue border border-neon-blue/20 shadow-inner flex-shrink-0"><Info size={20} className="md:w-6 md:h-6"/></div>
                   <div className="min-w-0">
-                      <h3 className="text-base md:text-2xl font-black text-white tracking-tighter uppercase leading-none mb-1 truncate">{editingRes.clientName}</h3>
-                      <p className="text-[8px] md:text-[10px] text-slate-500 font-black uppercase tracking-widest">Reserva #{editingRes.id.slice(0,8)}</p>
+                      <h3 className="text-base md:text-xl font-bold text-white tracking-tight uppercase leading-tight mb-1 truncate">{editingRes.clientName}</h3>
+                      <p className="text-[8px] md:text-[10px] text-slate-500 font-bold uppercase tracking-widest">Reserva #{editingRes.id.slice(0,8)}</p>
                   </div>
               </div>
               <div className="flex items-center gap-2 md:gap-3 ml-2">
@@ -400,7 +401,7 @@ const Agenda: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-4 md:space-y-8 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-4 md:space-y-8 custom-scrollbar bg-slate-800">
                 
                 {isEditMode ? (
                     <div className="space-y-6 animate-fade-in">
@@ -421,21 +422,21 @@ const Agenda: React.FC = () => {
                         {/* Grid de Informações Otimizado */}
                         <div className="grid grid-cols-2 gap-3 md:gap-4">
                             <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner">
-                                <p className="text-[7px] md:text-[9px] text-slate-500 font-black uppercase mb-1 md:mb-2 tracking-widest">Agenda</p>
-                                <p className="text-white font-black text-xs md:text-sm">{editingRes.date.split('-').reverse().join('/')}</p>
+                                <p className="text-[7px] md:text-[9px] text-slate-500 font-bold uppercase mb-1 md:mb-2 tracking-widest">Agenda</p>
+                                <p className="text-white font-bold text-xs md:text-sm">{editingRes.date.split('-').reverse().join('/')}</p>
                                 <p className="text-neon-blue text-sm md:text-lg font-black">{editingRes.time}</p>
                             </div>
                             <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner">
-                                <p className="text-[7px] md:text-[9px] text-slate-500 font-black uppercase mb-1 md:mb-2 tracking-widest">Grade</p>
-                                <p className="text-white font-black text-xs md:text-sm uppercase leading-tight">{editingRes.laneCount} Pistas</p>
+                                <p className="text-[7px] md:text-[9px] text-slate-500 font-bold uppercase mb-1 md:mb-2 tracking-widest">Grade</p>
+                                <p className="text-white font-bold text-xs md:text-sm uppercase leading-tight">{editingRes.laneCount} Pistas</p>
                                 <p className="text-slate-400 text-xs md:text-base font-bold">{editingRes.duration} Horas</p>
                             </div>
                             <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner">
-                                <p className="text-[7px] md:text-[9px] text-slate-500 font-black uppercase mb-1 md:mb-2 tracking-widest">Grupo</p>
-                                <p className="text-white font-black text-sm md:text-xl leading-tight">{editingRes.peopleCount} Jogadores</p>
+                                <p className="text-[7px] md:text-[9px] text-slate-500 font-bold uppercase mb-1 md:mb-2 tracking-widest">Grupo</p>
+                                <p className="text-white font-bold text-sm md:text-xl leading-tight">{editingRes.peopleCount} Jogadores</p>
                             </div>
                             <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner">
-                                <p className="text-[7px] md:text-[9px] text-slate-500 font-black uppercase mb-1 md:mb-2 tracking-widest">Financeiro</p>
+                                <p className="text-[7px] md:text-[9px] text-slate-500 font-bold uppercase mb-1 md:mb-2 tracking-widest">Financeiro</p>
                                 <p className="text-neon-green font-black text-sm md:text-xl leading-tight">{editingRes.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
                             </div>
                         </div>
@@ -444,8 +445,8 @@ const Agenda: React.FC = () => {
                         {editingRes.status === ReservationStatus.CHECK_IN && (
                              <div className="bg-slate-900/80 p-4 md:p-6 rounded-2xl border border-slate-700 shadow-xl space-y-3">
                                 <div className="flex justify-between items-center">
-                                    <h4 className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase flex items-center gap-1.5 tracking-widest"><LayoutGrid size={12} className="text-neon-blue"/> Pistas Ativas</h4>
-                                    {canEdit && <button onClick={openEditLanes} className="text-[8px] md:text-[10px] font-black text-neon-blue uppercase flex items-center gap-1 hover:underline"><Pencil size={10}/> Editar</button>}
+                                    <h4 className="text-[8px] md:text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1.5 tracking-widest"><LayoutGrid size={12} className="text-neon-blue"/> Pistas Ativas</h4>
+                                    {canEdit && <button onClick={openEditLanes} className="text-[8px] md:text-[10px] font-bold text-neon-blue uppercase flex items-center gap-1 hover:underline"><Pencil size={10}/> Editar</button>}
                                 </div>
                                 <div className="flex flex-wrap gap-2">
                                     {editingRes.lanesAssigned && editingRes.lanesAssigned.length > 0 ? (
@@ -460,7 +461,7 @@ const Agenda: React.FC = () => {
                         {/* Notas do Atendimento */}
                         {editingRes.observations && (
                             <div className="bg-slate-900/80 p-4 rounded-2xl border-l-4 border-neon-blue shadow-lg">
-                                <p className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase mb-2 tracking-widest">Observações Equipe</p>
+                                <p className="text-[8px] md:text-[10px] font-bold text-slate-500 uppercase mb-2 tracking-widest">Observações Equipe</p>
                                 <p className="text-slate-300 text-xs md:text-sm italic font-medium leading-relaxed truncate-2-lines">"{editingRes.observations}"</p>
                             </div>
                         )}
@@ -500,7 +501,7 @@ const Agenda: React.FC = () => {
                   <div className="text-center mb-8">
                       <div className="w-16 h-16 md:w-20 md:h-20 bg-neon-blue/20 rounded-2xl flex items-center justify-center mx-auto mb-6 text-neon-blue border border-neon-blue/30 shadow-inner animate-pulse"><LayoutGrid size={32}/></div>
                       <h3 className="text-xl md:text-2xl font-black text-white uppercase tracking-tighter leading-none mb-2">Atribuir Pista</h3>
-                      <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest truncate">{laneSelectorTargetRes.clientName}</p>
+                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest truncate">{laneSelectorTargetRes.clientName}</p>
                   </div>
                   <div className="grid grid-cols-3 gap-3 md:gap-4 mb-10">
                       {Array.from({ length: settings.activeLanes }).map((_, i) => { 
