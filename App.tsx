@@ -1,6 +1,6 @@
 
 import React, { useEffect } from 'react';
-import { HashRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider, useApp } from './contexts/AppContext'; 
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -93,6 +93,7 @@ const AppContent: React.FC = () => {
                     </ProtectedRoute>
                 } />
                 
+                {/* Redirecionamentos de rotas removidas */}
                 <Route path="/dashboard" element={<Navigate to="/agenda" />} />
                 <Route path="/crm" element={<Navigate to="/clientes" />} />
                 <Route path="/funil" element={<Navigate to="/clientes" />} />

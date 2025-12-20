@@ -1,13 +1,11 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 import { db, cleanPhone } from '../services/mockBackend';
-import { Client, Reservation, FunnelStage, User, UserRole, ReservationStatus, LoyaltyTransaction } from '../types';
-import { FUNNEL_STAGES } from '../constants';
-import { Search, MessageCircle, Calendar, Tag, Plus, Users, Loader2, LayoutList, Kanban as KanbanIcon, GripVertical, Pencil, Save, X, Crown, Star, Sparkles, Clock, LayoutGrid, Gift, Coins, History, ArrowDown, ArrowUp, CalendarPlus } from 'lucide-react';
+import { Client, Reservation, FunnelStage, FunnelStageConfig, User, UserRole, ReservationStatus, LoyaltyTransaction, PaymentStatus } from '../types';
+import { Search, MessageCircle, Calendar, Plus, Users, Loader2, LayoutList, Kanban as KanbanIcon, GripVertical, Pencil, Save, X, Crown, Star, Sparkles, Clock, LayoutGrid, Gift, Coins, History, ArrowDown, ArrowUp, CalendarPlus, Check, DollarSign, CheckCircle2, Ban, AlertCircle, MapPin, Cake, UserCheck, Utensils, Trash2, Hash, FileText, Store } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabaseClient';
 
-// Tipos de Classificação
 type ClientTier = 'VIP' | 'FIEL' | 'NOVO';
 
 const CRM: React.FC = () => {
@@ -20,40 +18,41 @@ const CRM: React.FC = () => {
   const [clientMetrics, setClientMetrics] = useState<Record<string, { count: number, tier: ClientTier }>>({});
   const [loading, setLoading] = useState(true);
   
-  // Loyalty State
+  const [funnelStages, setFunnelStages] = useState<FunnelStageConfig[]>([]);
+  const [editingStage, setEditingStage] = useState<FunnelStageConfig | null>(null);
+  const [stageForm, setStageForm] = useState({ nome: '', ordem: 0 });
+  const [isSavingStage, setIsSavingStage] = useState(false);
+
   const [loyaltyHistory, setLoyaltyHistory] = useState<LoyaltyTransaction[]>([]);
   const [loadingLoyalty, setLoadingLoyalty] = useState(false);
-  const [adjustPoints, setAdjustPoints] = useState<string>('');
-  const [adjustReason, setAdjustReason] = useState<string>('');
   const [detailTab, setDetailTab] = useState<'INFO' | 'LOYALTY'>('INFO');
 
-  // Auth State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-
-  // Editing State
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Client>>({});
+  const [isUpdatingStage, setIsUpdatingStage] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem('tonapista_auth');
     if (stored) setCurrentUser(JSON.parse(stored));
   }, []);
 
-  // Permission Check
-  const canEditClient = currentUser?.role === UserRole.ADMIN || currentUser?.perm_edit_client;
-  const canCreateReservation = currentUser?.role === UserRole.ADMIN || currentUser?.perm_create_reservation;
+  const isAdmin = currentUser?.role === UserRole.ADMIN;
+  const canEditClient = isAdmin || currentUser?.perm_edit_client;
+  const canCreateReservation = isAdmin || currentUser?.perm_create_reservation;
 
   const fetchData = async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
-        const [clientsData, reservationsData] = await Promise.all([
+        const [clientsData, reservationsData, stagesData] = await Promise.all([
             db.clients.getAll(),
-            db.reservations.getAll()
+            db.reservations.getAll(),
+            db.funnelStages.getAll()
         ]);
-
         setClients(clientsData);
+        // Garante que as etapas fiquem na ordem correta da automação (1 a 5)
+        setFunnelStages(stagesData.sort((a, b) => a.ordem - b.ordem));
 
-        // --- LÓGICA DE CLASSIFICAÇÃO (Últimos 3 meses) ---
         const metrics: Record<string, { count: number, tier: ClientTier }> = {};
         const threeMonthsAgo = new Date();
         threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
@@ -64,68 +63,38 @@ const CRM: React.FC = () => {
                 r.status !== ReservationStatus.CANCELADA &&
                 new Date(r.date) >= threeMonthsAgo
             );
-
-            const totalSlots = recentReservations.reduce((acc, curr) => {
-                return acc + (curr.laneCount * curr.duration);
-            }, 0);
-
+            const totalSlots = recentReservations.reduce((acc, curr) => acc + (curr.laneCount * curr.duration), 0);
             let tier: ClientTier = 'NOVO';
-            if (totalSlots >= 20) {
-                tier = 'VIP';
-            } else if (totalSlots >= 6) {
-                tier = 'FIEL';
-            }
-
+            if (totalSlots >= 20) tier = 'VIP';
+            else if (totalSlots >= 6) tier = 'FIEL';
             metrics[client.id] = { count: totalSlots, tier };
         });
-
         setClientMetrics(metrics);
-
-    } catch (e) {
-        console.error(e);
-    } finally {
-        if (!isBackground) setLoading(false);
-    }
+    } catch (e) { console.error(e); } 
+    finally { if (!isBackground) setLoading(false); }
   };
 
   useEffect(() => {
     fetchData();
-
-    const channel = supabase
-      .channel('crm-updates')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => {
-          console.log('[CRM] Cliente atualizado via Realtime');
-          fetchData(true);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => {
-          console.log('[CRM] Reserva atualizada via Realtime (Recalcular métricas)');
-          fetchData(true);
-      })
+    const channel = supabase.channel('crm-v13-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => fetchData(true))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => fetchData(true))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'etapas_funil' }, () => fetchData(true))
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // Load Client Details (History & Loyalty)
   useEffect(() => {
     const fetchDetails = async () => {
       if (selectedClient) {
-        // Reservation History
-        const allRes = await db.reservations.getAll();
-        const history = allRes.filter(r => {
-            const isMain = r.clientId === selectedClient.id;
-            const isGuest = r.guests?.some(g => cleanPhone(g.phone) === cleanPhone(selectedClient.phone));
-            return isMain || isGuest;
-        });
-        const sortedHistory = history.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        const history = await db.reservations.getByClient(selectedClient.id);
+        const sortedHistory = history.sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time));
         setClientHistory(sortedHistory);
 
-        // Loyalty History
         if (detailTab === 'LOYALTY') {
             setLoadingLoyalty(true);
             try {
-                const loyalty = await db.loyalty.getHistory(selectedClient.id);
-                setLoyaltyHistory(loyalty);
+                setLoyaltyHistory(await db.loyalty.getHistory(selectedClient.id));
             } catch(e) { console.error(e); }
             finally { setLoadingLoyalty(false); }
         }
@@ -134,460 +103,342 @@ const CRM: React.FC = () => {
     fetchDetails();
   }, [selectedClient, detailTab]);
 
-  // Lista Filtrada e Ordenada (A-Z)
   const filteredAndSortedClients = useMemo(() => {
     const filtered = clients.filter(c => 
         c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.phone.includes(searchTerm) ||
-        c.tags.some(t => t.toLowerCase().includes(searchTerm.toLowerCase()))
+        c.phone.includes(searchTerm)
     );
-
     return filtered.sort((a, b) => a.name.localeCompare(b.name));
   }, [clients, searchTerm]);
 
   const openWhatsApp = (phone: string) => {
-    const clean = phone.replace(/\D/g, '');
-    window.open(`https://wa.me/55${clean}`, '_blank');
+    window.open(`https://wa.me/55${phone.replace(/\D/g, '')}`, '_blank');
   };
 
-  const handleDragStart = (e: React.DragEvent, clientId: string) => {
-    if (!canEditClient) return;
-    e.dataTransfer.setData('clientId', clientId);
-  };
-
-  const handleDrop = async (e: React.DragEvent, newStage: FunnelStage) => {
-    e.preventDefault();
-    if (!canEditClient) {
-        alert("Sem permissão para editar status do cliente.");
-        return;
-    }
-
-    const clientId = e.dataTransfer.getData('clientId');
-    if (!clientId) return;
-
-    const updatedClients = clients.map(c => {
-        if (c.id === clientId) return { ...c, funnelStage: newStage };
-        return c;
-    });
-    setClients(updatedClients);
-
-    await db.clients.updateStage(clientId, newStage);
-    fetchData(true);
-  };
-
-  const handleDragOver = (e: React.DragEvent) => e.preventDefault();
-  
-  const getClientsByStage = (stage: FunnelStage) => {
-      return filteredAndSortedClients.filter(c => (c.funnelStage || FunnelStage.NOVO) === stage);
-  };
-
-  const startEditing = () => {
-      if (!canEditClient) return;
-      if (!selectedClient) return;
-      setEditForm({
-          name: selectedClient.name,
-          email: selectedClient.email,
-          phone: selectedClient.phone,
-          tags: selectedClient.tags 
-      });
-      setIsEditing(true);
+  const updateClientStage = async (clientId: string, newStage: string) => {
+    setIsUpdatingStage(true);
+    try {
+        await db.clients.updateStage(clientId, newStage);
+        setClients(prev => prev.map(c => c.id === clientId ? { ...c, funnelStage: newStage } : c));
+        if (selectedClient?.id === clientId) setSelectedClient(prev => prev ? { ...prev, funnelStage: newStage } : null);
+    } catch (e) { alert("Erro ao atualizar fase."); } 
+    finally { setIsUpdatingStage(false); }
   };
 
   const handleSaveClient = async () => {
-      if (!canEditClient) return;
-      if (!selectedClient || !editForm) return;
-      
-      const updatedClient = {
-          ...selectedClient,
-          ...editForm
-      };
-
+      if (!canEditClient || !selectedClient || !editForm) return;
+      const updatedClient = { ...selectedClient, ...editForm } as Client;
       await db.clients.update(updatedClient);
-      
       setSelectedClient(updatedClient);
-      fetchData(true);
       setIsEditing(false);
+      fetchData(true);
   };
 
-  const handleAdjustPoints = async () => {
-      if (!selectedClient || !adjustPoints || !adjustReason) return;
-      
-      const amount = parseInt(adjustPoints);
-      if (isNaN(amount) || amount === 0) return;
-
-      try {
-          await db.loyalty.addTransaction(selectedClient.id, amount, adjustReason, currentUser?.id);
-          
-          // Refresh details
-          const updatedClient = await db.clients.getById(selectedClient.id);
-          if (updatedClient) {
-            setSelectedClient(updatedClient);
-          } else {
-             // Fallback refresh logic since we use phone mostly
-             const clientsData = await db.clients.getAll();
-             const freshClient = clientsData.find(c => c.id === selectedClient.id);
-             if (freshClient) setSelectedClient(freshClient);
-          }
-          
-          // Refresh List
-          const loyalty = await db.loyalty.getHistory(selectedClient.id);
-          setLoyaltyHistory(loyalty);
-          
-          setAdjustPoints('');
-          setAdjustReason('');
-          alert("Pontos atualizados com sucesso!");
-      } catch (e) {
-          console.error(e);
-          alert("Erro ao atualizar pontos.");
-      }
+  const handleAddStage = async () => {
+    const nome = prompt("Nome da nova etapa:");
+    if (!nome) return;
+    setIsSavingStage(true);
+    try {
+      const nextOrdem = funnelStages.length > 0 ? Math.max(...funnelStages.map(s => s.ordem)) + 1 : 1;
+      await db.funnelStages.create(nome, nextOrdem);
+      fetchData(true);
+    } catch (e) { alert("Erro ao criar etapa."); } 
+    finally { setIsSavingStage(false); }
   };
 
-  const handleNewReservationForClient = () => {
-      if (!selectedClient) return;
-      navigate('/agendamento', { state: { prefilledClient: selectedClient } });
+  const handleEditStage = (stage: FunnelStageConfig) => {
+    setEditingStage(stage);
+    setStageForm({ nome: stage.nome, ordem: stage.ordem });
+  };
+
+  const saveStageEdit = async () => {
+    if (!editingStage || !stageForm.nome.trim()) return;
+    setIsSavingStage(true);
+    try {
+      await db.funnelStages.update(editingStage.id, stageForm.nome, stageForm.ordem);
+      setEditingStage(null);
+      fetchData(true);
+    } catch (e) { alert("Erro ao salvar etapa."); }
+    finally { setIsSavingStage(false); }
+  };
+
+  const deleteStage = async (stage: FunnelStageConfig) => {
+    const hasClients = clients.some(c => c.funnelStage === stage.nome);
+    if (hasClients) {
+      alert("Não é possível excluir uma etapa que possui clientes ativos.");
+      return;
+    }
+    if (!window.confirm(`Excluir a etapa "${stage.nome}" permanentemente?`)) return;
+    setIsSavingStage(true);
+    try {
+      await db.funnelStages.delete(stage.id);
+      fetchData(true);
+    } catch (e) { alert("Erro ao excluir."); }
+    finally { setIsSavingStage(false); }
   };
 
   const renderTierBadge = (clientId: string) => {
       const metric = clientMetrics[clientId] || { count: 0, tier: 'NOVO' };
-      
-      switch (metric.tier) {
-          case 'VIP':
-              return (
-                  <div className="flex items-center gap-1 bg-yellow-500/10 text-yellow-500 px-2 py-1 rounded-md text-[10px] font-bold border border-yellow-500/20 shadow-[0_0_10px_rgba(234,179,8,0.1)]">
-                      <Crown size={12} fill="currentColor" />
-                      <span>VIP ({metric.count})</span>
-                  </div>
-              );
-          case 'FIEL':
-              return (
-                  <div className="flex items-center gap-1 bg-blue-500/10 text-blue-400 px-2 py-1 rounded-md text-[10px] font-bold border border-blue-500/20 shadow-[0_0_10px_rgba(59,130,246,0.1)]">
-                      <Star size={12} fill="currentColor" />
-                      <span>Fiel ({metric.count})</span>
-                  </div>
-              );
-          default:
-               return (
-                  <div className="flex items-center gap-1 bg-slate-800 text-slate-500 px-2 py-1 rounded-md text-[10px] font-bold border border-slate-700">
-                      <span>Novo</span>
-                  </div>
-               );
-      }
+      if (metric.tier === 'VIP') return <div className="flex items-center gap-1 bg-yellow-500/10 text-yellow-500 px-2 py-1 rounded-md text-[10px] font-bold border border-yellow-500/20"><Crown size={12} fill="currentColor" /><span>VIP ({metric.count})</span></div>;
+      if (metric.tier === 'FIEL') return <div className="flex items-center gap-1 bg-blue-500/10 text-blue-400 px-2 py-1 rounded-md text-[10px] font-bold border border-blue-500/20"><Star size={12} fill="currentColor" /><span>Fiel ({metric.count})</span></div>;
+      return <div className="flex items-center gap-1 bg-slate-800 text-slate-500 px-2 py-1 rounded-md text-[10px] font-bold border border-slate-700"><span>Novo</span></div>;
   };
 
-  const totalHistorySlots = clientHistory.reduce((acc, h) => acc + (h.laneCount * h.duration), 0);
-
   return (
-    <div className="h-full flex flex-col pb-20 md:pb-0">
-      
-      <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+    <div className="h-[calc(100vh-100px)] md:h-[calc(100vh-140px)] flex flex-col font-sans overflow-hidden">
+      <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4 flex-shrink-0 px-1">
           <div className="flex items-center gap-3 w-full md:w-auto">
-            <h1 className="text-2xl md:text-3xl font-bold text-white">Gestão de Clientes</h1>
-            <span className="bg-slate-800 border border-slate-700 text-neon-blue px-3 py-1 rounded-full text-sm font-bold shadow-sm flex items-center gap-1">
-               <Users size={14} />
-               {loading ? '...' : clients.length}
-            </span>
+            <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">Gestão de Clientes</h1>
+            <div className="bg-slate-800 border border-slate-700 text-neon-blue px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-2 shadow-inner"><Users size={14} /><span>{loading ? '...' : clients.length} cadastrados</span></div>
           </div>
-          
-          <div className="flex bg-slate-800 p-1 rounded-lg border border-slate-700 w-full md:w-auto justify-center md:justify-end">
-             <button 
-               onClick={() => setViewMode('LIST')}
-               className={`flex-1 md:flex-none px-4 py-2 rounded flex items-center justify-center gap-2 text-sm font-bold transition ${viewMode === 'LIST' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}
-             >
-                <LayoutList size={18} /> Lista
-             </button>
-             <button 
-               onClick={() => setViewMode('KANBAN')}
-               className={`flex-1 md:flex-none px-4 py-2 rounded flex items-center justify-center gap-2 text-sm font-bold transition ${viewMode === 'KANBAN' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}
-             >
-                <KanbanIcon size={18} /> Funil
-             </button>
+          <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-700 w-full md:w-auto shadow-lg">
+             <button onClick={() => { setViewMode('LIST'); setSelectedClient(null); }} className={`flex-1 md:flex-none px-6 py-2 rounded-lg flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider transition-all ${viewMode === 'LIST' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}><LayoutList size={16} /> Lista</button>
+             <button onClick={() => { setViewMode('KANBAN'); setSelectedClient(null); }} className={`flex-1 md:flex-none px-6 py-2 rounded-lg flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider transition-all ${viewMode === 'KANBAN' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}><KanbanIcon size={16} /> Funil</button>
           </div>
       </div>
 
-      {viewMode === 'LIST' ? (
-          <div className="flex-1 flex flex-col lg:flex-row gap-6 overflow-hidden min-h-0">
-                <div className={`${selectedClient ? 'hidden lg:flex' : 'flex'} flex-col w-full lg:w-1/3 bg-slate-800 border border-slate-700 rounded-xl shadow-lg overflow-hidden lg:max-h-[850px] max-h-[500px]`}>
-                    <div className="p-4 border-b border-slate-700 bg-slate-900/50">
-                    <div className="relative">
-                        <Search className="absolute left-3 top-3 text-slate-400" size={18} />
-                        <input 
-                        type="text" 
-                        placeholder="Buscar cliente..."
-                        className="w-full bg-slate-700 text-white pl-10 pr-4 py-2 rounded-lg focus:outline-none focus:ring-1 focus:ring-neon-blue"
-                        value={searchTerm}
-                        onChange={e => setSearchTerm(e.target.value)}
-                        />
-                    </div>
-                    </div>
-                    <div className="flex-1 overflow-y-auto max-h-[400px] lg:max-h-full">
-                    {loading ? (
-                        <div className="flex justify-center p-8"><Loader2 className="animate-spin text-neon-blue"/></div>
-                    ) : filteredAndSortedClients.map(client => (
-                        <div 
-                        key={client.id}
-                        onClick={() => { setSelectedClient(client); setIsEditing(false); setDetailTab('INFO'); }}
-                        className={`p-4 border-b border-slate-700 cursor-pointer hover:bg-slate-700/50 transition ${selectedClient?.id === client.id ? 'bg-slate-700/80 border-l-4 border-l-neon-blue' : ''}`}
-                        >
-                        <div className="flex justify-between items-start">
-                            <h3 className="font-bold text-white truncate pr-2 flex-1 text-sm md:text-base">{client.name}</h3>
-                            {renderTierBadge(client.id)}
-                        </div>
-                        <div className="flex justify-between items-center mt-1">
-                             <p className="text-xs md:text-sm text-slate-400">{client.phone}</p>
-                        </div>
-                        </div>
-                    ))}
-                    </div>
-                </div>
-
-                <div className={`${!selectedClient ? 'hidden lg:flex' : 'flex'} flex-1 flex-col bg-slate-800 border border-slate-700 rounded-xl shadow-lg overflow-hidden`}>
-                    {selectedClient ? (
-                    <>
-                        <div className="p-4 md:p-6 border-b border-slate-700 bg-slate-900/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                            <div>
-                                <button onClick={() => setSelectedClient(null)} className="lg:hidden text-slate-400 text-sm mb-2 flex items-center gap-1"><X size={14}/> Fechar Detalhes</button>
-                                {!isEditing ? (
-                                    <>
-                                        <div className="flex flex-wrap items-center gap-2 md:gap-3 mb-1">
-                                            <h2 className="text-xl md:text-2xl font-bold text-white flex items-center gap-2">
-                                                {selectedClient.name}
-                                            </h2>
-                                            {clientMetrics[selectedClient.id]?.tier === 'VIP' && (
-                                                <div className="flex items-center gap-1 bg-yellow-500/20 text-yellow-500 px-2 py-1 rounded-full text-xs font-bold border border-yellow-500/30">
-                                                    <Crown size={12} fill="currentColor"/> VIP
-                                                </div>
-                                            )}
-                                            {clientMetrics[selectedClient.id]?.tier === 'FIEL' && (
-                                                <div className="flex items-center gap-1 bg-blue-500/20 text-blue-400 px-2 py-1 rounded-full text-xs font-bold border border-blue-500/30">
-                                                    <Star size={12} fill="currentColor"/> Fiel
-                                                </div>
-                                            )}
-
-                                            {canEditClient && (
-                                                <button onClick={startEditing} className="text-slate-500 hover:text-white transition p-1 ml-1 bg-slate-800 rounded-full"><Pencil size={14}/></button>
-                                            )}
-                                        </div>
-                                        <p className="text-sm text-slate-400">{selectedClient.email || 'Sem e-mail'}</p>
-                                    </>
-                                ) : (
-                                    <div className="flex items-center gap-2">
-                                        <h2 className="text-xl font-bold text-white">Editando Cliente</h2>
-                                    </div>
-                                )}
+      <div className="flex-1 flex flex-col lg:flex-row gap-6 overflow-hidden min-h-0 relative px-1">
+            <div className={`flex-col overflow-hidden min-h-0 transition-all duration-300 ${viewMode === 'LIST' ? 'lg:w-[400px]' : 'flex-1'} ${selectedClient ? 'hidden lg:flex' : 'flex'} h-full`}>
+                {viewMode === 'LIST' ? (
+                    <div className="flex flex-col bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden h-full">
+                        <div className="p-4 border-b border-slate-700 bg-slate-900/50 flex-shrink-0">
+                            <div className="relative">
+                                <Search className="absolute left-3 top-3.5 text-slate-500" size={18} />
+                                <input type="text" placeholder="Buscar por nome ou fone..." className="w-full bg-slate-700 border border-slate-600 text-white pl-10 pr-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-neon-blue/20 transition-all text-sm font-medium" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                             </div>
-                            
-                            {!isEditing ? (
-                                <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-                                    <button 
-                                        onClick={() => openWhatsApp(selectedClient.phone)}
-                                        className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-medium transition shadow-[0_0_10px_rgba(34,197,94,0.3)]"
-                                    >
-                                        <MessageCircle size={18} /> <span className="hidden xl:inline">WhatsApp</span>
-                                    </button>
-                                    {canCreateReservation && (
-                                        <button 
-                                            onClick={handleNewReservationForClient}
-                                            className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-neon-orange hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-medium transition shadow-lg"
-                                        >
-                                            <CalendarPlus size={18} /> <span>Nova Reserva</span>
-                                        </button>
-                                    )}
-                                </div>
-                            ) : (
-                                <div className="flex gap-2 w-full sm:w-auto">
-                                    <button 
-                                        onClick={() => setIsEditing(false)} 
-                                        className="flex-1 sm:flex-none bg-slate-700 text-white px-3 py-2 rounded hover:bg-slate-600"
-                                    >
-                                        <X size={18} />
-                                    </button>
-                                    <button 
-                                        disabled={!canEditClient}
-                                        onClick={handleSaveClient} 
-                                        className="flex-1 sm:flex-none bg-neon-blue text-white px-3 py-2 rounded hover:bg-blue-600 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        <Save size={18} /> Salvar
-                                    </button>
-                                </div>
-                            )}
                         </div>
-
-                        {/* TABS DE DETALHE */}
-                        {!isEditing && (
-                            <div className="flex border-b border-slate-700 bg-slate-800">
-                                <button 
-                                    onClick={() => setDetailTab('INFO')}
-                                    className={`flex-1 py-3 text-sm font-bold border-b-2 transition ${detailTab === 'INFO' ? 'border-neon-blue text-white bg-slate-700/50' : 'border-transparent text-slate-400 hover:text-white'}`}
-                                >
-                                    Dados e Histórico
-                                </button>
-                                <button 
-                                    onClick={() => setDetailTab('LOYALTY')}
-                                    className={`flex-1 py-3 text-sm font-bold border-b-2 transition flex items-center justify-center gap-2 ${detailTab === 'LOYALTY' ? 'border-neon-orange text-white bg-slate-700/50' : 'border-transparent text-slate-400 hover:text-white'}`}
-                                >
-                                    <Gift size={16}/> Fidelidade 
-                                    <span className="bg-slate-900 text-[10px] px-1.5 rounded-full text-slate-300">{selectedClient.loyaltyBalance || 0}</span>
-                                </button>
+                        <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-800/20">
+                        {loading ? <div className="flex justify-center p-12"><Loader2 className="animate-spin text-neon-blue" size={32}/></div> : filteredAndSortedClients.length === 0 ? <div className="text-center p-12 text-slate-500 text-sm italic">Nenhum cliente encontrado</div> : filteredAndSortedClients.map(client => (
+                            <div key={client.id} onClick={() => { setSelectedClient(client); setIsEditing(false); setDetailTab('INFO'); }} className={`p-4 border-b border-slate-700/50 cursor-pointer hover:bg-slate-700/30 transition-colors group ${selectedClient?.id === client.id ? 'bg-slate-700/80 border-l-4 border-l-neon-blue shadow-inner' : ''}`}>
+                                <div className="flex justify-between items-start mb-1">
+                                    <h3 className={`font-bold truncate pr-2 flex-1 text-sm ${selectedClient?.id === client.id ? 'text-neon-blue' : 'text-slate-200 group-hover:text-white'}`}>{client.name}</h3>
+                                    {renderTierBadge(client.id)}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <p className="text-xs text-slate-500 font-mono">{client.phone}</p>
+                                    <span className="w-1 h-1 rounded-full bg-slate-700"></span>
+                                    <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-tight">{client.funnelStage || 'Sem Etapa'}</p>
+                                </div>
+                            </div>
+                        ))}
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex-1 overflow-x-auto custom-scrollbar h-full bg-slate-900/10 rounded-2xl border border-slate-800/50">
+                        {loading ? <div className="flex justify-center items-center h-full"><Loader2 className="animate-spin text-neon-blue" size={48} /></div> : (
+                            <div className="flex gap-4 h-full min-w-max pb-4 px-2">
+                                {funnelStages.map((stage) => {
+                                    const stageClients = filteredAndSortedClients.filter(c => (c.funnelStage || '') === stage.nome);
+                                    return (
+                                        <div key={stage.id} onDragOver={(e) => e.preventDefault()} onDrop={async (e) => { e.preventDefault(); const id = e.dataTransfer.getData('clientId'); if(id) await updateClientStage(id, stage.nome); }} className={`w-[300px] bg-slate-800/40 rounded-2xl border border-slate-700 flex flex-col transition-all hover:border-slate-600 shadow-sm ${selectedClient?.funnelStage === stage.nome ? 'ring-2 ring-neon-blue/20 bg-slate-800/60' : ''}`}>
+                                            <div className="p-4 border-b border-slate-700/50 flex justify-between items-center sticky top-0 bg-slate-800 rounded-t-2xl z-10">
+                                                <div className="flex flex-col min-w-0">
+                                                    <span className="font-bold text-slate-200 uppercase text-[10px] tracking-widest truncate">{stage.nome}</span>
+                                                    <span className="text-[9px] text-slate-500 font-semibold uppercase">{stageClients.length} leads</span>
+                                                </div>
+                                                {isAdmin && (
+                                                    <div className="flex items-center gap-1">
+                                                        <button onClick={() => handleEditStage(stage)} className="p-1.5 text-slate-500 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"><Pencil size={12}/></button>
+                                                        <button onClick={() => deleteStage(stage)} className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"><Trash2 size={12}/></button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="p-3 space-y-3 flex-1 overflow-y-auto custom-scrollbar min-h-[200px]">
+                                                {stageClients.length === 0 ? <div className="h-20 flex items-center justify-center border-2 border-dashed border-slate-700/30 rounded-xl text-[10px] text-slate-600 uppercase font-bold tracking-widest">Vazio</div> : stageClients.map(client => (
+                                                <div key={client.id} draggable onDragStart={(e) => { e.dataTransfer.setData('clientId', client.id); }} onClick={() => { setSelectedClient(client); setIsEditing(false); setDetailTab('INFO'); }} className={`bg-slate-700/80 p-4 rounded-xl shadow-md border transition-all group relative cursor-pointer ${selectedClient?.id === client.id ? 'border-neon-blue ring-2 ring-neon-blue/20 bg-slate-700' : 'border-slate-600 hover:border-slate-500 hover:bg-slate-700'}`}>
+                                                    <div className="flex justify-between items-start mb-1 gap-2">
+                                                        <h4 className={`font-bold text-sm truncate leading-tight flex-1 ${selectedClient?.id === client.id ? 'text-neon-blue' : 'text-white'}`}>{client.name}</h4>
+                                                        <GripVertical className="text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" size={14} />
+                                                    </div>
+                                                    <p className="text-[11px] text-slate-400 font-mono">{client.phone}</p>
+                                                </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         )}
-
-                        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 md:space-y-8">
-                            
-                            {isEditing ? (
-                                <div className="space-y-4 animate-fade-in bg-slate-900/30 p-4 rounded-lg border border-slate-700">
-                                    <div><label className="block text-xs text-slate-400 mb-1">Nome Completo</label><input className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} /></div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div><label className="block text-xs text-slate-400 mb-1">Telefone</label><input className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" value={editForm.phone} onChange={e => setEditForm({...editForm, phone: e.target.value})} /></div>
-                                        <div><label className="block text-xs text-slate-400 mb-1">E-mail</label><input className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" value={editForm.email} onChange={e => setEditForm({...editForm, email: e.target.value})} /></div>
-                                    </div>
-                                    <div><label className="block text-xs text-slate-400 mb-1">Tags (separadas por vírgula)</label><input className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" value={editForm.tags?.join(', ')} onChange={e => setEditForm({...editForm, tags: e.target.value.split(',').map(t => t.trim()).filter(Boolean)})} placeholder="Ex: VIP, Empresa, Aniversário" /></div>
-                                </div>
-                            ) : detailTab === 'INFO' ? (
-                                <>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                        <div className="bg-slate-900 p-4 rounded-lg border border-slate-700">
-                                            <p className="text-slate-500 text-xs uppercase font-bold">Telefone</p>
-                                            <p className="text-white font-mono text-sm md:text-base">{selectedClient.phone}</p>
-                                        </div>
-                                        <div className="bg-slate-900 p-4 rounded-lg border border-slate-700 relative overflow-hidden">
-                                            <p className="text-slate-500 text-xs uppercase font-bold relative z-10">Classificação</p>
-                                            <div className="relative z-10 mt-1 flex items-center gap-2">
-                                                {clientMetrics[selectedClient.id]?.tier === 'VIP' ? <span className="text-yellow-500 font-bold flex items-center gap-1 text-sm md:text-base"><Crown size={16} fill="currentColor"/> VIP ({clientMetrics[selectedClient.id].count})</span> : clientMetrics[selectedClient.id]?.tier === 'FIEL' ? <span className="text-blue-400 font-bold flex items-center gap-1 text-sm md:text-base"><Star size={16} fill="currentColor"/> FIEL ({clientMetrics[selectedClient.id].count})</span> : <span className="text-slate-400 font-bold flex items-center gap-1 text-sm md:text-base"><Sparkles size={16}/> NOVO / OCASIONAL</span>}
-                                            </div>
-                                        </div>
-                                        <div className="bg-slate-900 p-4 rounded-lg border border-slate-700 sm:col-span-2 lg:col-span-1">
-                                            <p className="text-slate-500 text-xs uppercase font-bold">Último contato</p>
-                                            <p className="text-white text-sm md:text-base">{new Date(selectedClient.lastContactAt).toLocaleDateString('pt-BR')}</p>
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <h3 className="text-base md:text-lg font-bold text-white mb-3 flex items-center gap-2"><Tag size={18} className="text-neon-blue"/> Tags</h3>
-                                        <div className="flex flex-wrap gap-2">{selectedClient.tags.map(t => <span key={t} className="bg-neon-blue/10 text-neon-blue border border-neon-blue/30 px-3 py-1 rounded-full text-xs md:text-sm">{t}</span>)}{selectedClient.tags.length === 0 && <span className="text-slate-500 italic text-sm">Sem tags.</span>}</div>
-                                    </div>
-
-                                    <div>
-                                        <h3 className="text-base md:text-lg font-bold text-white mb-3 flex items-center gap-2"><Calendar size={18} className="text-neon-orange"/> Histórico <span className="text-xs md:text-sm font-normal text-slate-400 ml-2">({clientHistory.length} pedidos / {totalHistorySlots} horas totais)</span></h3>
-                                        <div className="space-y-2">
-                                        {clientHistory.length === 0 ? <p className="text-slate-500 italic">Nenhuma reserva encontrada.</p> : clientHistory.map(h => (
-                                            <div key={h.id} className="flex flex-col md:flex-row md:items-center justify-between bg-slate-700/30 p-3 rounded-lg border border-slate-700 gap-2">
-                                                <div>
-                                                    <div className="flex items-center gap-2"><span className="text-white font-medium text-sm md:text-base">{new Date(h.date).toLocaleDateString('pt-BR')}</span><span className="text-slate-400">|</span><span className="text-slate-300 text-sm">{h.eventType}</span></div>
-                                                    {h.clientId !== selectedClient.id && <span className="text-[10px] uppercase text-neon-blue font-bold bg-neon-blue/10 px-1 rounded mt-1 inline-block">Segundo Responsável</span>}
-                                                </div>
-                                                <div className="flex flex-wrap items-center gap-2 md:gap-4 md:justify-end">
-                                                     <div className="flex items-center gap-2 text-[10px] md:text-xs text-slate-400 bg-slate-800/50 px-2 py-1 rounded border border-slate-600"><span className="flex items-center gap-1"><LayoutGrid size={12}/> {h.laneCount}</span><span>x</span><span className="flex items-center gap-1"><Clock size={12}/> {h.duration}h</span><span>=</span><span className="text-white font-bold">{(h.laneCount * h.duration)} reserva(s)</span></div>
-                                                    <div className="text-right"><span className={`text-[10px] md:text-xs px-2 py-1 rounded block ${h.status === 'Confirmada' ? 'bg-green-500/20 text-green-400' : 'bg-slate-600 text-slate-300'}`}>{h.status}</span></div>
-                                                </div>
-                                            </div>
-                                        ))}
-                                        </div>
-                                    </div>
-                                </>
-                            ) : (
-                                // --- FIDELIDADE TAB ---
-                                <div className="space-y-6 animate-fade-in">
-                                    <div className="bg-slate-900 p-6 rounded-xl border border-neon-orange/30 shadow-lg flex flex-col md:flex-row items-center justify-between gap-6">
-                                        <div className="flex items-center gap-4">
-                                            <div className="w-16 h-16 bg-neon-orange/20 rounded-full flex items-center justify-center text-neon-orange border border-neon-orange/50">
-                                                <Coins size={32}/>
-                                            </div>
-                                            <div>
-                                                <p className="text-slate-400 text-sm uppercase font-bold tracking-wider">Saldo Atual</p>
-                                                <h3 className="text-4xl font-bold text-white">{selectedClient.loyaltyBalance || 0} <span className="text-lg text-neon-orange">pts</span></h3>
-                                            </div>
-                                        </div>
-                                        
-                                        {canEditClient && (
-                                            <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 flex flex-col gap-2 w-full md:w-auto">
-                                                <p className="text-xs text-slate-400 font-bold mb-1">Ajuste Manual</p>
-                                                <div className="flex gap-2">
-                                                    <input 
-                                                        type="number" 
-                                                        className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-white w-20 text-sm" 
-                                                        placeholder="+/-"
-                                                        value={adjustPoints}
-                                                        onChange={e => setAdjustPoints(e.target.value)}
-                                                    />
-                                                    <input 
-                                                        type="text" 
-                                                        className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-white w-32 text-sm" 
-                                                        placeholder="Motivo"
-                                                        value={adjustReason}
-                                                        onChange={e => setAdjustReason(e.target.value)}
-                                                    />
-                                                    <button onClick={handleAdjustPoints} className="bg-slate-700 hover:bg-slate-600 text-white px-3 rounded text-sm"><Save size={14}/></button>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    <div>
-                                        <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><History size={20} className="text-slate-400"/> Extrato de Pontos</h3>
-                                        <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden min-h-[200px]">
-                                            {loadingLoyalty ? (
-                                                <div className="flex justify-center py-8"><Loader2 className="animate-spin text-neon-orange"/></div>
-                                            ) : loyaltyHistory.length === 0 ? (
-                                                <div className="text-center py-8 text-slate-500 italic">Nenhuma transação encontrada.</div>
-                                            ) : (
-                                                <div className="divide-y divide-slate-700">
-                                                    {loyaltyHistory.map(t => (
-                                                        <div key={t.id} className="p-4 flex justify-between items-center hover:bg-slate-700/30">
-                                                            <div>
-                                                                <p className="text-white font-medium">{t.description}</p>
-                                                                <p className="text-xs text-slate-500">{new Date(t.createdAt).toLocaleString('pt-BR')}</p>
-                                                            </div>
-                                                            <div className={`font-bold font-mono text-lg flex items-center gap-1 ${t.amount > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                                                {t.amount > 0 ? <ArrowUp size={16}/> : <ArrowDown size={16}/>}
-                                                                {t.amount > 0 ? '+' : ''}{t.amount}
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                        </div>
-                    </>
-                    ) : (
-                    <div className="flex-1 flex flex-col items-center justify-center text-slate-500 p-8">
-                        <Users size={64} className="mb-4 opacity-20" />
-                        <p>Selecione um cliente para ver detalhes</p>
-                    </div>
-                    )}
-                </div>
-          </div>
-      ) : (
-          <div className="flex-1 overflow-x-auto overflow-y-hidden">
-                {loading ? (
-                    <div className="flex justify-center items-center h-full"><Loader2 className="animate-spin text-neon-blue" size={48} /></div>
-                ) : (
-                    <div className="flex gap-4 h-full min-w-[1200px] pb-4 px-4 lg:px-0">
-                        {FUNNEL_STAGES.map((stage) => {
-                            const stageClients = getClientsByStage(stage);
-                            return (
-                                <div key={stage} className="flex-1 min-w-[280px] bg-slate-800/50 rounded-xl border border-slate-700 flex flex-col" onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, stage)}>
-                                    <div className="p-4 border-b border-slate-700 font-bold text-slate-300 flex justify-between items-center sticky top-0 bg-slate-800 rounded-t-xl z-10"><span>{stage}</span><span className="bg-slate-700 text-xs px-2 py-1 rounded-full text-slate-400">{stageClients.length}</span></div>
-                                    <div className="p-3 space-y-3 flex-1 overflow-y-auto">
-                                        {stageClients.map(client => (
-                                        <div key={client.id} draggable onDragStart={(e) => handleDragStart(e, client.id)} className={`bg-slate-700 p-4 rounded-lg shadow-sm border border-slate-600 transition group relative ${canEditClient ? 'cursor-grab active:cursor-grabbing hover:border-neon-blue hover:shadow-md' : 'cursor-default'}`}>
-                                            <div className="flex justify-between items-start mb-2"><h4 className="font-bold text-white text-sm md:text-base">{client.name}</h4>{canEditClient && (<GripVertical className="text-slate-500 opacity-0 group-hover:opacity-100 transition" size={16} />)}</div>
-                                            <p className="text-xs text-slate-400">{client.phone}</p>
-                                            {clientMetrics[client.id]?.tier !== 'NOVO' && (<div className="mt-2">{clientMetrics[client.id]?.tier === 'VIP' ? <span className="text-[10px] bg-yellow-500/10 text-yellow-500 px-1.5 py-0.5 rounded border border-yellow-500/20 font-bold flex items-center gap-1 w-fit"><Crown size={8}/> VIP</span> : <span className="text-[10px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/20 font-bold flex items-center gap-1 w-fit"><Star size={8}/> FIEL</span>}</div>)}
-                                            <p className="text-[10px] md:text-xs text-slate-500 mt-2">Último: {new Date(client.lastContactAt).toLocaleDateString('pt-BR')}</p>
-                                        </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            );
-                        })}
                     </div>
                 )}
-          </div>
-      )}
+            </div>
+
+            <div className={`${!selectedClient ? 'hidden' : 'flex'} flex-col bg-slate-800 border lg:border-l border-slate-700 rounded-2xl lg:rounded-none lg:rounded-tr-2xl lg:rounded-br-2xl shadow-2xl overflow-hidden h-full animate-scale-in transition-all duration-300 ${viewMode === 'LIST' ? 'flex-1' : 'w-full lg:w-[550px] absolute lg:relative right-0 top-0 z-30'} min-h-0`}>
+                {selectedClient ? (
+                <>
+                    <div className="p-4 sm:p-6 md:p-8 border-b border-slate-700 bg-slate-900/60 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-6 flex-shrink-0">
+                        <div className="flex-1 min-w-0 w-full">
+                            <div className="flex items-center gap-3 sm:gap-4 mb-3">
+                                <button onClick={() => setSelectedClient(null)} className="p-2 bg-slate-700/50 text-slate-400 hover:text-white rounded-xl border border-slate-600 transition-colors shadow-sm flex-shrink-0" title="Voltar"><X size={20}/></button>
+                                <div className="h-10 w-[1px] bg-slate-700 mx-1 hidden sm:block"></div>
+                                <div className="min-w-0">
+                                    {!isEditing ? (
+                                        <>
+                                            <div className="flex items-center gap-2">
+                                                <h2 className="text-xl sm:text-2xl md:text-3xl font-extrabold text-white truncate tracking-tight">{selectedClient.name}</h2>
+                                                {canEditClient && <button onClick={() => { setEditForm({ name: selectedClient.name, email: selectedClient.email, phone: selectedClient.phone }); setIsEditing(true); }} className="text-slate-500 hover:text-neon-blue transition-colors p-1.5 bg-slate-800/50 rounded-lg border border-slate-700 flex-shrink-0"><Pencil size={14}/></button>}
+                                            </div>
+                                            <p className="text-xs sm:text-sm text-slate-400 font-medium truncate">{selectedClient.email || 'Sem e-mail'}</p>
+                                        </>
+                                    ) : <h2 className="text-lg sm:text-xl font-bold text-white uppercase tracking-wider text-neon-blue">Editando Cadastro</h2>}
+                                </div>
+                            </div>
+                        </div>
+                        {!isEditing ? (
+                            <div className="flex gap-2 sm:gap-3 w-full sm:w-auto">
+                                <button onClick={() => openWhatsApp(selectedClient.phone)} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-bold transition shadow-lg text-xs sm:text-sm"><MessageCircle size={18} /> WhatsApp</button>
+                                {canCreateReservation && <button onClick={() => navigate('/agendamento', { state: { prefilledClient: selectedClient } })} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-neon-orange hover:bg-orange-600 text-white px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl font-bold transition shadow-lg text-xs sm:text-sm"><CalendarPlus size={18} /> Reservar</button>}
+                            </div>
+                        ) : (
+                            <div className="flex gap-2 sm:gap-3 w-full sm:w-auto">
+                                <button onClick={() => setIsEditing(false)} className="flex-1 sm:flex-none bg-slate-700 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold text-xs sm:text-sm uppercase">Cancelar</button>
+                                <button onClick={handleSaveClient} className="flex-1 sm:flex-none bg-neon-blue text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg text-xs sm:text-sm uppercase"><Save size={18} /> Salvar</button>
+                            </div>
+                        )}
+                    </div>
+
+                    {!isEditing && (
+                        <div className="flex border-b border-slate-700 bg-slate-800/50 p-1 flex-shrink-0">
+                            <button onClick={() => setDetailTab('INFO')} className={`flex-1 py-3 sm:py-4 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all rounded-xl ${detailTab === 'INFO' ? 'bg-slate-700 text-white shadow-inner border border-slate-600' : 'text-slate-500 hover:text-slate-300'}`}>Histórico & Dados</button>
+                            <button onClick={() => setDetailTab('LOYALTY')} className={`flex-1 py-3 sm:py-4 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all rounded-xl flex items-center justify-center gap-1 sm:gap-2 ${detailTab === 'LOYALTY' ? 'bg-slate-700 text-white shadow-inner border border-slate-600' : 'text-slate-500 hover:text-slate-300'}`}><Gift size={16}/> Fidelidade <span className="bg-slate-900 text-[10px] px-2 py-0.5 rounded-full text-neon-orange border border-neon-orange/20 font-bold">{selectedClient.loyaltyBalance || 0} pts</span></button>
+                        </div>
+                    )}
+
+                    <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 custom-scrollbar bg-slate-900/10 min-h-0">
+                        {isEditing ? (
+                            <div className="space-y-6 animate-fade-in max-w-2xl mx-auto">
+                                <div className="bg-slate-900/40 p-6 rounded-2xl border border-slate-700 space-y-4">
+                                    <div><label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Nome Completo</label><input className="w-full bg-slate-800 border border-slate-600 rounded-xl p-4 text-white outline-none focus:ring-2 focus:ring-neon-blue/30 transition-all font-medium" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} /></div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div><label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">WhatsApp / Fone</label><input className="w-full bg-slate-800 border border-slate-600 rounded-xl p-4 text-white outline-none focus:ring-2 focus:ring-neon-blue/30 transition-all font-mono" value={editForm.phone} onChange={e => setEditForm({...editForm, phone: e.target.value})} /></div>
+                                        <div><label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">E-mail</label><input className="w-full bg-slate-800 border border-slate-600 rounded-xl p-4 text-white outline-none focus:ring-2 focus:ring-neon-blue/30 transition-all font-medium" value={editForm.email} onChange={e => setEditForm({...editForm, email: e.target.value})} /></div>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : detailTab === 'INFO' ? (
+                            <div className="space-y-6 sm:space-y-8 animate-fade-in">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="bg-slate-900/30 p-4 sm:p-5 rounded-2xl border border-slate-700/50 shadow-sm"><p className="text-slate-500 text-[10px] uppercase font-bold mb-1">WhatsApp Principal</p><p className="text-white font-mono font-bold text-base sm:text-lg flex items-center gap-3"><MessageCircle size={18} className="text-green-500"/> {selectedClient.phone}</p></div>
+                                    <div className="bg-slate-900/30 p-4 sm:p-5 rounded-2xl border border-slate-700/50 shadow-sm"><p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Última Interação</p><p className="text-white text-base sm:text-lg font-bold flex items-center gap-3"><Clock size={18} className="text-neon-blue"/> {selectedClient.lastContactAt ? new Date(selectedClient.lastContactAt).toLocaleDateString('pt-BR') : 'N/A'}</p></div>
+                                </div>
+
+                                <div>
+                                    <h3 className="text-[10px] font-bold text-slate-400 mb-4 uppercase tracking-widest flex items-center gap-2 border-l-4 border-neon-orange pl-3">Fase no Funil de Vendas</h3>
+                                    <div className="flex flex-wrap gap-2">{funnelStages.map(stage => { const isActive = selectedClient.funnelStage === stage.nome; return (<button key={stage.id} disabled={!canEditClient || isUpdatingStage} onClick={() => updateClientStage(selectedClient.id, stage.nome)} className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all border shadow-sm ${isActive ? 'bg-neon-orange text-white border-neon-orange shadow-orange-900/20' : 'bg-slate-900 text-slate-500 border-slate-700 hover:border-slate-500 hover:text-slate-300'} ${!canEditClient ? 'opacity-50' : 'active:scale-95'}`}>{isActive && <Check size={14} className="inline mr-1"/>}{stage.nome}</button>);})}</div>
+                                </div>
+
+                                <div>
+                                    <h3 className="text-[10px] font-bold text-slate-400 mb-4 uppercase tracking-widest flex items-center gap-2 border-l-4 border-neon-blue pl-3">Histórico de Visitas (Agenda)</h3>
+                                    <div className="space-y-4">
+                                    {clientHistory.length === 0 ? <div className="text-center py-12 bg-slate-900/20 border-2 border-dashed border-slate-700 rounded-3xl text-slate-600 italic font-medium uppercase text-[10px] tracking-widest">Nenhuma reserva registrada</div> : clientHistory.map(res => {
+                                        const isCheckedIn = res.checkedInIds && res.checkedInIds.length > 0;
+                                        const isNoShow = res.noShowIds && res.noShowIds.length > 0;
+                                        const needsPaymentAlert = res.paymentStatus === PaymentStatus.PENDENTE;
+
+                                        let cardStyle = 'border-slate-700 bg-slate-800';
+                                        if (isCheckedIn) cardStyle = 'border-green-500/50 bg-slate-900 opacity-90';
+                                        else if (isNoShow) cardStyle = 'border-red-500/50 bg-red-900/10 grayscale opacity-70';
+                                        else if (res.status === ReservationStatus.CONFIRMADA) cardStyle = 'border-neon-blue/50 bg-blue-900/10';
+                                        else if (res.status === ReservationStatus.PENDENTE) cardStyle = 'border-yellow-500/50 bg-yellow-900/10';
+
+                                        return (
+                                        <div key={res.id} className={`p-4 rounded-xl border shadow-lg transition overflow-hidden group ${cardStyle}`}>
+                                            <div className="flex justify-between items-start mb-3">
+                                                <div className="min-w-0 pr-2">
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <span className="text-sm font-bold text-white tracking-tight">{res.date.split('-').reverse().join('/')}</span>
+                                                        <span className="w-1 h-1 rounded-full bg-slate-700"></span>
+                                                        <span className="text-neon-blue font-bold text-sm">{res.time}</span>
+                                                    </div>
+                                                    
+                                                    {needsPaymentAlert && res.status !== ReservationStatus.CANCELADA && (
+                                                        <div className="mt-1 flex items-center gap-1 text-[10px] bg-red-500/20 text-red-400 border border-red-500/30 px-1.5 py-0.5 rounded font-bold uppercase animate-pulse w-fit">
+                                                            <DollarSign size={10} /> PGTO PENDENTE
+                                                        </div>
+                                                    )}
+
+                                                    <div className="flex items-center gap-3 mt-2 flex-wrap">
+                                                        {isCheckedIn ? <span className="text-[9px] font-bold text-green-400 bg-green-500/20 px-1.5 py-0.5 rounded uppercase border border-green-500/30">CHECK-IN</span> : isNoShow ? <span className="text-[9px] font-bold text-red-400 bg-red-600/20 px-1.5 py-0.5 rounded uppercase border border-red-500/30">NO-SHOW</span> : <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border-neon-blue/30' : res.status === ReservationStatus.PENDENTE ? 'text-yellow-400 bg-yellow-900/40 border-yellow-500/30' : 'text-slate-400 bg-slate-800 border-slate-700'}`}>{res.status}</span>}
+                                                        {res.payOnSite && res.status === ReservationStatus.PENDENTE && (
+                                                            <span className="text-[9px] font-bold text-white bg-slate-600 px-1.5 py-0.5 rounded flex items-center gap-1"><Store size={10}/> Local</span>
+                                                        )}
+                                                        {res.comandaId && (
+                                                            <span className="text-[9px] font-bold text-white bg-purple-600 px-1.5 py-0.5 rounded flex items-center gap-1"><Hash size={10}/> {res.comandaId}</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <div className="text-right">
+                                                    <span className="text-base font-bold text-green-400">{res.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                                    <div className="flex flex-col gap-1 mt-1">
+                                                        <span className="text-[9px] text-slate-500 font-bold uppercase flex items-center justify-end gap-1"><LayoutGrid size={10}/> {res.laneCount} Pistas</span>
+                                                        <span className="text-[9px] text-slate-500 font-bold uppercase flex items-center justify-end gap-1"><Users size={10}/> {res.peopleCount} Pessoas</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {isCheckedIn && res.lanesAssigned && res.lanesAssigned.length > 0 && (
+                                                <div className="flex gap-1.5 mb-3 p-2 bg-slate-900/50 rounded-lg border border-slate-700/50">
+                                                    {res.lanesAssigned.map(l => (
+                                                        <span key={l} className="w-6 h-6 rounded-full bg-neon-blue text-white flex items-center justify-center text-[10px] font-black shadow-sm shadow-blue-500/50 border border-white/10">{l}</span>
+                                                    ))}
+                                                    <span className="text-[9px] text-slate-500 font-bold uppercase ml-1 self-center">Pistas em Uso</span>
+                                                </div>
+                                            )}
+
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2 pt-2 border-t border-slate-700/50">
+                                                <div className="flex items-center gap-2"><div className="p-1 bg-slate-700/50 rounded text-slate-400"><FileText size={12}/></div><span className="text-[10px] text-slate-300 font-medium truncate">{res.eventType}</span></div>
+                                                {res.hasTableReservation && (
+                                                    <div className="flex flex-col gap-1 bg-slate-900/30 p-2 rounded-lg border border-neon-orange/10">
+                                                        <span className="text-[9px] font-bold text-neon-orange uppercase flex items-center gap-1"><Utensils size={10} /> Mesa: {res.tableSeatCount} lug.</span>
+                                                        {res.birthdayName && <span className="text-[9px] text-neon-blue flex items-center gap-1 truncate font-bold"><Cake size={10} /> {res.birthdayName}</span>}
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {res.observations && (
+                                                <div className="mt-3 p-2 bg-slate-950/30 rounded text-[10px] text-slate-400 italic border-l-2 border-slate-700">"{res.observations}"</div>
+                                            )}
+                                        </div>
+                                    )})}
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="space-y-10 animate-fade-in max-w-2xl mx-auto">
+                                <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-8 sm:p-10 rounded-3xl border border-neon-orange/20 shadow-2xl flex flex-col items-center justify-center gap-6 relative overflow-hidden group">
+                                    <div className="absolute top-0 right-0 w-32 h-32 bg-neon-orange/5 rounded-full blur-3xl -mr-10 -mt-10 group-hover:bg-neon-orange/10 transition-colors"></div>
+                                    <div className="w-16 h-16 sm:w-20 sm:h-20 bg-neon-orange/10 rounded-2xl flex items-center justify-center text-neon-orange border border-neon-orange/20 shadow-inner group-hover:rotate-6 transition-transform"><Coins size={44}/></div>
+                                    <div className="text-center relative z-10 font-sans">
+                                        <p className="text-slate-500 text-[10px] sm:text-xs uppercase font-bold tracking-widest mb-2 opacity-70">Saldo Atualizado</p>
+                                        <div className="flex items-baseline justify-center gap-2">
+                                            <h3 className="text-5xl sm:text-6xl font-extrabold text-white tracking-tighter">{selectedClient.loyaltyBalance || 0}</h3>
+                                            <span className="text-lg sm:text-xl text-neon-orange font-bold uppercase tracking-wider">pts</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="space-y-4">
+                                    <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2 border-l-2 border-slate-600 pl-3">Extrato de Movimentações</h3>
+                                    <div className="bg-slate-900/50 rounded-2xl border border-slate-700/50 overflow-hidden shadow-sm">{loadingLoyalty ? (<div className="flex justify-center py-20"><Loader2 className="animate-spin text-neon-orange" size={32}/></div>) : loyaltyHistory.length === 0 ? (<div className="text-center py-16 text-slate-600 italic font-medium uppercase text-xs tracking-widest">Sem movimentações</div>) : (<div className="divide-y divide-slate-800">{loyaltyHistory.map(t => (
+                                        <div key={t.id} className="p-4 sm:p-5 flex justify-between items-center hover:bg-slate-800/40 transition-colors group">
+                                            <div className="min-w-0 pr-4"><p className="text-white font-bold text-sm mb-1 group-hover:text-neon-orange transition-colors truncate">{t.description}</p><p className="text-[10px] text-slate-500 font-bold uppercase flex items-center gap-2"><Clock size={12}/> {new Date(t.createdAt).toLocaleDateString('pt-BR')}</p></div>
+                                            <div className={`font-mono font-bold text-lg sm:text-xl flex items-center gap-1 flex-shrink-0 ${t.amount > 0 ? 'text-green-400' : 'text-red-400'}`}>{t.amount > 0 ? <ArrowUp size={18}/> : <ArrowDown size={18}/>}{Math.abs(t.amount)}</div>
+                                        </div>
+                                    ))}</div>)}</div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </>
+                ) : (
+                <div className="flex-1 flex flex-col items-center justify-center text-slate-700 p-12 text-center font-sans h-full">
+                    <div className="w-24 h-24 bg-slate-800/50 rounded-full flex items-center justify-center mb-6 border border-slate-700/50">
+                        <Users size={48} className="opacity-10" />
+                    </div>
+                    <p className="font-bold uppercase tracking-widest text-xs text-slate-600 max-w-xs leading-loose">Selecione um cliente para visualizar perfil completo e histórico</p>
+                </div>
+                )}
+            </div>
+      </div>
     </div>
   );
 };
