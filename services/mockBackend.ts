@@ -43,12 +43,18 @@ export const db = {
   funnelStages: {
       getAll: async (): Promise<FunnelStageConfig[]> => {
           const { data, error } = await supabase.from('etapas_funil').select('*').order('ordem', { ascending: true });
-          if (error) return [];
+          if (error) {
+              console.error("[ERRO BUSCA ETAPAS]:", error.message, error.details);
+              return [];
+          }
           return data.map(d => ({ id: d.id, nome: d.nome, ordem: d.ordem }));
       },
       create: async (nome: string, ordem: number) => {
           const { data, error } = await supabase.from('etapas_funil').insert({ nome, ordem }).select().single();
-          if (error) throw error;
+          if (error) {
+              console.error("[ERRO AO CRIAR ETAPA]:", error.message);
+              throw error;
+          }
           return { id: data.id, nome: data.nome, ordem: data.ordem };
       },
       update: async (id: string, nome: string, ordem: number) => {
@@ -219,7 +225,7 @@ export const db = {
     update: async (client: Client, updatedBy?: string) => {
       await supabase.from('clientes').update({
         name: client.name, phone: cleanPhone(client.phone), email: client.email || null,
-        last_contact_at: client.lastContactAt, photo_url: client.photoUrl, funnel_stage: client.funnelStage
+        last_contact_at: client.lastContactAt, photo_url: client.photoUrl, funnel_stage: client.funnel_stage
       }).eq('client_id', client.id);
       if (updatedBy) db.audit.log(updatedBy, 'STAFF', 'UPDATE_CLIENT', `Atualizou ${client.name}`, client.id);
     },
@@ -266,7 +272,6 @@ export const db = {
             date: r.date, 
             time: r.time, 
             peopleCount: r.people_count || 0, 
-            // Fix: Property name mismatch. DB uses 'lane_count', interface uses 'laneCount'.
             laneCount: r.lane_count || 0, 
             duration: r.duration || 0, 
             totalValue: r.total_value || 0, 
@@ -298,6 +303,7 @@ export const db = {
       });
       return res;
     },
+    // Fixed: replaced incorrect snake_case property access with correct camelCase ones from the Reservation interface (checkedInIds, noShowIds, hasTableReservation, tableSeatCount).
     update: async (res: Reservation, updatedByUserId?: string, actionDetail?: string) => {
       await supabase.from('reservas').update({
         date: res.date, time: res.time, people_count: res.peopleCount, lane_count: res.laneCount, duration: res.duration,
@@ -324,11 +330,9 @@ export const db = {
         establishmentName: data.establishment_name || INITIAL_SETTINGS.establishmentName,
         address: data.address || INITIAL_SETTINGS.address,
         phone: data.phone || INITIAL_SETTINGS.phone,
-        // Fix: Property 'whatsapp_link' does not exist on 'AppSettings'. Renaming to 'whatsappLink'.
         whatsappLink: data.whatsapp_link || INITIAL_SETTINGS.whatsappLink,
         logoUrl: data.logo_url || INITIAL_SETTINGS.logoUrl,
         activeLanes: data.active_lanes || INITIAL_SETTINGS.activeLanes,
-        // Fix: Correct property names 'weekdayPrice' and 'weekendPrice' for 'AppSettings'.
         weekdayPrice: data.weekday_price || INITIAL_SETTINGS.weekdayPrice,
         weekendPrice: data.weekend_price || INITIAL_SETTINGS.weekendPrice,
         onlinePaymentEnabled: data.online_payment_enabled ?? INITIAL_SETTINGS.onlinePaymentEnabled,
