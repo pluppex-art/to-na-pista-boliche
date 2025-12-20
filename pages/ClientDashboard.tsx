@@ -36,7 +36,8 @@ import {
   ArrowRight,
   CheckCircle,
   AlertTriangle,
-  Timer
+  Timer,
+  Plus
 } from 'lucide-react';
 
 // Subcomponente para o Contador de Pagamento (30 minutos)
@@ -109,6 +110,13 @@ const ClientDashboard: React.FC = () => {
     const interval = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Cálculo da média de avaliação do cliente
+  const averageRating = useMemo(() => {
+      if (feedbacks.length === 0) return 0;
+      const sum = feedbacks.reduce((acc, f) => acc + (f.nota || 0), 0);
+      return sum / feedbacks.length;
+  }, [feedbacks]);
 
   const loadData = async (isBackground = false) => {
       const stored = localStorage.getItem('tonapista_client_auth');
@@ -198,6 +206,29 @@ const ClientDashboard: React.FC = () => {
       finally { setIsSaving(false); }
   };
 
+  // Alteração rápida de nota clicando nas estrelas do cabeçalho
+  const handleQuickFeedback = async (newRating: number) => {
+      if (!client || isSaving || pastReservations.length === 0) return;
+      
+      const latestRes = pastReservations[0];
+      const existing = feedbacks.find(f => f.reserva_id === latestRes.id);
+      
+      setIsSaving(true);
+      try {
+          await db.feedbacks.create({
+              reserva_id: latestRes.id,
+              cliente_id: client.id,
+              nota: newRating,
+              comentario: existing?.comentario || ''
+          });
+          await loadData(true);
+      } catch (e) { 
+          alert("Erro ao atualizar nota rápida.");
+      } finally { 
+          setIsSaving(false); 
+      }
+  };
+
   const handleSendSuggestion = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!client || isSaving) return;
@@ -221,10 +252,7 @@ const ClientDashboard: React.FC = () => {
           alert("Sua ideia foi enviada com sucesso! Obrigado por nos ajudar a melhorar.");
       } catch (e: any) { 
           console.error("Erro técnico detalhado:", e);
-          
-          // Formata a mensagem de erro para não exibir [object Object]
           const errorMsg = e.message || JSON.stringify(e);
-          
           if (e.code === '42501' || errorMsg.includes('security policy')) {
               alert("ERRO DE PERMISSÃO (RLS): O banco de dados recusou o envio. Certifique-se de executar o NOVO SQL (que remove referências a sequências inexistentes) no painel do Supabase.");
           } else {
@@ -291,9 +319,13 @@ const ClientDashboard: React.FC = () => {
               upcoming.push(res);
           }
       });
+      
+      // Ordenação: Criadas mais recentemente no TOPO (createdAt descendente)
+      const sortByNewest = (a: Reservation, b: Reservation) => b.createdAt.localeCompare(a.createdAt);
+
       return { 
-        upcomingReservations: upcoming.sort((a,b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time)), 
-        pastReservations: past.sort((a,b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time)) 
+        upcomingReservations: upcoming.sort(sortByNewest), 
+        pastReservations: past.sort(sortByNewest) 
       };
   }, [history, now]);
 
@@ -313,7 +345,7 @@ const ClientDashboard: React.FC = () => {
   if (!client) return null;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 pb-24 font-sans selection:bg-neon-orange/30">
+    <div className="min-h-screen bg-slate-950 text-slate-200 pb-24 selection:bg-neon-orange/30">
         <header className="bg-slate-900/80 backdrop-blur-md border-b border-slate-800 p-4 sticky top-0 z-40 shadow-xl">
             <div className="max-w-xl mx-auto flex justify-between items-center">
                 <div className="flex items-center gap-3">
@@ -329,7 +361,17 @@ const ClientDashboard: React.FC = () => {
                     )}
                     <h1 className="text-sm font-bold text-white uppercase tracking-tighter">Minha Conta</h1>
                 </div>
-                <button onClick={handleLogout} className="text-slate-500 hover:text-red-400 p-2 transition-colors"><LogOut size={18}/></button>
+                <div className="flex items-center gap-2">
+                    <button 
+                        onClick={() => navigate('/agendamento')} 
+                        className="bg-neon-orange hover:bg-orange-600 text-white font-black text-[10px] px-3 py-1.5 rounded-lg uppercase tracking-tighter flex items-center gap-1 shadow-lg transition-all active:scale-95"
+                    >
+                        <Plus size={14}/> Reserva
+                    </button>
+                    <button onClick={handleLogout} className="text-slate-500 hover:text-red-400 p-2 transition-colors">
+                        <LogOut size={18}/>
+                    </button>
+                </div>
             </div>
         </header>
 
@@ -343,8 +385,34 @@ const ClientDashboard: React.FC = () => {
                             {client.photoUrl ? <img src={client.photoUrl} className="w-full h-full object-cover" /> : <Users size={48}/>}
                         </div>
                         <h2 className="text-2xl font-black text-white tracking-tight mb-2">{client.name}</h2>
-                        <div className={`flex items-center gap-2 px-4 py-1.5 rounded-full border border-current font-black text-[10px] tracking-[0.2em] mb-6 ${tier.color} ${tier.bg}`}>
-                            <tier.icon size={14} /> {tier.label}
+                        
+                        <div className="flex flex-col items-center gap-2 mb-6">
+                            <div className={`flex items-center gap-2 px-4 py-1.5 rounded-full border border-current font-black text-[10px] tracking-[0.2em] ${tier.color} ${tier.bg}`}>
+                                <tier.icon size={14} /> {tier.label}
+                            </div>
+                            
+                            {/* ESTRELAS DA AVALIAÇÃO DO CLIENTE - CLICÁVEIS */}
+                            <div className="flex flex-col items-center">
+                                <div className="flex items-center gap-1.5 mt-1">
+                                    {[1, 2, 3, 4, 5].map((star) => (
+                                        <button
+                                            key={star}
+                                            onClick={() => handleQuickFeedback(star)}
+                                            disabled={isSaving}
+                                            className={`transition-all duration-300 hover:scale-125 active:scale-90 ${isSaving ? 'opacity-50 cursor-wait' : 'cursor-pointer'}`}
+                                            title={`Avaliar com ${star} estrelas`}
+                                        >
+                                            <Star 
+                                                size={16} 
+                                                fill={star <= Math.round(averageRating || 0) ? "#eab308" : "none"} 
+                                                className={star <= Math.round(averageRating || 0) ? "text-yellow-500 drop-shadow-[0_0_5px_rgba(234,179,8,0.3)]" : "text-slate-700"}
+                                                strokeWidth={2}
+                                            />
+                                        </button>
+                                    ))}
+                                </div>
+                                <span className="text-[9px] font-black text-slate-600 mt-2 uppercase tracking-[0.2em]">Toque para alterar sua nota</span>
+                            </div>
                         </div>
                         
                         <div className="grid grid-cols-2 gap-4 w-full">

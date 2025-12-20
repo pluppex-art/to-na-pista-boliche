@@ -18,7 +18,11 @@ const PublicBooking: React.FC = () => {
   const location = useLocation(); 
   const { settings, user: staffUser, loading: appLoading } = useApp();
   
-  const [clientUser, setClientUser] = useState<any>(null);
+  // Inicialização imediata do clientUser para evitar flicker no header
+  const [clientUser, setClientUser] = useState<any>(() => {
+      const stored = localStorage.getItem('tonapista_client_auth');
+      return stored ? JSON.parse(stored) : null;
+  });
   
   const [authMode, setAuthMode] = useState<'REGISTER' | 'LOGIN'>('LOGIN');
   const [isForgotPassMode, setIsForgotPassMode] = useState(false);
@@ -36,7 +40,7 @@ const PublicBooking: React.FC = () => {
 
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [createdReservationIds, setCreatedReservationIds] = useState<string[]>([]);
-  const [clientId, setClientId] = useState<string>('');
+  const [clientId, setClientId] = useState<string>(clientUser?.id || '');
 
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedTimes, setSelectedTimes] = useState<string[]>([]);
@@ -58,9 +62,9 @@ const PublicBooking: React.FC = () => {
     wantsTable: false,
     birthdayName: '',
     tableSeatCount: 0,
-    name: '',
-    whatsapp: '',
-    email: '',
+    name: clientUser?.name || '',
+    whatsapp: clientUser?.phone || '',
+    email: clientUser?.email || '',
     password: '', 
     createAccount: true,
     hasSecondResponsible: false,
@@ -71,29 +75,22 @@ const PublicBooking: React.FC = () => {
 
   const [viewDate, setViewDate] = useState(new Date());
 
+  // Sincroniza dados se o login mudar
   useEffect(() => {
       const storedClient = localStorage.getItem('tonapista_client_auth');
       if (storedClient) {
-          try {
-              const parsedClient = JSON.parse(storedClient);
-              setClientUser(parsedClient);
-              setFormData(prev => ({
-                  ...prev,
-                  name: parsedClient.name,
-                  email: parsedClient.email,
-                  whatsapp: parsedClient.phone,
-                  createAccount: false 
-              }));
-              setClientId(parsedClient.id);
-          } catch (e) {
-              console.error("Error parsing client auth", e);
-          }
-      } else {
-          if (staffUser) {
-              setFormData(prev => ({ ...prev, createAccount: false }));
-          }
+          const parsedClient = JSON.parse(storedClient);
+          setClientUser(parsedClient);
+          setClientId(parsedClient.id);
+          setFormData(prev => ({
+              ...prev,
+              name: parsedClient.name,
+              email: parsedClient.email,
+              whatsapp: parsedClient.phone,
+              createAccount: false 
+          }));
       }
-  }, [staffUser]);
+  }, []);
 
   useEffect(() => {
       if (location.state?.prefilledClient) {
@@ -381,7 +378,6 @@ const PublicBooking: React.FC = () => {
             const phoneClean = formData.whatsapp.replace(/\D/g, '');
             const emailClean = formData.email.trim();
 
-            // VERIFICA SE CLIENTE JÁ EXISTE (PARA EVITAR DUPLICIDADE E ERRO 23502)
             let filters = [];
             if (phoneClean) filters.push(`phone.eq.${phoneClean}`);
             if (emailClean) filters.push(`email.eq.${emailClean}`);
@@ -398,14 +394,12 @@ const PublicBooking: React.FC = () => {
 
             if (existingClient) {
                 if (staffUser) {
-                    // SE FOR EQUIPE, USA O CLIENTE JÁ EXISTENTE E SEGUE
                     setClientId(existingClient.client_id);
                     setFormData(prev => ({ ...prev, name: existingClient.name }));
                     setCurrentStep(c => c + 1);
                     setIsSaving(false);
                     return;
                 } else {
-                    // SE FOR PÚBLICO, OBRIGA LOGIN
                     alert("Identificamos que você já possui cadastro! Por favor, acesse sua conta para continuar.");
                     setAuthMode('LOGIN');
                     if (existingClient.email) setLoginEmail(existingClient.email);
@@ -414,7 +408,6 @@ const PublicBooking: React.FC = () => {
                 }
             }
 
-            // CRIAÇÃO DE NOVO CLIENTE (SOMENTE SE NÃO EXISTIR)
             const newClientData = {
                 id: uuidv4(),
                 name: formData.name,
@@ -668,7 +661,20 @@ const PublicBooking: React.FC = () => {
              settings?.logoUrl ? <img src={settings.logoUrl} className="h-12 md:h-16 object-contain" onError={() => setImgError(true)} /> : <img src="/logo.png" className="h-12 md:h-16 object-contain" onError={() => setImgError(true)} />
            ) : <h1 className="text-2xl font-bold text-neon-orange">{settings?.establishmentName}</h1>}
           <div className="flex items-center gap-4">
-            {staffUser ? <Link to="/dashboard" className="text-neon-blue bg-slate-800 px-3 py-2 rounded-lg text-sm border border-slate-700 flex items-center gap-2"><LayoutDashboard size={16}/> Dashboard</Link> : clientUser ? <Link to="/minha-conta" className="text-neon-green bg-slate-800 px-3 py-2 rounded-lg text-sm border border-slate-700 flex items-center gap-2"><UserIcon size={16}/> Conta</Link> : <Link to="/login" className="text-slate-600 p-2"><Lock size={18}/></Link>}
+            {/* PRIORIDADE NO HEADER: Se for cliente logado, volta para a conta do cliente */}
+            {clientUser ? (
+                <Link to="/minha-conta" className="text-neon-green bg-slate-800 px-3 py-2 rounded-lg text-sm border border-slate-700 flex items-center gap-2 transition hover:bg-slate-700">
+                    <UserIcon size={16}/> Minha Conta
+                </Link>
+            ) : staffUser ? (
+                <Link to="/agenda" className="text-neon-blue bg-slate-800 px-3 py-2 rounded-lg text-sm border border-slate-700 flex items-center gap-2 transition hover:bg-slate-700">
+                    <LayoutDashboard size={16}/> Dashboard
+                </Link>
+            ) : (
+                <Link to="/login" className="text-slate-600 p-2 hover:text-white transition">
+                    <Lock size={18}/>
+                </Link>
+            )}
           </div>
         </div>
       </header>
@@ -703,7 +709,6 @@ const PublicBooking: React.FC = () => {
                 <h2 className="text-xl md:text-2xl font-bold text-white mb-6 flex items-center gap-2 uppercase tracking-tight"><Clock className="text-neon-orange" /> Configuração e Horário</h2>
                 <div className="bg-slate-800/50 p-5 rounded-2xl border border-slate-700 mb-6 space-y-4">
                     
-                    {/* STAFF MANUAL MODE TOGGLE */}
                     {staffUser && (
                         <div className="flex items-center justify-between p-3 bg-neon-blue/10 border border-neon-blue/30 rounded-xl mb-2">
                             <div className="flex items-center gap-2">
@@ -726,7 +731,6 @@ const PublicBooking: React.FC = () => {
                         <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Tipo de Evento</label><select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white" value={formData.type} onChange={e => handleInputChange('type', e.target.value)}>{EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
                     </div>
 
-                    {/* MANUAL FIELDS */}
                     {isManualMode && (
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-slate-700 animate-scale-in">
                             <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Início (HH:MM)</label><input type="time" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white" value={manualStartTime} onChange={e => setManualStartTime(e.target.value)} /></div>
@@ -850,7 +854,6 @@ const PublicBooking: React.FC = () => {
                     <h2 className="text-3xl font-bold text-white mb-2 tracking-tight uppercase">Reserva Iniciada!</h2>
                     <p className="text-slate-400 mb-8 max-w-sm mx-auto text-sm">Quase lá! Para garantir sua pista, precisamos que conclua o pagamento abaixo.</p>
 
-                    {/* ALERTA DE 30 MINUTOS */}
                     <div className="bg-red-500/10 border border-red-500/30 p-5 rounded-2xl mb-8 flex flex-col items-center gap-3 animate-pulse max-w-md mx-auto">
                         <AlertTriangle className="text-red-500" size={32} />
                         <div>
@@ -861,7 +864,6 @@ const PublicBooking: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* RESUMO RÁPIDO NO CHECKOUT */}
                     <div className="bg-slate-800 border border-slate-700 p-6 rounded-2xl mb-8 max-w-sm mx-auto space-y-3 text-left">
                         <div className="flex items-center gap-3 text-slate-300 text-sm"><CalendarIcon size={16} className="text-neon-blue"/><span className="font-bold">{formattedDateDisplay} às {reservationBlocks[0]?.time}</span></div>
                         <div className="flex items-center gap-3 text-slate-300 text-sm"><Hash size={16} className="text-neon-blue"/><span className="font-bold">{formData.lanes} Pista(s) • {formData.people} Pessoas</span></div>

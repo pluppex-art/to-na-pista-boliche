@@ -53,12 +53,14 @@ export const checkHourCapacity = (
     if (r.status === ReservationStatus.CANCELADA) return false;
     if (r.id === excludeReservationId) return false;
 
-    // 2. REGRA DE 30 MINUTOS
+    // 2. REGRA DE 30 MINUTOS (CRÍTICA PARA LIBERAR PISTAS)
+    // Se a reserva está pendente há mais de 30 minutos e não é pagamento no local,
+    // ela NÃO ocupa mais espaço na grade de horários disponível.
     if (r.status === ReservationStatus.PENDENTE && !r.payOnSite && r.createdAt) {
         const created = new Date(r.createdAt);
         const diffMinutes = (now.getTime() - created.getTime()) / (1000 * 60);
         if (diffMinutes >= 30) {
-            return false;
+            return false; // Libera a pista instantaneamente para o site
         }
     }
 

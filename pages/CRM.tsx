@@ -96,7 +96,8 @@ const CRM: React.FC = () => {
     const fetchDetails = async () => {
       if (selectedClient) {
         const history = await db.reservations.getByClient(selectedClient.id);
-        const sortedHistory = history.sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time));
+        // Ordenação: Criadas mais recentemente no TOPO
+        const sortedHistory = history.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         setClientHistory(sortedHistory);
 
         if (detailTab === 'LOYALTY') {
@@ -211,7 +212,7 @@ const CRM: React.FC = () => {
   };
 
   return (
-    <div className="h-[calc(100vh-100px)] md:h-[calc(100vh-140px)] flex flex-col font-sans overflow-hidden">
+    <div className="h-[calc(100vh-100px)] md:h-[calc(100vh-140px)] flex flex-col overflow-hidden">
       <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4 flex-shrink-0 px-1">
           <div className="flex items-center gap-3 w-full md:w-auto">
             <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">Gestão de Clientes</h1>

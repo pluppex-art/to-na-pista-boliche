@@ -1,28 +1,31 @@
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
 import { supabase } from '../services/supabaseClient';
 import { Reservation, ReservationStatus, EventType, UserRole, PaymentStatus } from '../types';
 import { useApp } from '../contexts/AppContext'; 
 import { generateDailySlots, checkHourCapacity } from '../utils/availability'; 
-import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, CheckCircle2, X, AlertTriangle, MessageCircle, Clock, Store, LayoutGrid, Hash, DollarSign, FileText, ClipboardList, MousePointerClick, Wallet, User as UserIcon, Info } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, X, MessageCircle, Clock, Store, LayoutGrid, DollarSign, FileText, Wallet, User as UserIcon, Info, Trash2 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { EVENT_TYPES } from '../constants';
 
-// Componente Interno para o Contador de 30 minutos
-const CountdownBadge: React.FC<{ createdAt: string }> = ({ createdAt }) => {
+// Componente Interno para o Contador de 30 minutos com ação de cancelamento
+const CountdownBadge: React.FC<{ res: Reservation, onExpire?: () => void }> = ({ res, onExpire }) => {
     const [timeLeft, setTimeLeft] = useState<string>("");
+    const [isExpired, setIsExpired] = useState(false);
+    const { user: currentUser } = useApp();
 
     useEffect(() => {
         const updateTimer = () => {
-            const created = new Date(createdAt).getTime();
+            const created = new Date(res.createdAt).getTime();
             const expires = created + 30 * 60 * 1000;
             const now = new Date().getTime();
             const diff = expires - now;
 
             if (diff <= 0) {
                 setTimeLeft("EXPIRADO");
+                setIsExpired(true);
                 return;
             }
 
@@ -34,14 +37,29 @@ const CountdownBadge: React.FC<{ createdAt: string }> = ({ createdAt }) => {
         updateTimer();
         const interval = setInterval(updateTimer, 1000);
         return () => clearInterval(interval);
-    }, [createdAt]);
+    }, [res.createdAt]);
 
-    if (timeLeft === "EXPIRADO") {
-        return <span className="text-[8px] font-black text-red-500 bg-red-500/10 border border-red-500/20 px-1.5 py-0.5 rounded uppercase">Tempo Esgotado</span>;
+    const handleAutoCancel = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (window.confirm(`A reserva de ${res.clientName} expirou. Deseja liberar a pista agora?`)) {
+            await db.reservations.update({ ...res, status: ReservationStatus.CANCELADA }, currentUser?.id, 'Cancelamento Automático (Prazo de 30min excedido)');
+            if (onExpire) onExpire();
+        }
+    };
+
+    if (isExpired) {
+        return (
+            <button 
+                onClick={handleAutoCancel}
+                className="text-[8px] font-black text-white bg-red-600 border border-red-700 px-2 py-1 rounded uppercase flex items-center gap-1 hover:bg-red-500 transition shadow-lg animate-pulse"
+            >
+                <Trash2 size={8}/> Expirou - Liberar Pista
+            </button>
+        );
     }
 
     return (
-        <span className="text-[8px] font-black text-yellow-500 bg-yellow-500/10 border border-yellow-500/30 px-1.5 py-0.5 rounded uppercase flex items-center gap-1 animate-pulse">
+        <span className="text-[8px] font-black text-yellow-500 bg-yellow-500/10 border border-yellow-500/30 px-1.5 py-0.5 rounded uppercase flex items-center gap-1">
             <Clock size={8}/> Cancela em {timeLeft}
         </span>
     );
@@ -76,24 +94,19 @@ const Agenda: React.FC = () => {
   const [cancelReason, setCancelReason] = useState('');
   
   const [unpaidConfirmed, setUnpaidConfirmed] = useState<Reservation[]>([]);
-  const [unresolvedAttendance, setUnresolvedAttendance] = useState<Reservation[]>([]);
 
   const canEdit = currentUser?.role === UserRole.ADMIN || currentUser?.perm_edit_reservation;
   const canDelete = currentUser?.role === UserRole.ADMIN || currentUser?.perm_delete_reservation;
   const canReceivePayment = currentUser?.role === UserRole.ADMIN || currentUser?.perm_receive_payment;
 
-  const getMonthRange = (dateStr: string) => {
-      const [y, m] = dateStr.split('-').map(Number);
-      const start = `${y}-${String(m).padStart(2, '0')}-01`;
-      const lastDay = new Date(y, m, 0).getDate();
-      const end = `${y}-${String(m).padStart(2, '0')}-${lastDay}`;
-      return { start, end };
-  };
-
   const loadData = async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
-      const { start, end } = getMonthRange(selectedDate);
+      const year = parseInt(selectedDate.split('-')[0]);
+      const month = parseInt(selectedDate.split('-')[1]);
+      const start = `${year}-${String(month).padStart(2, '0')}-01`;
+      const end = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`;
+
       const [monthReservations, allClients] = await Promise.all([
           db.reservations.getByDateRange(start, end),
           db.clients.getAll()
@@ -103,7 +116,11 @@ const Agenda: React.FC = () => {
       allClients.forEach(c => { phoneMap[c.id] = c.phone; });
       setClientPhones(phoneMap);
 
-      const dayReservations = monthReservations.filter(r => r.date === selectedDate && r.status !== ReservationStatus.CANCELADA);
+      // Ordenação: Criadas mais recentemente no TOPO
+      const dayReservations = monthReservations
+        .filter(r => r.date === selectedDate && r.status !== ReservationStatus.CANCELADA)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
       setReservations(dayReservations);
 
       let total = 0, pending = 0, confirmed = 0, checkIn = 0, noShow = 0;
@@ -119,16 +136,6 @@ const Agenda: React.FC = () => {
 
       setMetrics({ totalSlots: total, pendingSlots: pending, confirmedSlots: confirmed, checkInSlots: checkIn, noShowSlots: noShow });
 
-      const now = new Date();
-      const unresolved = monthReservations.filter(r => {
-          if (r.status !== ReservationStatus.CONFIRMADA) return false;
-          if (r.checkedInIds && r.checkedInIds.length > 0) return false;
-          if (r.noShowIds && r.noShowIds.length > 0) return false;
-          const startDateTime = new Date(`${r.date}T${r.time}`);
-          return now > new Date(startDateTime.getTime() + 20 * 60000);
-      });
-      setUnresolvedAttendance(unresolved);
-
       const unpaid = monthReservations.filter(r => {
           if (r.date !== selectedDate) return false;
           const isActive = r.status === ReservationStatus.CONFIRMADA || r.status === ReservationStatus.CHECK_IN;
@@ -142,7 +149,7 @@ const Agenda: React.FC = () => {
 
   useEffect(() => { 
     loadData();
-    const channel = supabase.channel('agenda-realtime-v5')
+    const channel = supabase.channel('agenda-realtime-v6')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => loadData(true))
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -264,13 +271,13 @@ const Agenda: React.FC = () => {
       <div className="space-y-2">
         {unpaidConfirmed.length > 0 && (
             <div className="bg-purple-500/10 border border-purple-500/50 rounded-xl p-4 animate-pulse">
-                <h3 className="text-purple-400 font-bold flex items-center gap-2 mb-2"><Wallet size={18} /> Confirmados s/ Pagamento</h3>
+                <h3 className="text-purple-400 font-bold flex items-center gap-2 mb-2 uppercase text-xs tracking-widest"><Wallet size={16} /> Confirmados s/ Pagamento</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3">
                     {unpaidConfirmed.map(r => (
-                        <div key={r.id} onClick={() => openResModal(r)} className="bg-slate-900/90 p-3 rounded border border-purple-500/30 cursor-pointer hover:bg-slate-800 transition">
+                        <div key={r.id} onClick={() => openResModal(r)} className="bg-slate-900/90 p-3 rounded-xl border border-purple-500/30 cursor-pointer hover:bg-slate-800 transition">
                             <div className="flex justify-between items-start mb-1"><span className="text-xs font-bold text-white truncate">{r.clientName}</span><span className="text-[10px] text-green-400 font-bold">{r.totalValue.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</span></div>
                             <span className="text-[10px] text-slate-500">{r.time}</span>
-                            <button onClick={(e) => handleQuickReceive(e, r)} className="w-full mt-2 bg-green-600 hover:bg-green-500 text-white text-[10px] font-bold py-1.5 rounded flex items-center justify-center gap-1"><DollarSign size={12}/> Receber</button>
+                            <button onClick={(e) => handleQuickReceive(e, r)} className="w-full mt-2 bg-green-600 hover:bg-green-500 text-white text-[10px] font-black py-2 rounded-lg flex items-center justify-center gap-1 shadow-md uppercase">Receber</button>
                         </div>
                     ))}
                 </div>
@@ -278,29 +285,29 @@ const Agenda: React.FC = () => {
         )}
       </div>
 
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-4">
-        <div><h1 className="text-3xl font-bold text-white tracking-tight">Dashboard</h1><p className="text-slate-400 text-sm">Gestão de {selectedDate.split('-').reverse().join('/')}</p></div>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-6">
+        <div><h1 className="text-3xl font-black text-white tracking-tight uppercase">Dashboard</h1><p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Gestão de {selectedDate.split('-').reverse().join('/')}</p></div>
         <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
-            <div className="flex items-center gap-4 bg-slate-800 p-2 rounded-lg border border-slate-700 shadow-sm w-full md:w-auto justify-between md:justify-start">
+            <div className="flex items-center gap-4 bg-slate-800 p-2 rounded-2xl border border-slate-700 shadow-xl w-full md:w-auto justify-between md:justify-start">
                 <button onClick={() => { const [y,m,d] = selectedDate.split('-').map(Number); const nd = new Date(y,m-1,d-1); setSelectedDate([nd.getFullYear(),String(nd.getMonth()+1).padStart(2,'0'),String(nd.getDate()).padStart(2,'0')].join('-')); }} className="p-2 hover:bg-slate-700 rounded-full text-slate-300"><ChevronLeft size={20} /></button>
-                <input type="date" className="bg-transparent text-white font-bold text-center focus:outline-none" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}/>
+                <input type="date" className="bg-transparent text-white font-black text-center focus:outline-none uppercase text-xs tracking-widest cursor-pointer" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}/>
                 <button onClick={() => { const [y,m,d] = selectedDate.split('-').map(Number); const nd = new Date(y,m-1,d+1); setSelectedDate([nd.getFullYear(),String(nd.getMonth()+1).padStart(2,'0'),String(nd.getDate()).padStart(2,'0')].join('-')); }} className="p-2 hover:bg-slate-700 rounded-full text-slate-300"><ChevronRight size={20} /></button>
             </div>
-            {currentUser?.perm_create_reservation && <Link to="/agendamento" className="bg-neon-orange hover:bg-orange-500 text-white px-6 py-3 rounded-lg font-bold shadow-lg flex items-center justify-center gap-2 transition transform hover:scale-105 w-full sm:w-auto"><Plus size={20} /> Nova Reserva</Link>}
+            {currentUser?.perm_create_reservation && <Link to="/agendamento" className="bg-neon-orange hover:bg-orange-500 text-white px-8 py-3 rounded-2xl font-black shadow-xl flex items-center justify-center gap-2 transition transform hover:scale-105 w-full sm:w-auto uppercase text-xs tracking-[0.2em]"><Plus size={20} /> Nova Reserva</Link>}
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-         <div className="p-3 rounded-xl border flex items-center justify-between shadow-sm bg-slate-800 border-slate-700"><div className="flex items-center gap-3"><div className="p-2 bg-slate-500/10 rounded-lg text-slate-500"><Calendar size={18} /></div><span className="text-xs uppercase font-bold text-slate-500 hidden sm:inline">Total</span></div><span className="text-xl font-bold text-slate-200">{loading ? '-' : metrics.totalSlots}</span></div>
-         <div className="p-3 rounded-xl border flex items-center justify-between shadow-sm bg-slate-800 border-yellow-500/30"><div className="flex items-center gap-3"><div className="p-2 bg-yellow-500/10 rounded-lg text-yellow-500"><AlertCircle size={18} /></div><span className="text-xs uppercase font-bold text-yellow-500 hidden sm:inline">Pendente</span></div><span className="text-xl font-bold text-yellow-500">{loading ? '-' : metrics.pendingSlots}</span></div>
-         <div className="bg-green-900/20 p-3 rounded-xl border border-green-500/30 flex items-center justify-between shadow-sm"><div className="flex items-center gap-3"><div className="p-2 bg-green-500/20 rounded-lg text-green-400"><Users size={18} /></div><span className="text-xs text-green-400 uppercase font-bold hidden sm:inline">Check-in</span></div><span className="text-xl font-bold text-green-400">{loading ? '-' : metrics.checkInSlots}</span></div>
-         <div className="bg-red-900/20 p-3 rounded-xl border border-red-500/30 flex items-center justify-between shadow-sm"><div className="flex items-center gap-3"><div className="p-2 bg-red-500/20 rounded-lg text-red-400"><Ban size={18} /></div><span className="text-xs text-red-400 uppercase font-bold hidden sm:inline">No-Show</span></div><span className="text-xl font-bold text-red-400">{loading ? '-' : metrics.noShowSlots}</span></div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+         <div className="p-4 rounded-2xl border flex items-center justify-between shadow-xl bg-slate-800 border-slate-700"><div className="flex items-center gap-3"><div className="p-2 bg-slate-500/10 rounded-xl text-slate-500"><Calendar size={20} /></div><span className="text-[10px] uppercase font-black text-slate-500 hidden sm:inline tracking-widest">Total</span></div><span className="text-2xl font-black text-slate-200">{loading ? '-' : metrics.totalSlots}</span></div>
+         <div className="p-4 rounded-2xl border flex items-center justify-between shadow-xl bg-slate-800 border-yellow-500/30"><div className="flex items-center gap-3"><div className="p-2 bg-yellow-500/10 rounded-xl text-yellow-500"><AlertCircle size={20} /></div><span className="text-[10px] uppercase font-black text-yellow-500 hidden sm:inline tracking-widest">Pendente</span></div><span className="text-2xl font-black text-yellow-500">{loading ? '-' : metrics.pendingSlots}</span></div>
+         <div className="bg-green-900/20 p-4 rounded-2xl border border-green-500/30 flex items-center justify-between shadow-xl"><div className="flex items-center gap-3"><div className="p-2 bg-green-500/20 rounded-xl text-green-400"><Users size={20} /></div><span className="text-[10px] text-green-400 uppercase font-black hidden sm:inline tracking-widest">Check-in</span></div><span className="text-2xl font-black text-green-400">{loading ? '-' : metrics.checkInSlots}</span></div>
+         <div className="bg-red-900/20 p-4 rounded-2xl border border-red-500/30 flex items-center justify-between shadow-xl"><div className="flex items-center gap-3"><div className="p-2 bg-red-500/20 rounded-xl text-red-400"><Ban size={20} /></div><span className="text-[10px] text-red-400 uppercase font-black hidden sm:inline tracking-widest">No-Show</span></div><span className="text-2xl font-black text-red-400">{loading ? '-' : metrics.noShowSlots}</span></div>
       </div>
 
-      <div className="flex-1 bg-slate-800 border border-slate-700 rounded-2xl overflow-hidden shadow-2xl flex flex-col min-h-[500px]">
+      <div className="flex-1 bg-slate-800 border border-slate-700 rounded-3xl overflow-hidden shadow-2xl flex flex-col min-h-[500px]">
         {loading ? (<div className="flex-1 flex justify-center items-center"><Loader2 className="animate-spin text-neon-blue" size={48} /></div>) : (
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
-             {generateDailySlots(selectedDate, settings, []).length === 0 ? <div className="flex flex-col items-center justify-center h-full text-slate-500 py-10"><Ban size={48} className="mb-4 opacity-20"/><p>Fechado neste dia.</p></div> : (
+          <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 custom-scrollbar">
+             {generateDailySlots(selectedDate, settings, []).length === 0 ? <div className="flex flex-col items-center justify-center h-full text-slate-500 py-16"><Ban size={64} className="mb-4 opacity-10"/><p className="font-bold uppercase tracking-widest">Fechado neste dia.</p></div> : (
              generateDailySlots(selectedDate, settings, []).map(slot => {
                const currentHourInt = parseInt(slot.time.split(':')[0]);
                const hourReservations = reservations.filter(r => {
@@ -309,13 +316,13 @@ const Agenda: React.FC = () => {
                });
                const lanesOccupied = hourReservations.reduce((acc, curr) => acc + curr.laneCount, 0);
                return (
-                 <div key={slot.time} className="bg-slate-900/50 rounded-xl border border-slate-700 overflow-hidden group">
-                    <div className="bg-slate-900 p-3 flex justify-between items-center border-b border-slate-700">
-                       <div className="flex items-center gap-3"><span className="text-xl font-bold text-neon-blue">{slot.time}</span><div className="h-4 w-[1px] bg-slate-700 mx-2"></div><span className="text-sm text-slate-500">{lanesOccupied} / {settings.activeLanes} Pistas</span></div>
-                       <div className="w-20 h-1.5 bg-slate-800 rounded-full overflow-hidden"><div className={`h-full ${lanesOccupied >= settings.activeLanes ? 'bg-red-500' : 'bg-green-500'}`} style={{width: `${(lanesOccupied / settings.activeLanes) * 100}%`}}></div></div>
+                 <div key={slot.time} className="bg-slate-900/40 rounded-3xl border border-slate-700/50 overflow-hidden group hover:border-slate-600 transition-colors">
+                    <div className="bg-slate-900/80 p-4 px-6 flex justify-between items-center border-b border-slate-700/50 backdrop-blur-sm">
+                       <div className="flex items-center gap-4"><span className="text-2xl font-black text-neon-blue tracking-tighter">{slot.time}</span><div className="h-6 w-[1px] bg-slate-700"></div><span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{lanesOccupied} / {settings.activeLanes} Pistas Ocupadas</span></div>
+                       <div className="w-24 h-2 bg-slate-800 rounded-full overflow-hidden shadow-inner"><div className={`h-full transition-all duration-500 ${lanesOccupied >= settings.activeLanes ? 'bg-red-500' : 'bg-neon-blue'}`} style={{width: `${(lanesOccupied / settings.activeLanes) * 100}%`}}></div></div>
                     </div>
-                    <div className="p-3">
-                       {hourReservations.length === 0 ? <div className="py-2 px-2 text-slate-700 italic text-xs">Sem reservas neste horário</div> : (
+                    <div className="p-4 px-6">
+                       {hourReservations.length === 0 ? <div className="py-4 text-slate-700 italic text-xs font-medium uppercase tracking-widest opacity-40">Sem reservas para este horário</div> : (
                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                            {hourReservations.flatMap(res => {
                              return Array.from({ length: res.laneCount }).map((_, idx) => {
@@ -325,35 +332,35 @@ const Agenda: React.FC = () => {
                                const phone = clientPhones[res.clientId] || '';
                                
                                return (
-                               <div key={uid} onClick={() => openResModal(res)} className={`relative p-4 rounded-xl border cursor-pointer hover:bg-slate-800 transition shadow-sm ${isCI ? 'border-green-500 bg-slate-900 opacity-95' : isNS ? 'border-red-500 bg-red-900/10 grayscale opacity-80' : res.status === ReservationStatus.CONFIRMADA ? 'border-neon-blue bg-blue-900/20' : 'border-yellow-500/50 bg-yellow-900/10'}`}>
-                                  <div className="flex justify-between items-start mb-3">
+                               <div key={uid} onClick={() => openResModal(res)} className={`relative p-5 rounded-2xl border cursor-pointer hover:scale-[1.02] active:scale-95 transition-all shadow-lg ${isCI ? 'border-green-500 bg-slate-900 opacity-95' : isNS ? 'border-red-500 bg-red-900/10 grayscale opacity-80' : res.status === ReservationStatus.CONFIRMADA ? 'border-neon-blue bg-blue-900/10' : 'border-yellow-500/50 bg-yellow-900/10'}`}>
+                                  <div className="flex justify-between items-start mb-4">
                                     <div className="min-w-0 pr-2">
-                                        <h4 className={`font-bold truncate text-sm text-white ${isNS ? 'line-through text-slate-500' : ''}`}>{res.clientName}</h4>
-                                        {phone && <p className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5"><Phone size={10}/> {phone}</p>}
+                                        <h4 className={`font-black truncate text-sm text-white uppercase tracking-tight ${isNS ? 'line-through text-slate-500' : ''}`}>{res.clientName}</h4>
+                                        {phone && <p className="text-[10px] text-slate-500 font-bold flex items-center gap-1 mt-1 font-mono tracking-tighter">{phone}</p>}
                                         
-                                        <div className="flex items-center gap-1.5 mt-3 flex-wrap">
-                                            {isCI ? <span className="text-[8px] font-bold text-green-400 bg-green-500/20 px-1.5 py-0.5 rounded border border-green-500/30 uppercase">CHECK-IN</span> : isNS ? <span className="text-[8px] font-bold text-red-400 bg-red-600/20 px-1.5 py-0.5 rounded border border-red-500/30 uppercase">NO-SHOW</span> : <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border uppercase ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border-neon-blue/20' : 'text-yellow-400 bg-yellow-900/40 border-yellow-500/20'}`}>{res.status}</span>}
+                                        <div className="flex items-center gap-1.5 mt-4 flex-wrap">
+                                            {isCI ? <span className="text-[8px] font-black text-green-400 bg-green-500/20 px-2 py-0.5 rounded-lg border border-green-500/30 uppercase">CHECK-IN</span> : isNS ? <span className="text-[8px] font-black text-red-400 bg-red-600/20 px-2 py-0.5 rounded-lg border border-red-500/30 uppercase tracking-widest">NO-SHOW</span> : <span className={`text-[8px] font-black px-2 py-0.5 rounded-lg border uppercase tracking-widest ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border-neon-blue/30 shadow-blue-900/20 shadow-lg' : 'text-yellow-400 bg-yellow-900/40 border-yellow-500/30 shadow-yellow-900/20 shadow-lg'}`}>{res.status}</span>}
                                             
-                                            {/* CONTAGEM DOS 30 MINUTOS */}
+                                            {/* CONTAGEM DOS 30 MINUTOS E AÇÃO DE EXPIRAÇÃO */}
                                             {res.status === ReservationStatus.PENDENTE && !res.payOnSite && res.createdAt && (
-                                                <CountdownBadge createdAt={res.createdAt} />
+                                                <CountdownBadge res={res} onExpire={() => loadData(true)} />
                                             )}
                                             
-                                            {res.paymentStatus === PaymentStatus.PENDENTE && <span className="text-[8px] font-bold text-red-400 bg-red-500/10 border border-red-500/20 px-1.5 py-0.5 rounded animate-pulse">PAGAMENTO</span>}
+                                            {res.paymentStatus === PaymentStatus.PENDENTE && <span className="text-[8px] font-black text-red-400 bg-red-500/10 border border-red-500/20 px-2 py-0.5 rounded-lg animate-pulse uppercase">Pagamento Pendente</span>}
                                         </div>
                                     </div>
                                     <div className="flex flex-col items-end gap-3">
-                                        <div className="flex gap-1">
-                                            <button disabled={!canEdit} onClick={(e) => handleGranularStatus(e, res, uid, 'CHECK_IN')} className={`w-7 h-7 flex items-center justify-center rounded border transition ${isCI ? 'bg-green-600 text-white border-green-500' : 'bg-slate-800 text-slate-500 border-slate-700 hover:text-green-400'}`}><Check size={14}/></button>
-                                            <button disabled={!canEdit} onClick={(e) => handleGranularStatus(e, res, uid, 'NO_SHOW')} className={`w-7 h-7 flex items-center justify-center rounded border transition ${isNS ? 'bg-red-600 text-white border-red-500' : 'bg-slate-800 text-slate-500 border-slate-700 hover:text-red-400'}`}><Ban size={14}/></button>
+                                        <div className="flex gap-1.5">
+                                            <button disabled={!canEdit} onClick={(e) => handleGranularStatus(e, res, uid, 'CHECK_IN')} className={`w-8 h-8 flex items-center justify-center rounded-xl border transition-all shadow-md ${isCI ? 'bg-green-600 text-white border-green-500' : 'bg-slate-800 text-slate-500 border-slate-700 hover:text-green-400 hover:border-green-400'}`}><Check size={16}/></button>
+                                            <button disabled={!canEdit} onClick={(e) => handleGranularStatus(e, res, uid, 'NO_SHOW')} className={`w-8 h-8 flex items-center justify-center rounded-xl border transition-all shadow-md ${isNS ? 'bg-red-600 text-white border-red-500' : 'bg-slate-800 text-slate-500 border-slate-700 hover:text-red-400 hover:border-red-400'}`}><Ban size={16}/></button>
                                         </div>
-                                        {isCI && res.lanesAssigned && res.lanesAssigned.length > 0 && <div className="w-6 h-6 bg-white/10 rounded-full flex items-center justify-center border border-white/20 text-white font-black text-[10px]">{res.lanesAssigned[0]}</div>}
+                                        {isCI && res.lanesAssigned && res.lanesAssigned.length > 0 && <div className="w-7 h-7 bg-white/10 rounded-full flex items-center justify-center border border-white/20 text-white font-black text-xs shadow-inner">{res.lanesAssigned[0]}</div>}
                                     </div>
                                   </div>
 
-                                  <div className="pt-3 border-t border-slate-700/50 space-y-1 mt-2">
-                                      {res.hasTableReservation && <div className="flex items-center gap-1.5 text-[10px] font-bold text-orange-400 uppercase"><Utensils size={12} /> Mesa: {res.tableSeatCount} Lug.</div>}
-                                      {res.birthdayName && <div className="flex items-center gap-1.5 text-[10px] font-bold text-blue-400 uppercase"><Cake size={12} /> {res.birthdayName}</div>}
+                                  <div className="pt-4 border-t border-slate-700/50 space-y-1.5 mt-2">
+                                      {res.hasTableReservation && <div className="flex items-center gap-1.5 text-[10px] font-black text-orange-400 uppercase tracking-tighter"><Utensils size={14} className="opacity-50"/> MESA: {res.tableSeatCount} LUG.</div>}
+                                      {res.birthdayName && <div className="flex items-center gap-1.5 text-[10px] font-black text-blue-400 uppercase tracking-tighter"><Cake size={14} className="opacity-50"/> {res.birthdayName}</div>}
                                   </div>
                                </div>
                              )});
@@ -370,118 +377,118 @@ const Agenda: React.FC = () => {
 
       {/* MODAL DETALHADO DE RESERVA */}
       {editingRes && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4">
-          <div className="bg-slate-800 border border-slate-600 w-full max-w-2xl rounded-3xl shadow-2xl animate-scale-in flex flex-col max-h-[90vh] overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-xl p-4">
+          <div className="bg-slate-800 border border-slate-600 w-full max-w-2xl rounded-[2.5rem] shadow-2xl animate-scale-in flex flex-col max-h-[90vh] overflow-hidden">
             
-            <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-900/50">
-              <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-neon-blue/10 rounded-full flex items-center justify-center text-neon-blue border border-neon-blue/20"><Info size={20}/></div>
+            <div className="p-8 border-b border-slate-700 flex justify-between items-center bg-slate-900/50">
+              <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-neon-blue/10 rounded-2xl flex items-center justify-center text-neon-blue border border-neon-blue/20 shadow-inner"><Info size={24}/></div>
                   <div>
-                      <h3 className="text-xl font-bold text-white tracking-tighter uppercase">{editingRes.clientName}</h3>
-                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Reserva #{editingRes.id.slice(0,8)}</p>
+                      <h3 className="text-2xl font-black text-white tracking-tighter uppercase leading-none mb-1">{editingRes.clientName}</h3>
+                      <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em]">Reserva #{editingRes.id.slice(0,8)}</p>
                   </div>
               </div>
-              <div className="flex items-center gap-2">
-                  {canEdit && <button onClick={() => setIsEditMode(!isEditMode)} className={`p-2 rounded-xl border transition ${isEditMode ? 'bg-neon-blue text-white border-neon-blue shadow-lg' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`} title="Editar Agendamento"><Pencil size={20}/></button>}
-                  <button onClick={() => setEditingRes(null)} className="text-slate-400 hover:text-white p-2 bg-slate-800 rounded-xl border border-slate-700 transition"><X size={20}/></button>
+              <div className="flex items-center gap-3">
+                  {canEdit && <button onClick={() => setIsEditMode(!isEditMode)} className={`p-3 rounded-2xl border transition-all ${isEditMode ? 'bg-neon-blue text-white border-neon-blue shadow-lg scale-110' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`} title="Editar Agendamento"><Pencil size={20}/></button>}
+                  <button onClick={() => setEditingRes(null)} className="text-slate-400 hover:text-white p-3 bg-slate-800 rounded-2xl border border-slate-700 transition-colors"><X size={24}/></button>
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
                 
                 {isEditMode ? (
-                    <div className="space-y-6 animate-fade-in">
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div className="col-span-2"><label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Data</label><input type="date" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm" value={editForm.date} onChange={e => setEditForm({...editForm, date: e.target.value})} /></div>
-                            <div><label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Hora</label><input type="time" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm" value={editForm.time} onChange={e => setEditForm({...editForm, time: e.target.value})} /></div>
-                            <div><label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Duração (h)</label><input type="number" step="0.5" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm" value={editForm.duration} onChange={e => setEditForm({...editForm, duration: parseFloat(e.target.value)})} /></div>
+                    <div className="space-y-8 animate-fade-in">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                            <div className="col-span-2"><label className="text-[10px] font-black text-slate-500 uppercase block mb-2 tracking-widest">Data do Jogo</label><input type="date" className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white text-sm font-bold shadow-inner" value={editForm.date} onChange={e => setEditForm({...editForm, date: e.target.value})} /></div>
+                            <div><label className="text-[10px] font-black text-slate-500 uppercase block mb-2 tracking-widest">Horário</label><input type="time" className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white text-sm font-bold shadow-inner" value={editForm.time} onChange={e => setEditForm({...editForm, time: e.target.value})} /></div>
+                            <div><label className="text-[10px] font-black text-slate-500 uppercase block mb-2 tracking-widest">Duração (h)</label><input type="number" step="0.5" className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white text-sm font-bold shadow-inner" value={editForm.duration} onChange={e => setEditForm({...editForm, duration: parseFloat(e.target.value)})} /></div>
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                            <div><label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Pistas</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm font-black" value={editForm.laneCount} onChange={e => setEditForm({...editForm, laneCount: parseInt(e.target.value)})} /></div>
-                            <div><label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Pessoas</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm" value={editForm.peopleCount} onChange={e => setEditForm({...editForm, peopleCount: parseInt(e.target.value)})} /></div>
-                            <div><label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Tipo Evento</label><select className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm" value={editForm.eventType} onChange={e => setEditForm({...editForm, eventType: e.target.value as EventType})}>{EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
+                            <div><label className="text-[10px] font-black text-slate-500 uppercase block mb-2 tracking-widest">Pistas</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white text-sm font-black shadow-inner" value={editForm.laneCount} onChange={e => setEditForm({...editForm, laneCount: parseInt(e.target.value)})} /></div>
+                            <div><label className="text-[10px] font-black text-slate-500 uppercase block mb-2 tracking-widest">Pessoas</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white text-sm font-black shadow-inner" value={editForm.peopleCount} onChange={e => setEditForm({...editForm, peopleCount: parseInt(e.target.value)})} /></div>
+                            <div><label className="text-[10px] font-black text-slate-500 uppercase block mb-2 tracking-widest">Tipo Evento</label><select className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white text-sm font-bold shadow-inner" value={editForm.eventType} onChange={e => setEditForm({...editForm, eventType: e.target.value as EventType})}>{EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
                         </div>
-                        <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700 space-y-4">
-                            <label className="flex items-center gap-2 cursor-pointer font-bold text-white text-xs"><input type="checkbox" checked={editForm.hasTableReservation} onChange={e => setEditForm({...editForm, hasTableReservation: e.target.checked})} className="w-4 h-4 accent-neon-orange"/> RESERVAR MESA NO RESTAURANTE</label>
+                        <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-700 space-y-6">
+                            <label className="flex items-center gap-3 cursor-pointer font-black text-white text-xs uppercase tracking-widest"><input type="checkbox" checked={editForm.hasTableReservation} onChange={e => setEditForm({...editForm, hasTableReservation: e.target.checked})} className="w-5 h-5 accent-neon-orange"/> RESERVAR MESA NO RESTAURANTE</label>
                             {editForm.hasTableReservation && (
-                                <div className="grid grid-cols-2 gap-4 pl-6 animate-scale-in">
-                                    <div><label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Lugares Mesa</label><input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2 text-white text-sm" value={editForm.tableSeatCount} onChange={e => setEditForm({...editForm, tableSeatCount: parseInt(e.target.value)})} /></div>
-                                    <div><label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Nome Aniv.</label><input className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2 text-white text-sm" value={editForm.birthdayName} onChange={e => setEditForm({...editForm, birthdayName: e.target.value})} /></div>
+                                <div className="grid grid-cols-2 gap-6 pl-8 border-l-2 border-neon-orange/20 animate-scale-in">
+                                    <div><label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Lugar na Mesa</label><input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white text-sm font-bold" value={editForm.tableSeatCount} onChange={e => setEditForm({...editForm, tableSeatCount: parseInt(e.target.value)})} /></div>
+                                    <div><label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Nome Aniversário</label><input className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white text-sm font-bold" value={editForm.birthdayName} onChange={e => setEditForm({...editForm, birthdayName: e.target.value})} /></div>
                                 </div>
                             )}
                         </div>
-                        <div><label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Observações Operacionais</label><textarea className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm h-24" value={editForm.observations} onChange={e => setEditForm({...editForm, observations: e.target.value})} placeholder="Instruções para a equipe..."/></div>
-                        <button onClick={handleSaveFullEdit} className="w-full py-4 bg-neon-blue text-white rounded-2xl font-bold uppercase text-xs tracking-widest shadow-lg shadow-blue-900/20 flex items-center justify-center gap-2 transition active:scale-95"><Save size={18}/> Salvar Alterações</button>
+                        <div><label className="text-[10px] font-black text-slate-500 uppercase block mb-2 tracking-widest">Notas Operacionais</label><textarea className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white text-sm h-24 font-medium shadow-inner" value={editForm.observations} onChange={e => setEditForm({...editForm, observations: e.target.value})} placeholder="Instruções para a equipe do boliche..."/></div>
+                        <button onClick={handleSaveFullEdit} className="w-full py-5 bg-neon-blue hover:bg-blue-600 text-white rounded-2xl font-black uppercase text-xs tracking-[0.2em] shadow-xl shadow-blue-900/20 flex items-center justify-center gap-3 transition-all active:scale-95"><Save size={20}/> Salvar Agendamento</button>
                     </div>
                 ) : (
-                    <div className="space-y-6 animate-fade-in">
+                    <div className="space-y-8 animate-fade-in">
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700"><p className="text-[10px] text-slate-500 font-bold uppercase mb-1">Data/Hora</p><p className="text-white font-bold text-sm">{editingRes.date.split('-').reverse().join('/')} às {editingRes.time}</p></div>
-                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700"><p className="text-[10px] text-slate-500 font-bold uppercase mb-1">Configuração</p><p className="text-white font-bold text-sm">{editingRes.laneCount} Pistas / {editingRes.duration}h</p></div>
-                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700"><p className="text-[10px] text-slate-500 font-bold uppercase mb-1">Pessoas</p><p className="text-white font-bold text-sm">{editingRes.peopleCount} Jogadores</p></div>
-                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700"><p className="text-[10px] text-slate-500 font-bold uppercase mb-1">Valor Total</p><p className="text-green-400 font-black text-sm">{editingRes.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p></div>
+                            <div className="bg-slate-900/50 p-5 rounded-3xl border border-slate-700/50 shadow-inner"><p className="text-[9px] text-slate-500 font-black uppercase mb-2 tracking-widest">Agenda</p><p className="text-white font-black text-sm">{editingRes.date.split('-').reverse().join('/')}<br/><span className="text-neon-blue text-lg">{editingRes.time}</span></p></div>
+                            <div className="bg-slate-900/50 p-5 rounded-3xl border border-slate-700/50 shadow-inner"><p className="text-[9px] text-slate-500 font-black uppercase mb-2 tracking-widest">Grade</p><p className="text-white font-black text-sm uppercase leading-tight">{editingRes.laneCount} Pistas<br/>{editingRes.duration} Horas</p></div>
+                            <div className="bg-slate-900/50 p-5 rounded-3xl border border-slate-700/50 shadow-inner"><p className="text-[9px] text-slate-500 font-black uppercase mb-2 tracking-widest">Grupo</p><p className="text-white font-black text-lg leading-tight">{editingRes.peopleCount} <span className="text-[10px] text-slate-500 block">JOGADORES</span></p></div>
+                            <div className="bg-slate-900/50 p-5 rounded-3xl border border-slate-700/50 shadow-inner"><p className="text-[9px] text-slate-500 font-black uppercase mb-2 tracking-widest">Financeiro</p><p className="text-green-400 font-black text-lg leading-tight">{editingRes.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p></div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="bg-slate-900/30 p-5 rounded-2xl border border-slate-700 relative overflow-hidden group">
-                                <div className="absolute right-[-10px] top-[-10px] text-white opacity-5 rotate-12 group-hover:scale-110 transition"><UserIcon size={100}/></div>
-                                <h4 className="text-[10px] font-bold text-slate-500 uppercase mb-3 flex items-center gap-2 tracking-widest"><UserIcon size={12}/> Dados do Cliente</h4>
-                                <p className="text-white font-bold text-base mb-1">{editingRes.clientName}</p>
-                                <p className="text-neon-blue font-mono font-bold text-sm flex items-center gap-2"><Phone size={14}/> {clientPhones[editingRes.clientId] || 'N/A'}</p>
-                                <button onClick={() => window.open(`https://wa.me/55${(clientPhones[editingRes.clientId]||'').replace(/\D/g,'')}`)} className="mt-4 w-full py-2 bg-green-600/20 text-green-400 border border-green-500/20 rounded-xl text-[10px] font-bold uppercase flex items-center justify-center gap-2 hover:bg-green-600 hover:text-white transition"><MessageCircle size={14}/> Iniciar WhatsApp</button>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="bg-slate-900/40 p-6 rounded-3xl border border-slate-700 relative overflow-hidden group hover:border-green-500/30 transition-all">
+                                <div className="absolute right-[-15px] top-[-15px] text-white opacity-5 rotate-12 group-hover:scale-110 transition-transform"><UserIcon size={120}/></div>
+                                <h4 className="text-[10px] font-black text-slate-500 uppercase mb-4 flex items-center gap-2 tracking-[0.2em]"><UserIcon size={12} className="text-neon-blue"/> Perfil do Cliente</h4>
+                                <p className="text-white font-black text-xl mb-1 tracking-tight leading-none">{editingRes.clientName}</p>
+                                <p className="text-neon-blue font-mono font-bold text-sm flex items-center gap-2 mt-1 tracking-tighter"><Phone size={14}/> {clientPhones[editingRes.clientId] || 'N/A'}</p>
+                                <button onClick={() => window.open(`https://wa.me/55${(clientPhones[editingRes.clientId]||'').replace(/\D/g,'')}`)} className="mt-6 w-full py-3 bg-green-600/10 text-green-400 border border-green-500/20 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-green-600 hover:text-white transition-all shadow-lg active:scale-95"><MessageCircle size={16}/> Chamar no WhatsApp</button>
                             </div>
-                            <div className="bg-slate-900/30 p-5 rounded-2xl border border-slate-700 relative overflow-hidden group">
-                                <div className="absolute right-[-10px] top-[-10px] text-white opacity-5 -rotate-12 group-hover:scale-110 transition"><Utensils size={100}/></div>
-                                <h4 className="text-[10px] font-bold text-slate-500 uppercase mb-3 flex items-center gap-2 tracking-widest"><Store size={12}/> Restaurante & Evento</h4>
-                                <div className="space-y-3">
-                                    <div className="flex items-center gap-2"><div className="p-1.5 bg-slate-800 rounded-lg text-slate-400"><FileText size={14}/></div><span className="text-xs font-bold text-slate-200">{editingRes.eventType}</span></div>
+                            <div className="bg-slate-900/40 p-6 rounded-3xl border border-slate-700 relative overflow-hidden group hover:border-orange-500/30 transition-all">
+                                <div className="absolute right-[-15px] top-[-15px] text-white opacity-5 -rotate-12 group-hover:scale-110 transition-transform"><Utensils size={120}/></div>
+                                <h4 className="text-[10px] font-black text-slate-500 uppercase mb-4 flex items-center gap-2 tracking-[0.2em]"><Store size={12} className="text-orange-500"/> Restaurante & Evento</h4>
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-3"><div className="p-2 bg-slate-800 rounded-xl text-slate-400 shadow-inner"><FileText size={16}/></div><span className="text-xs font-black text-slate-200 uppercase tracking-widest">{editingRes.eventType}</span></div>
                                     {editingRes.hasTableReservation ? (
                                         <>
-                                            <div className="flex items-center gap-2"><div className="p-1.5 bg-orange-900/30 rounded-lg text-orange-400"><Utensils size={14}/></div><span className="text-xs font-bold text-orange-400">MESA PARA {editingRes.tableSeatCount} PESSOAS</span></div>
-                                            {editingRes.birthdayName && <div className="flex items-center gap-2"><div className="p-1.5 bg-blue-900/30 rounded-lg text-blue-400"><Cake size={14}/></div><span className="text-xs font-bold text-blue-400">{editingRes.birthdayName}</span></div>}
+                                            <div className="flex items-center gap-3"><div className="p-2 bg-orange-900/30 rounded-xl text-orange-400 shadow-inner"><Utensils size={16}/></div><span className="text-xs font-black text-orange-400 uppercase tracking-widest">MESA P/ {editingRes.tableSeatCount} PESSOAS</span></div>
+                                            {editingRes.birthdayName && <div className="flex items-center gap-3"><div className="p-2 bg-blue-900/30 rounded-xl text-blue-400 shadow-inner"><Cake size={16}/></div><span className="text-xs font-black text-blue-400 uppercase tracking-widest">{editingRes.birthdayName}</span></div>}
                                         </>
-                                    ) : <p className="text-[10px] text-slate-600 italic">Sem reserva de mesa</p>}
+                                    ) : <p className="text-[10px] text-slate-600 font-bold uppercase italic tracking-widest border-l-2 border-slate-700 pl-3">Sem reserva de mesa</p>}
                                 </div>
                             </div>
                         </div>
 
                         {editingRes.observations && (
-                            <div className="bg-slate-900/80 p-5 rounded-2xl border-l-4 border-neon-blue shadow-inner">
-                                <p className="text-[10px] text-slate-500 font-bold uppercase mb-2 tracking-widest">Observações Operações</p>
-                                <p className="text-slate-300 text-sm italic">"{editingRes.observations}"</p>
+                            <div className="bg-slate-900/80 p-6 rounded-3xl border-l-4 border-neon-blue shadow-2xl">
+                                <p className="text-[10px] font-black text-slate-500 uppercase mb-3 tracking-[0.2em]">Instruções da Equipe</p>
+                                <p className="text-slate-300 text-sm italic font-medium leading-relaxed">"{editingRes.observations}"</p>
                             </div>
                         )}
 
-                        <div className="pt-4 border-t border-slate-700 flex flex-col md:flex-row justify-between gap-4">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-slate-900 rounded-xl border border-slate-700 text-slate-500"><Clock size={16}/></div>
-                                <div><p className="text-[9px] font-bold text-slate-500 uppercase">Criado em</p><p className="text-[11px] text-slate-300">{new Date(editingRes.createdAt).toLocaleString('pt-BR')}</p></div>
+                        <div className="pt-6 border-t border-slate-700/50 flex flex-col md:flex-row justify-between gap-4">
+                            <div className="flex items-center gap-4">
+                                <div className="p-3 bg-slate-900 rounded-2xl border border-slate-700 text-slate-500 shadow-inner"><Clock size={18}/></div>
+                                <div><p className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-1">Registro Criado Em</p><p className="text-xs font-bold text-slate-400">{new Date(editingRes.createdAt).toLocaleString('pt-BR')}</p></div>
                             </div>
-                            <div className="flex items-center gap-2">
-                                <span className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-tighter border ${editingRes.paymentStatus === PaymentStatus.PAGO ? 'bg-green-600/10 text-green-500 border-green-500/20' : 'bg-red-600/10 text-red-500 border-red-500/20 animate-pulse'}`}>PGTO: {editingRes.paymentStatus}</span>
-                                {editingRes.comandaId && <span className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-tighter border bg-slate-900 text-slate-400 border-slate-700">Comanda: {editingRes.comandaId}</span>}
+                            <div className="flex items-center gap-3">
+                                <span className={`px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest border shadow-lg ${editingRes.paymentStatus === PaymentStatus.PAGO ? 'bg-green-600/10 text-green-500 border-green-500/20' : 'bg-red-600/10 text-red-500 border-red-500/20 animate-pulse'}`}>STATUS PGTO: {editingRes.paymentStatus}</span>
+                                {editingRes.comandaId && <span className="px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest border bg-slate-900 text-slate-400 border-slate-700 shadow-inner">MESA: {editingRes.comandaId}</span>}
                             </div>
                         </div>
                     </div>
                 )}
             </div>
 
-            <div className="p-6 bg-slate-900 border-t border-slate-700">
+            <div className="p-8 bg-slate-900 border-t border-slate-700">
                 {!isEditMode && (
-                    <div className="flex flex-wrap gap-2">
-                        <button disabled={!canEdit} onClick={() => handleStatusChange(ReservationStatus.CONFIRMADA)} className={`px-4 py-3 rounded-2xl text-[10px] font-bold uppercase flex-1 transition-all border flex items-center justify-center gap-2 ${editingRes.status === ReservationStatus.CONFIRMADA ? 'bg-green-600 text-white border-green-500 shadow-lg' : 'bg-slate-800 text-slate-400 border-slate-700 hover:border-slate-500'}`}><Check size={16}/> Confirmar Reserva</button>
-                        <button disabled={!canEdit} onClick={() => handleStatusChange(ReservationStatus.PENDENTE)} className={`px-4 py-3 rounded-2xl text-[10px] font-bold uppercase flex-1 transition-all border flex items-center justify-center gap-2 ${editingRes.status === ReservationStatus.PENDENTE ? 'bg-yellow-500 text-black border-yellow-500 shadow-lg' : 'bg-slate-800 text-slate-400 border-slate-700 hover:border-slate-500'}`}><Clock size={16}/> Pendente</button>
-                        <button disabled={!canDelete} onClick={() => setIsCancelling(true)} className="px-4 py-3 rounded-2xl text-[10px] font-bold uppercase flex-1 bg-red-600/20 text-red-400 border border-red-500/30 hover:bg-red-600 hover:text-white transition flex items-center justify-center gap-2"><Ban size={16}/> Cancelar</button>
+                    <div className="flex flex-wrap gap-3">
+                        <button disabled={!canEdit} onClick={() => handleStatusChange(ReservationStatus.CONFIRMADA)} className={`px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex-1 transition-all border flex items-center justify-center gap-2 shadow-lg active:scale-95 ${editingRes.status === ReservationStatus.CONFIRMADA ? 'bg-green-600 text-white border-green-500 shadow-green-900/20' : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white'}`}><Check size={18}/> Confirmar</button>
+                        <button disabled={!canEdit} onClick={() => handleStatusChange(ReservationStatus.PENDENTE)} className={`px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex-1 transition-all border flex items-center justify-center gap-2 shadow-lg active:scale-95 ${editingRes.status === ReservationStatus.PENDENTE ? 'bg-yellow-500 text-black border-yellow-500 shadow-yellow-900/20' : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white'}`}><Clock size={18}/> Manter Pendente</button>
+                        <button disabled={!canDelete} onClick={() => setIsCancelling(true)} className="px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex-1 bg-red-600/10 text-red-500 border border-red-500/20 hover:bg-red-600 hover:text-white transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2"><Ban size={18}/> Cancelar Jogo</button>
                     </div>
                 )}
 
                 {isCancelling && (
-                    <div className="mt-4 p-5 bg-red-950/20 border border-red-500/30 rounded-2xl animate-scale-in">
-                        <label className="text-[10px] font-bold text-red-400 uppercase mb-3 block tracking-widest">Motivo do Cancelamento</label>
-                        <textarea className="w-full bg-slate-950 border border-slate-700 rounded-xl p-4 text-white text-sm outline-none focus:border-red-500 transition-all shadow-inner" placeholder="Ex: Cliente desistiu via chat..." value={cancelReason} onChange={e => setCancelReason(e.target.value)} />
-                        <div className="flex gap-3 justify-end mt-4">
-                            <button onClick={() => setIsCancelling(false)} className="px-5 py-3 rounded-xl text-xs font-bold bg-slate-800 text-white border border-slate-700 hover:bg-slate-700 transition">Voltar</button>
-                            <button onClick={async () => { if(!cancelReason.trim()) return; await db.reservations.update({...editingRes, status: ReservationStatus.CANCELADA}, currentUser?.id, `Cancelado: ${cancelReason}`); setEditingRes(null); loadData(true); }} className="px-6 py-3 rounded-xl text-xs font-bold bg-red-600 text-white shadow-lg shadow-red-900/30 hover:bg-red-500 transition active:scale-95">Confirmar Cancelamento</button>
+                    <div className="mt-4 p-6 bg-red-950/20 border border-red-500/30 rounded-3xl animate-scale-in">
+                        <label className="text-[10px] font-black text-red-400 uppercase mb-4 block tracking-[0.2em]">Motivo da Anulação</label>
+                        <textarea className="w-full bg-slate-950 border border-slate-700 rounded-2xl p-4 text-white text-sm outline-none focus:border-red-500 transition-all shadow-inner font-medium mb-6" placeholder="Descreva por que a reserva foi cancelada (Ex: Cliente desistiu)..." value={cancelReason} onChange={e => setCancelReason(e.target.value)} />
+                        <div className="flex gap-4 justify-end">
+                            <button onClick={() => setIsCancelling(false)} className="px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest bg-slate-800 text-white border border-slate-700 hover:bg-slate-700 transition">Voltar</button>
+                            <button onClick={async () => { if(!cancelReason.trim()) return; await db.reservations.update({...editingRes, status: ReservationStatus.CANCELADA}, currentUser?.id, `Cancelado: ${cancelReason}`); setEditingRes(null); loadData(true); }} className="px-8 py-3 rounded-xl text-xs font-black uppercase tracking-[0.2em] bg-red-600 text-white shadow-xl shadow-red-900/30 hover:bg-red-500 transition-all active:scale-95">Anular Reserva</button>
                         </div>
                     </div>
                 )}
@@ -492,22 +499,22 @@ const Agenda: React.FC = () => {
 
       {showLaneSelector && laneSelectorTargetRes && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/95 p-4 backdrop-blur-xl">
-              <div className="bg-slate-800 border border-slate-600 w-full max-w-sm rounded-[40px] p-10 shadow-2xl animate-scale-in">
+              <div className="bg-slate-800 border border-slate-600 w-full max-w-sm rounded-[3rem] p-12 shadow-2xl animate-scale-in">
                   <div className="text-center mb-10">
-                      <div className="w-20 h-20 bg-neon-blue/20 rounded-[30px] flex items-center justify-center mx-auto mb-6 text-neon-blue border border-neon-blue/30 shadow-inner"><LayoutGrid size={40}/></div>
-                      <h3 className="text-2xl font-bold text-white uppercase tracking-tighter">Atribuir Pista</h3>
-                      <p className="text-[10px] text-slate-500 font-bold uppercase mt-2 tracking-widest">Iniciando jogo para {laneSelectorTargetRes.clientName}</p>
+                      <div className="w-20 h-20 bg-neon-blue/20 rounded-[2rem] flex items-center justify-center mx-auto mb-6 text-neon-blue border border-neon-blue/30 shadow-inner animate-pulse"><LayoutGrid size={40}/></div>
+                      <h3 className="text-2xl font-black text-white uppercase tracking-tighter leading-none mb-2">Atribuir Pista</h3>
+                      <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Iniciando jogo para {laneSelectorTargetRes.clientName}</p>
                   </div>
-                  <div className="grid grid-cols-3 gap-5 mb-10">
+                  <div className="grid grid-cols-3 gap-4 mb-12">
                       {Array.from({ length: settings.activeLanes }).map((_, i) => { 
                           const n = i + 1; 
                           const sel = tempSelectedLanes.includes(n); 
                           return (
-                              <button key={n} onClick={() => setTempSelectedLanes(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n])} className={`h-20 rounded-[25px] flex items-center justify-center text-3xl font-black transition-all border-2 ${sel ? 'bg-neon-blue border-white text-white shadow-[0_0_20px_rgba(59,130,246,0.6)]' : 'bg-slate-900 border-slate-700 text-slate-600 hover:border-slate-500'}`}>{n}</button>
+                              <button key={n} onClick={() => setTempSelectedLanes(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n])} className={`h-16 rounded-2xl flex items-center justify-center text-2xl font-black transition-all border-2 shadow-lg active:scale-90 ${sel ? 'bg-neon-blue border-white text-white shadow-blue-500/50' : 'bg-slate-900 border-slate-700 text-slate-600 hover:border-slate-500'}`}>{n}</button>
                           )
                       })}
                   </div>
-                  <button onClick={saveLaneSelection} className="w-full py-5 bg-green-600 hover:bg-green-500 text-white rounded-[25px] font-black uppercase text-sm tracking-[0.2em] shadow-xl transition active:scale-95">SALVAR E INICIAR</button>
+                  <button onClick={saveLaneSelection} className="w-full py-5 bg-green-600 hover:bg-green-500 text-white rounded-[2rem] font-black uppercase text-sm tracking-[0.3em] shadow-xl shadow-green-900/20 transition-all active:scale-95">SALVAR E INICIAR</button>
               </div>
           </div>
       )}
