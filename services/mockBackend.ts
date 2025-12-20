@@ -1,5 +1,5 @@
 
-import { AppSettings, Client, FunnelCard, Reservation, ReservationStatus, PaymentStatus, UserRole, FunnelStage, FunnelStageConfig, LoyaltyTransaction, AuditLog, User, EventType } from '../types';
+import { AppSettings, Client, FunnelCard, Reservation, ReservationStatus, PaymentStatus, UserRole, FunnelStage, FunnelStageConfig, LoyaltyTransaction, AuditLog, User, EventType, Feedback, Suggestion } from '../types';
 import { supabase } from './supabaseClient';
 import { INITIAL_SETTINGS } from '../constants';
 import { v4 as uuidv4 } from 'uuid';
@@ -18,6 +18,35 @@ const safeTags = (tags: any): string[] => {
 };
 
 export const db = {
+  feedbacks: {
+    create: async (feedback: Feedback) => {
+      const { data, error } = await supabase.from('avaliacoes').insert({
+        reserva_id: feedback.reserva_id,
+        cliente_id: feedback.cliente_id,
+        nota: feedback.nota,
+        comentario: feedback.comentario
+      }).select().single();
+      if (error) throw error;
+      return data;
+    },
+    getByClient: async (clientId: string) => {
+      const { data } = await supabase.from('avaliacoes').select('*').eq('cliente_id', clientId);
+      return data || [];
+    }
+  },
+
+  suggestions: {
+    create: async (suggestion: Suggestion) => {
+      const { data, error } = await supabase.from('sugestoes').insert({
+        cliente_id: suggestion.cliente_id,
+        titulo: suggestion.titulo,
+        descricao: suggestion.descricao
+      }).select().single();
+      if (error) throw error;
+      return data;
+    }
+  },
+
   audit: {
       log: async (userId: string, userName: string, actionType: string, details: string, entityId?: string) => {
           try {
@@ -29,7 +58,6 @@ export const db = {
       getLogs: async (filters?: { userId?: string, actionType?: string, startDate?: string, endDate?: string, limit?: number }): Promise<AuditLog[]> => {
           let query = supabase.from('audit_logs').select('*').order('created_at', { ascending: false });
           if (filters?.userId && filters.userId !== 'ALL') query = query.eq('user_id', filters.userId);
-          // Fixed property name typo from action_type to actionType
           if (filters?.actionType && filters.actionType !== 'ALL') query = query.eq('action_type', filters.actionType);
           if (filters?.startDate) query = query.gte('created_at', `${filters.startDate}T00:00:00`);
           if (filters?.endDate) query = query.lte('created_at', `${filters.endDate}T23:59:59`);
@@ -43,21 +71,16 @@ export const db = {
 
   funnelStages: {
       getAll: async (): Promise<FunnelStageConfig[]> => {
-          console.log("[DB] Buscando etapas do funil...");
           const { data, error } = await supabase.from('etapas_funil').select('*').order('ordem', { ascending: true });
           if (error) {
-              console.error("[DB ERROR] Erro ao buscar etapas:", error.message, error.details);
+              console.error("[DB ERROR]", error.message);
               throw new Error(`Erro de Banco: ${error.message}`);
           }
-          console.log(`[DB] ${data?.length || 0} etapas encontradas.`);
           return (data || []).map(d => ({ id: d.id, nome: d.nome, ordem: d.ordem }));
       },
       create: async (nome: string, ordem: number) => {
           const { data, error } = await supabase.from('etapas_funil').insert({ nome, ordem }).select().single();
-          if (error) {
-              console.error("[DB ERROR] Erro ao criar etapa:", error.message);
-              throw error;
-          }
+          if (error) throw error;
           return { id: data.id, nome: data.nome, ordem: data.ordem };
       },
       update: async (id: string, nome: string, ordem: number) => {
@@ -180,10 +203,7 @@ export const db = {
     logout: async () => { await supabase.auth.signOut(); },
     getAll: async (): Promise<Client[]> => {
       const { data, error } = await supabase.from('clientes').select('*');
-      if (error) {
-          console.error("[DB ERROR] Clientes:", error.message);
-          throw error;
-      }
+      if (error) throw error;
       return (data || []).map((c: any) => ({
           id: c.client_id, name: c.name || 'Sem Nome', phone: c.phone || '', email: c.email, photoUrl: c.photo_url,
           tags: safeTags(c.tags), createdAt: c.created_at, lastContactAt: c.last_contact_at,
@@ -232,7 +252,7 @@ export const db = {
     update: async (client: Client, updatedBy?: string) => {
       const { error } = await supabase.from('clientes').update({
         name: client.name, phone: cleanPhone(client.phone), email: client.email || null,
-        last_contact_at: client.lastContactAt, photo_url: client.photo_url, funnel_stage: client.funnelStage
+        last_contact_at: client.lastContactAt, photo_url: client.photoUrl, funnel_stage: client.funnelStage
       }).eq('client_id', client.id);
       if (error) throw error;
       if (updatedBy) db.audit.log(updatedBy, 'STAFF', 'UPDATE_CLIENT', `Atualizou ${client.name}`, client.id);
@@ -305,21 +325,21 @@ export const db = {
     create: async (res: Reservation, createdByUserId?: string) => {
       const { error } = await supabase.from('reservas').insert({
         id: res.id, client_id: res.clientId || null, client_name: res.clientName, date: res.date, time: res.time,
-        people_count: res.people_count, lane_count: res.lane_count, duration: res.duration, total_value: res.total_value,
-        event_type: res.eventType, observations: res.observations, status: res.status, payment_status: res.payment_status,
-        created_at: res.createdAt, has_table_reservation: res.has_table_reservation, birthday_name: res.birthday_name,
-        table_seat_count: res.table_seat_count, created_by: createdByUserId || null
+        people_count: res.peopleCount, lane_count: res.laneCount, duration: res.duration, total_value: res.totalValue,
+        event_type: res.eventType, observations: res.observations, status: res.status, payment_status: res.paymentStatus,
+        created_at: res.createdAt, has_table_reservation: res.hasTableReservation, birthday_name: res.birthdayName,
+        table_seat_count: res.tableSeatCount, created_by: createdByUserId || null
       });
       if (error) throw error;
       return res;
     },
     update: async (res: Reservation, updatedByUserId?: string, actionDetail?: string) => {
       const { error } = await supabase.from('reservas').update({
-        date: res.date, time: res.time, people_count: res.people_count, lane_count: res.lane_count, duration: res.duration,
-        total_value: res.total_value, event_type: res.eventType, observations: res.observations, status: res.status,
-        payment_status: res.payment_status, checked_in_ids: res.checked_in_ids || [], 
-        no_show_ids: res.no_show_ids || [], has_table_reservation: res.has_table_reservation, 
-        table_seat_count: res.table_seat_count, pistas_usadas: res.lanesAssigned
+        date: res.date, time: res.time, people_count: res.peopleCount, lane_count: res.laneCount, duration: res.duration,
+        total_value: res.totalValue, event_type: res.eventType, observations: res.observations, status: res.status,
+        payment_status: res.paymentStatus, checked_in_ids: res.checkedInIds || [], 
+        no_show_ids: res.noShowIds || [], has_table_reservation: res.hasTableReservation, 
+        table_seat_count: res.tableSeatCount, pistas_usadas: res.lanesAssigned
       }).eq('id', res.id);
       if (error) throw error;
     }
@@ -359,8 +379,8 @@ export const db = {
         id: 1, establishment_name: s.establishmentName, address: s.address, phone: s.phone,
         whatsapp_link: s.whatsappLink, logo_url: s.logoUrl, active_lanes: s.activeLanes,
         weekday_price: s.weekdayPrice, weekend_price: s.weekendPrice,
-        online_payment_enabled: s.online_payment_enabled, mercadopago_public_key: s.mercadopago_public_key,
-        blocked_dates: s.blocked_dates
+        online_payment_enabled: s.onlinePaymentEnabled, mercadopago_public_key: s.mercadopagoPublicKey,
+        blocked_dates: s.blockedDates
       });
       if (error) throw error;
       window.dispatchEvent(new Event('settings_updated'));

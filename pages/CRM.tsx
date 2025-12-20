@@ -48,7 +48,7 @@ const CRM: React.FC = () => {
         setLoadError(null);
     }
     try {
-        console.log("[CRM] Iniciando busca de dados...");
+        console.log("[CRM] Buscando dados...");
         const [clientsData, reservationsData, stagesData] = await Promise.all([
             db.clients.getAll(),
             db.reservations.getAll(),
@@ -77,14 +77,14 @@ const CRM: React.FC = () => {
         setClientMetrics(metrics);
     } catch (e: any) { 
         console.error("[CRM ERROR]:", e);
-        setLoadError(e.message || "Erro de conexão com o banco de dados.");
+        setLoadError(e.message || "Erro ao conectar com o banco de dados.");
     } 
     finally { if (!isBackground) setLoading(false); }
   };
 
   useEffect(() => {
     fetchData();
-    const channel = supabase.channel('crm-v14-sync')
+    const channel = supabase.channel('crm-realtime-v15')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => fetchData(true))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => fetchData(true))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'etapas_funil' }, () => fetchData(true))
@@ -129,7 +129,7 @@ const CRM: React.FC = () => {
         await db.clients.updateStage(clientId, newStage);
         setClients(prev => prev.map(c => c.id === clientId ? { ...c, funnelStage: newStage } : c));
         if (selectedClient?.id === clientId) setSelectedClient(prev => prev ? { ...prev, funnelStage: newStage } : null);
-    } catch (e) { alert("Erro ao atualizar fase. Verifique se o RLS permite escrita."); } 
+    } catch (e) { alert("Erro ao atualizar fase. Verifique o RLS no Supabase."); } 
     finally { setIsUpdatingStage(false); }
   };
 
@@ -154,18 +154,17 @@ const CRM: React.FC = () => {
             { n: 'No Show', o: 5 }
         ];
         
-        // Tentativa de inserção sequencial
         for (const d of defaults) {
             await db.funnelStages.create(d.n, d.o);
         }
         
         await fetchData();
-        alert("Funil inicializado com sucesso!");
+        alert("Funil inicializado!");
     } catch (e: any) { 
         console.error("[CRM ERROR] Erro na inicialização:", e);
-        const msg = e.message || 'Erro desconhecido';
+        const msg = e.message || 'Erro de segurança';
         if (msg.includes('row-level security')) {
-            alert(`BLOQUEIO DE SEGURANÇA: O banco de dados recusou a criação das etapas. \n\nPOR FAVOR: Rode o script SQL que te enviei no painel do Supabase para destravar a tabela 'etapas_funil'.`);
+            alert(`ATENÇÃO: O banco de dados bloqueou a criação. \n\nVocê deve executar o script SQL de destravamento no painel do Supabase para que este botão funcione.`);
         } else {
             alert(`Erro ao inicializar: ${msg}`);
         }
@@ -185,17 +184,17 @@ const CRM: React.FC = () => {
       await db.funnelStages.update(editingStage.id, stageForm.nome, stageForm.ordem);
       setEditingStage(null);
       fetchData(true);
-    } catch (e) { alert("Erro ao salvar etapa."); }
+    } catch (e) { alert("Erro ao salvar."); }
     finally { setIsSavingStage(false); }
   };
 
   const deleteStage = async (stage: FunnelStageConfig) => {
     const hasClients = clients.some(c => c.funnelStage === stage.nome);
     if (hasClients) {
-      alert("Não é possível excluir uma etapa que possui clientes ativos.");
+      alert("Não é possível excluir uma etapa com clientes.");
       return;
     }
-    if (!window.confirm(`Excluir a etapa "${stage.nome}" permanentemente?`)) return;
+    if (!window.confirm(`Excluir a etapa "${stage.nome}"?`)) return;
     setIsSavingStage(true);
     try {
       await db.funnelStages.delete(stage.id);
@@ -216,11 +215,11 @@ const CRM: React.FC = () => {
       <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4 flex-shrink-0 px-1">
           <div className="flex items-center gap-3 w-full md:w-auto">
             <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">Gestão de Clientes</h1>
-            <div className="bg-slate-800 border border-slate-700 text-neon-blue px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-2 shadow-inner"><Users size={14} /><span>{loading ? '...' : clients.length} cadastrados</span></div>
+            <div className="bg-slate-800 border border-slate-700 text-neon-blue px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-2 shadow-inner"><Users size={14} /><span>{loading ? '...' : clients.length}</span></div>
           </div>
           <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-700 w-full md:w-auto shadow-lg">
-             <button onClick={() => { setViewMode('LIST'); setSelectedClient(null); }} className={`flex-1 md:flex-none px-6 py-2 rounded-lg flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider transition-all ${viewMode === 'LIST' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}><LayoutList size={16} /> Lista</button>
-             <button onClick={() => { setViewMode('KANBAN'); setSelectedClient(null); }} className={`flex-1 md:flex-none px-6 py-2 rounded-lg flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider transition-all ${viewMode === 'KANBAN' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}><KanbanIcon size={16} /> Funil</button>
+             <button onClick={() => { setViewMode('LIST'); setSelectedClient(null); }} className={`flex-1 md:flex-none px-6 py-2 rounded-lg flex items-center justify-center gap-2 text-xs font-bold uppercase transition-all ${viewMode === 'LIST' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}><LayoutList size={16} /> Lista</button>
+             <button onClick={() => { setViewMode('KANBAN'); setSelectedClient(null); }} className={`flex-1 md:flex-none px-6 py-2 rounded-lg flex items-center justify-center gap-2 text-xs font-bold uppercase transition-all ${viewMode === 'KANBAN' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}><KanbanIcon size={16} /> Funil</button>
           </div>
       </div>
 
@@ -231,11 +230,11 @@ const CRM: React.FC = () => {
                         <div className="p-4 border-b border-slate-700 bg-slate-900/50 flex-shrink-0">
                             <div className="relative">
                                 <Search className="absolute left-3 top-3.5 text-slate-500" size={18} />
-                                <input type="text" placeholder="Buscar por nome ou fone..." className="w-full bg-slate-700 border border-slate-600 text-white pl-10 pr-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-neon-blue/20 transition-all text-sm font-medium" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                                <input type="text" placeholder="Buscar..." className="w-full bg-slate-700 border border-slate-600 text-white pl-10 pr-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-neon-blue/20 transition-all text-sm font-medium" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                             </div>
                         </div>
                         <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-800/20">
-                        {loading ? <div className="flex justify-center p-12"><Loader2 className="animate-spin text-neon-blue" size={32}/></div> : filteredAndSortedClients.length === 0 ? <div className="text-center p-12 text-slate-500 text-sm italic">Nenhum cliente encontrado</div> : filteredAndSortedClients.map(client => (
+                        {loading ? <div className="flex justify-center p-12"><Loader2 className="animate-spin text-neon-blue" size={32}/></div> : filteredAndSortedClients.length === 0 ? <div className="text-center p-12 text-slate-500 text-sm italic">Nenhum cliente</div> : filteredAndSortedClients.map(client => (
                             <div key={client.id} onClick={() => { setSelectedClient(client); setIsEditing(false); setDetailTab('INFO'); }} className={`p-4 border-b border-slate-700/50 cursor-pointer hover:bg-slate-700/30 transition-colors group ${selectedClient?.id === client.id ? 'bg-slate-700/80 border-l-4 border-l-neon-blue shadow-inner' : ''}`}>
                                 <div className="flex justify-between items-start mb-1">
                                     <h3 className={`font-bold truncate pr-2 flex-1 text-sm ${selectedClient?.id === client.id ? 'text-neon-blue' : 'text-slate-200 group-hover:text-white'}`}>{client.name}</h3>
@@ -244,7 +243,7 @@ const CRM: React.FC = () => {
                                 <div className="flex items-center gap-2">
                                     <p className="text-xs text-slate-500 font-mono">{client.phone}</p>
                                     <span className="w-1 h-1 rounded-full bg-slate-700"></span>
-                                    <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-tight">{client.funnelStage || 'Sem Etapa'}</p>
+                                    <p className="text-[10px] text-slate-500 font-semibold uppercase">{client.funnelStage || 'Sem Etapa'}</p>
                                 </div>
                             </div>
                         ))}
@@ -258,7 +257,7 @@ const CRM: React.FC = () => {
                                 <div>
                                     <h3 className="text-white font-bold text-lg">Erro no Banco de Dados</h3>
                                     <p className="text-red-400 text-sm mt-2 font-mono bg-slate-900 p-3 rounded-lg border border-red-500/30">{loadError}</p>
-                                    <p className="text-slate-400 text-xs mt-4">Isso geralmente é causado por travas de segurança (RLS). Rode o script SQL no Supabase.</p>
+                                    <p className="text-slate-400 text-xs mt-4">Rode o script SQL no Supabase para liberar o acesso às tabelas.</p>
                                 </div>
                                 <button onClick={() => fetchData()} className="mt-4 px-6 py-3 bg-slate-700 text-white rounded-xl font-bold hover:bg-slate-600 transition flex items-center gap-2">Tentar Novamente</button>
                             </div>
@@ -267,12 +266,12 @@ const CRM: React.FC = () => {
                                 <AlertTriangle size={48} className="text-yellow-500 opacity-50"/>
                                 <div>
                                     <h3 className="text-white font-bold">Funil não configurado</h3>
-                                    <p className="text-slate-400 text-xs mt-1">Não encontramos nenhuma etapa de funil no seu banco de dados.</p>
+                                    <p className="text-slate-400 text-xs mt-1">Não encontramos etapas no banco de dados.</p>
                                 </div>
                                 {isAdmin && (
                                     <button onClick={initDefaultStages} disabled={isSavingStage} className="mt-4 px-6 py-3 bg-neon-blue text-white rounded-xl font-bold flex items-center gap-2 hover:bg-blue-600 transition shadow-lg">
                                         {isSavingStage ? <Loader2 className="animate-spin"/> : <Zap size={18}/>}
-                                        INICIALIZAR ETAPAS PADRÃO
+                                        INICIALIZAR ETAPAS
                                     </button>
                                 )}
                             </div>
@@ -331,7 +330,7 @@ const CRM: React.FC = () => {
                                             </div>
                                             <p className="text-xs sm:text-sm text-slate-400 font-medium truncate">{selectedClient.email || 'Sem e-mail'}</p>
                                         </>
-                                    ) : <h2 className="text-lg sm:text-xl font-bold text-white uppercase tracking-wider text-neon-blue">Editando Cadastro</h2>}
+                                    ) : <h2 className="text-lg sm:text-xl font-bold text-white uppercase tracking-wider text-neon-blue">Editando</h2>}
                                 </div>
                             </div>
                         </div>
@@ -350,7 +349,7 @@ const CRM: React.FC = () => {
 
                     {!isEditing && (
                         <div className="flex border-b border-slate-700 bg-slate-800/50 p-1 flex-shrink-0">
-                            <button onClick={() => setDetailTab('INFO')} className={`flex-1 py-3 sm:py-4 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all rounded-xl ${detailTab === 'INFO' ? 'bg-slate-700 text-white shadow-inner border border-slate-600' : 'text-slate-500 hover:text-slate-300'}`}>Histórico & Dados</button>
+                            <button onClick={() => setDetailTab('INFO')} className={`flex-1 py-3 sm:py-4 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all rounded-xl ${detailTab === 'INFO' ? 'bg-slate-700 text-white shadow-inner border border-slate-600' : 'text-slate-500 hover:text-slate-300'}`}>Histórico</button>
                             <button onClick={() => setDetailTab('LOYALTY')} className={`flex-1 py-3 sm:py-4 text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all rounded-xl flex items-center justify-center gap-1 sm:gap-2 ${detailTab === 'LOYALTY' ? 'bg-slate-700 text-white shadow-inner border border-slate-600' : 'text-slate-500 hover:text-slate-300'}`}><Gift size={16}/> Fidelidade <span className="bg-slate-900 text-[10px] px-2 py-0.5 rounded-full text-neon-orange border border-neon-orange/20 font-bold">{selectedClient.loyaltyBalance || 0} pts</span></button>
                         </div>
                     )}
@@ -359,96 +358,48 @@ const CRM: React.FC = () => {
                         {isEditing ? (
                             <div className="space-y-6 animate-fade-in max-w-2xl mx-auto">
                                 <div className="bg-slate-900/40 p-6 rounded-2xl border border-slate-700 space-y-4">
-                                    <div><label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Nome Completo</label><input className="w-full bg-slate-800 border border-slate-600 rounded-xl p-4 text-white outline-none focus:ring-2 focus:ring-neon-blue/30 transition-all font-medium" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} /></div>
+                                    <div><label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Nome</label><input className="w-full bg-slate-800 border border-slate-600 rounded-xl p-4 text-white font-medium" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} /></div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div><label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">WhatsApp / Fone</label><input className="w-full bg-slate-800 border border-slate-600 rounded-xl p-4 text-white outline-none focus:ring-2 focus:ring-neon-blue/30 transition-all font-mono" value={editForm.phone} onChange={e => setEditForm({...editForm, phone: e.target.value})} /></div>
-                                        <div><label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">E-mail</label><input className="w-full bg-slate-800 border border-slate-600 rounded-xl p-4 text-white outline-none focus:ring-2 focus:ring-neon-blue/30 transition-all font-medium" value={editForm.email} onChange={e => setEditForm({...editForm, email: e.target.value})} /></div>
+                                        <div><label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">WhatsApp</label><input className="w-full bg-slate-800 border border-slate-600 rounded-xl p-4 text-white font-mono" value={editForm.phone} onChange={e => setEditForm({...editForm, phone: e.target.value})} /></div>
+                                        <div><label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">E-mail</label><input className="w-full bg-slate-800 border border-slate-600 rounded-xl p-4 text-white" value={editForm.email} onChange={e => setEditForm({...editForm, email: e.target.value})} /></div>
                                     </div>
                                 </div>
                             </div>
                         ) : detailTab === 'INFO' ? (
                             <div className="space-y-6 sm:space-y-8 animate-fade-in">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className="bg-slate-900/30 p-4 sm:p-5 rounded-2xl border border-slate-700/50 shadow-sm"><p className="text-slate-500 text-[10px] uppercase font-bold mb-1">WhatsApp Principal</p><p className="text-white font-mono font-bold text-base sm:text-lg flex items-center gap-3"><MessageCircle size={18} className="text-green-500"/> {selectedClient.phone}</p></div>
-                                    <div className="bg-slate-900/30 p-4 sm:p-5 rounded-2xl border border-slate-700/50 shadow-sm"><p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Última Interação</p><p className="text-white text-base sm:text-lg font-bold flex items-center gap-3"><Clock size={18} className="text-neon-blue"/> {selectedClient.lastContactAt ? new Date(selectedClient.lastContactAt).toLocaleDateString('pt-BR') : 'N/A'}</p></div>
+                                    <div className="bg-slate-900/30 p-4 sm:p-5 rounded-2xl border border-slate-700/50 shadow-sm"><p className="text-slate-500 text-[10px] uppercase font-bold mb-1">WhatsApp</p><p className="text-white font-mono font-bold text-base sm:text-lg flex items-center gap-3"><MessageCircle size={18} className="text-green-500"/> {selectedClient.phone}</p></div>
+                                    <div className="bg-slate-900/30 p-4 sm:p-5 rounded-2xl border border-slate-700/50 shadow-sm"><p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Último Contato</p><p className="text-white text-base sm:text-lg font-bold flex items-center gap-3"><Clock size={18} className="text-neon-blue"/> {selectedClient.lastContactAt ? new Date(selectedClient.lastContactAt).toLocaleDateString('pt-BR') : 'N/A'}</p></div>
                                 </div>
 
                                 <div>
-                                    <h3 className="text-[10px] font-bold text-slate-400 mb-4 uppercase tracking-widest flex items-center gap-2 border-l-4 border-neon-orange pl-3">Fase no Funil de Vendas</h3>
-                                    <div className="flex flex-wrap gap-2">{funnelStages.map(stage => { const isActive = selectedClient.funnelStage === stage.nome; return (<button key={stage.id} disabled={!canEditClient || isUpdatingStage} onClick={() => updateClientStage(selectedClient.id, stage.nome)} className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all border shadow-sm ${isActive ? 'bg-neon-orange text-white border-neon-orange shadow-orange-900/20' : 'bg-slate-900 text-slate-500 border-slate-700 hover:border-slate-500 hover:text-slate-300'} ${!canEditClient ? 'opacity-50' : 'active:scale-95'}`}>{isActive && <Check size={14} className="inline mr-1"/>}{stage.nome}</button>);})}</div>
+                                    <h3 className="text-[10px] font-bold text-slate-400 mb-4 uppercase tracking-widest flex items-center gap-2 border-l-4 border-neon-orange pl-3">Fase do Funil</h3>
+                                    <div className="flex flex-wrap gap-2">{funnelStages.map(stage => { const isActive = selectedClient.funnelStage === stage.nome; return (<button key={stage.id} disabled={!canEditClient || isUpdatingStage} onClick={() => updateClientStage(selectedClient.id, stage.nome)} className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all border shadow-sm ${isActive ? 'bg-neon-orange text-white border-neon-orange' : 'bg-slate-900 text-slate-500 border-slate-700 hover:border-slate-500 hover:text-slate-300'}`}>{isActive && <Check size={14} className="inline mr-1"/>}{stage.nome}</button>);})}</div>
                                 </div>
 
                                 <div>
-                                    <h3 className="text-[10px] font-bold text-slate-400 mb-4 uppercase tracking-widest flex items-center gap-2 border-l-4 border-neon-blue pl-3">Histórico de Visitas (Agenda)</h3>
+                                    <h3 className="text-[10px] font-bold text-slate-400 mb-4 uppercase tracking-widest flex items-center gap-2 border-l-4 border-neon-blue pl-3">Histórico de Visitas</h3>
                                     <div className="space-y-4">
-                                    {clientHistory.length === 0 ? <div className="text-center py-12 bg-slate-900/20 border-2 border-dashed border-slate-700 rounded-3xl text-slate-600 italic font-medium uppercase text-[10px] tracking-widest">Nenhuma reserva registrada</div> : clientHistory.map(res => {
+                                    {clientHistory.length === 0 ? <div className="text-center py-12 bg-slate-900/20 border border-slate-700 rounded-3xl text-slate-600 text-xs font-bold uppercase">Nenhuma reserva</div> : clientHistory.map(res => {
                                         const isCheckedIn = res.checkedInIds && res.checkedInIds.length > 0;
                                         const isNoShow = res.noShowIds && res.noShowIds.length > 0;
-                                        const needsPaymentAlert = res.paymentStatus === PaymentStatus.PENDENTE;
-
-                                        let cardStyle = 'border-slate-700 bg-slate-800';
-                                        if (isCheckedIn) cardStyle = 'border-green-500/50 bg-slate-900 opacity-90';
-                                        else if (isNoShow) cardStyle = 'border-red-500/50 bg-red-900/10 grayscale opacity-70';
-                                        else if (res.status === ReservationStatus.CONFIRMADA) cardStyle = 'border-neon-blue/50 bg-blue-900/10';
-                                        else if (res.status === ReservationStatus.PENDENTE) cardStyle = 'border-yellow-500/50 bg-yellow-900/10';
-
+                                        
                                         return (
-                                        <div key={res.id} className={`p-4 rounded-xl border shadow-lg transition overflow-hidden group ${cardStyle}`}>
-                                            <div className="flex justify-between items-start mb-3">
-                                                <div className="min-w-0 pr-2">
+                                        <div key={res.id} className={`p-4 rounded-xl border shadow-lg transition ${isCheckedIn ? 'border-green-500/30 bg-slate-900' : 'border-slate-700 bg-slate-800'}`}>
+                                            <div className="flex justify-between items-start">
+                                                <div>
                                                     <div className="flex items-center gap-2 mb-1">
-                                                        <span className="text-sm font-bold text-white tracking-tight">{res.date.split('-').reverse().join('/')}</span>
-                                                        <span className="w-1 h-1 rounded-full bg-slate-700"></span>
+                                                        <span className="text-sm font-bold text-white">{res.date.split('-').reverse().join('/')}</span>
                                                         <span className="text-neon-blue font-bold text-sm">{res.time}</span>
                                                     </div>
-                                                    
-                                                    {needsPaymentAlert && res.status !== ReservationStatus.CANCELADA && (
-                                                        <div className="mt-1 flex items-center gap-1 text-[10px] bg-red-500/20 text-red-400 border border-red-500/30 px-1.5 py-0.5 rounded font-bold uppercase animate-pulse w-fit">
-                                                            <DollarSign size={10} /> PGTO PENDENTE
-                                                        </div>
-                                                    )}
-
-                                                    <div className="flex items-center gap-3 mt-2 flex-wrap">
-                                                        {isCheckedIn ? <span className="text-[9px] font-bold text-green-400 bg-green-500/20 px-1.5 py-0.5 rounded uppercase border border-green-500/30">CHECK-IN</span> : isNoShow ? <span className="text-[9px] font-bold text-red-400 bg-red-600/20 px-1.5 py-0.5 rounded uppercase border border-green-500/30">NO-SHOW</span> : <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border-neon-blue/30' : res.status === ReservationStatus.PENDENTE ? 'text-yellow-400 bg-yellow-900/40 border-yellow-500/30' : 'text-slate-400 bg-slate-800 border-slate-700'}`}>{res.status}</span>}
-                                                        {res.payOnSite && res.status === ReservationStatus.PENDENTE && (
-                                                            <span className="text-[9px] font-bold text-white bg-slate-600 px-1.5 py-0.5 rounded flex items-center gap-1"><Store size={10}/> Local</span>
-                                                        )}
-                                                        {res.comandaId && (
-                                                            <span className="text-[9px] font-bold text-white bg-purple-600 px-1.5 py-0.5 rounded flex items-center gap-1"><Hash size={10}/> {res.comandaId}</span>
-                                                        )}
+                                                    <div className="flex gap-2 mt-2">
+                                                       {isCheckedIn ? <span className="text-[9px] font-bold text-green-400 bg-green-500/20 px-1.5 py-0.5 rounded border border-green-500/30">CHECK-IN</span> : isNoShow ? <span className="text-[9px] font-bold text-red-400 bg-red-600/20 px-1.5 py-0.5 rounded border border-red-500/30">NO-SHOW</span> : <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40' : 'text-slate-400 bg-slate-800'}`}>{res.status}</span>}
                                                     </div>
                                                 </div>
                                                 <div className="text-right">
                                                     <span className="text-base font-bold text-green-400">{res.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                                                    <div className="flex flex-col gap-1 mt-1">
-                                                        <span className="text-[9px] text-slate-500 font-bold uppercase flex items-center justify-end gap-1"><LayoutGrid size={10}/> {res.laneCount} Pistas</span>
-                                                        <span className="text-[9px] text-slate-500 font-bold uppercase flex items-center justify-end gap-1"><Users size={10}/> {res.peopleCount} Pessoas</span>
-                                                    </div>
                                                 </div>
                                             </div>
-
-                                            {isCheckedIn && res.lanesAssigned && res.lanesAssigned.length > 0 && (
-                                                <div className="flex gap-1.5 mb-3 p-2 bg-slate-900/50 rounded-lg border border-slate-700/50">
-                                                    {res.lanesAssigned.map(l => (
-                                                        <span key={l} className="w-6 h-6 rounded-full bg-neon-blue text-white flex items-center justify-center text-[10px] font-black shadow-sm shadow-blue-500/50 border border-white/10">{l}</span>
-                                                    ))}
-                                                    <span className="text-[9px] text-slate-500 font-bold uppercase ml-1 self-center">Pistas em Uso</span>
-                                                </div>
-                                            )}
-
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2 pt-2 border-t border-slate-700/50">
-                                                <div className="flex items-center gap-2"><div className="p-1 bg-slate-700/50 rounded text-slate-400"><FileText size={12}/></div><span className="text-[10px] text-slate-300 font-medium truncate">{res.eventType}</span></div>
-                                                {res.hasTableReservation && (
-                                                    <div className="flex flex-col gap-1 bg-slate-900/30 p-2 rounded-lg border border-neon-orange/10">
-                                                        <span className="text-[9px] font-bold text-neon-orange uppercase flex items-center gap-1"><Utensils size={10} /> Mesa: {res.tableSeatCount} lug.</span>
-                                                        {res.birthdayName && <span className="text-[9px] text-neon-blue flex items-center gap-1 truncate font-bold"><Cake size={10} /> {res.birthdayName}</span>}
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {res.observations && (
-                                                <div className="mt-3 p-2 bg-slate-950/30 rounded text-[10px] text-slate-400 italic border-l-2 border-slate-700">"{res.observations}"</div>
-                                            )}
                                         </div>
                                     )})}
                                     </div>
@@ -456,23 +407,22 @@ const CRM: React.FC = () => {
                             </div>
                         ) : (
                             <div className="space-y-10 animate-fade-in max-w-2xl mx-auto">
-                                <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-8 sm:p-10 rounded-3xl border border-neon-orange/20 shadow-2xl flex flex-col items-center justify-center gap-6 relative overflow-hidden group">
-                                    <div className="absolute top-0 right-0 w-32 h-32 bg-neon-orange/5 rounded-full blur-3xl -mr-10 -mt-10 group-hover:bg-neon-orange/10 transition-colors"></div>
-                                    <div className="w-16 h-16 sm:w-20 sm:h-20 bg-neon-orange/10 rounded-2xl flex items-center justify-center text-neon-orange border border-neon-orange/20 shadow-inner group-hover:rotate-6 transition-transform"><Coins size={44}/></div>
-                                    <div className="text-center relative z-10 font-sans">
-                                        <p className="text-slate-500 text-[10px] sm:text-xs uppercase font-bold tracking-widest mb-2 opacity-70">Saldo Atualizado</p>
+                                <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-8 rounded-3xl border border-neon-orange/20 shadow-2xl flex flex-col items-center justify-center gap-6">
+                                    <div className="w-16 h-16 bg-neon-orange/10 rounded-2xl flex items-center justify-center text-neon-orange border border-neon-orange/20 shadow-inner"><Coins size={44}/></div>
+                                    <div className="text-center">
+                                        <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest mb-2">Saldo</p>
                                         <div className="flex items-baseline justify-center gap-2">
-                                            <h3 className="text-5xl sm:text-6xl font-extrabold text-white tracking-tighter">{selectedClient.loyaltyBalance || 0}</h3>
-                                            <span className="text-lg sm:text-xl text-neon-orange font-bold uppercase tracking-wider">pts</span>
+                                            <h3 className="text-5xl font-extrabold text-white">{selectedClient.loyaltyBalance || 0}</h3>
+                                            <span className="text-sm text-neon-orange font-bold uppercase">pts</span>
                                         </div>
                                     </div>
                                 </div>
                                 <div className="space-y-4">
-                                    <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2 border-l-2 border-slate-600 pl-3">Extrato de Movimentações</h3>
-                                    <div className="bg-slate-900/50 rounded-2xl border border-slate-700/50 overflow-hidden shadow-sm">{loadingLoyalty ? (<div className="flex justify-center py-20"><Loader2 className="animate-spin text-neon-orange" size={32}/></div>) : loyaltyHistory.length === 0 ? (<div className="text-center py-16 text-slate-600 italic font-medium uppercase text-xs tracking-widest">Sem movimentações</div>) : (<div className="divide-y divide-slate-800">{loyaltyHistory.map(t => (
-                                        <div key={t.id} className="p-4 sm:p-5 flex justify-between items-center hover:bg-slate-800/40 transition-colors group">
-                                            <div className="min-w-0 pr-4"><p className="text-white font-bold text-sm mb-1 group-hover:text-neon-orange transition-colors truncate">{t.description}</p><p className="text-[10px] text-slate-500 font-bold uppercase flex items-center gap-2"><Clock size={12}/> {new Date(t.createdAt).toLocaleDateString('pt-BR')}</p></div>
-                                            <div className={`font-mono font-bold text-lg sm:text-xl flex items-center gap-1 flex-shrink-0 ${t.amount > 0 ? 'text-green-400' : 'text-red-400'}`}>{t.amount > 0 ? <ArrowUp size={18}/> : <ArrowDown size={18}/>}{Math.abs(t.amount)}</div>
+                                    <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2 border-l-2 border-slate-600 pl-3">Movimentações</h3>
+                                    <div className="bg-slate-900/50 rounded-2xl border border-slate-700/50 overflow-hidden">{loyaltyHistory.length === 0 ? (<div className="text-center py-16 text-slate-600 uppercase text-xs tracking-widest">Sem movimentações</div>) : (<div className="divide-y divide-slate-800">{loyaltyHistory.map(t => (
+                                        <div key={t.id} className="p-4 flex justify-between items-center hover:bg-slate-800/40 transition-colors">
+                                            <div className="min-w-0 pr-4"><p className="text-white font-bold text-sm mb-1 truncate">{t.description}</p><p className="text-[10px] text-slate-500 font-bold uppercase">{new Date(t.createdAt).toLocaleDateString('pt-BR')}</p></div>
+                                            <div className={`font-mono font-bold text-lg flex items-center gap-1 ${t.amount > 0 ? 'text-green-400' : 'text-red-400'}`}>{t.amount > 0 ? <ArrowUp size={18}/> : <ArrowDown size={18}/>}{Math.abs(t.amount)}</div>
                                         </div>
                                     ))}</div>)}</div>
                                 </div>
@@ -481,11 +431,11 @@ const CRM: React.FC = () => {
                     </div>
                 </>
                 ) : (
-                <div className="flex-1 flex flex-col items-center justify-center text-slate-700 p-12 text-center font-sans h-full">
+                <div className="flex-1 flex flex-col items-center justify-center text-slate-700 p-12 text-center h-full">
                     <div className="w-24 h-24 bg-slate-800/50 rounded-full flex items-center justify-center mb-6 border border-slate-700/50">
                         <Users size={48} className="opacity-10" />
                     </div>
-                    <p className="font-bold uppercase tracking-widest text-xs text-slate-600 max-w-xs leading-loose">Selecione um cliente para visualizar perfil completo e histórico</p>
+                    <p className="font-bold uppercase tracking-widest text-xs text-slate-600 max-w-xs leading-loose">Selecione um cliente para ver os detalhes</p>
                 </div>
                 )}
             </div>

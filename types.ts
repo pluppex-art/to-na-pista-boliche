@@ -72,6 +72,24 @@ export interface Client {
   loyaltyBalance?: number;
 }
 
+export interface Feedback {
+    id?: string;
+    reserva_id: string;
+    cliente_id: string;
+    nota: number;
+    comentario: string;
+    created_at?: string;
+}
+
+export interface Suggestion {
+    id?: string;
+    cliente_id: string;
+    titulo: string;
+    descricao: string;
+    status?: string;
+    created_at?: string;
+}
+
 export interface LoyaltyTransaction {
   id: string;
   clientId: string;
@@ -112,6 +130,7 @@ export interface Reservation {
   comandaId?: string;
   createdBy?: string;
   lanesAssigned?: number[];
+  rating?: number; // Adicionado para controle local
 }
 
 export interface FunnelCard {
