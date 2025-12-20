@@ -48,6 +48,7 @@ const CRM: React.FC = () => {
         setLoadError(null);
     }
     try {
+        console.log("[CRM] Iniciando busca de dados...");
         const [clientsData, reservationsData, stagesData] = await Promise.all([
             db.clients.getAll(),
             db.reservations.getAll(),
@@ -76,14 +77,14 @@ const CRM: React.FC = () => {
         setClientMetrics(metrics);
     } catch (e: any) { 
         console.error("[CRM ERROR]:", e);
-        setLoadError(e.message || "Erro desconhecido ao carregar dados.");
+        setLoadError(e.message || "Erro de conexão com o banco de dados.");
     } 
     finally { if (!isBackground) setLoading(false); }
   };
 
   useEffect(() => {
     fetchData();
-    const channel = supabase.channel('crm-v13-sync')
+    const channel = supabase.channel('crm-v14-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => fetchData(true))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => fetchData(true))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'etapas_funil' }, () => fetchData(true))
@@ -128,7 +129,7 @@ const CRM: React.FC = () => {
         await db.clients.updateStage(clientId, newStage);
         setClients(prev => prev.map(c => c.id === clientId ? { ...c, funnelStage: newStage } : c));
         if (selectedClient?.id === clientId) setSelectedClient(prev => prev ? { ...prev, funnelStage: newStage } : null);
-    } catch (e) { alert("Erro ao atualizar fase."); } 
+    } catch (e) { alert("Erro ao atualizar fase. Verifique se o RLS permite escrita."); } 
     finally { setIsUpdatingStage(false); }
   };
 
@@ -152,14 +153,22 @@ const CRM: React.FC = () => {
             { n: 'Pós Venda', o: 4 },
             { n: 'No Show', o: 5 }
         ];
+        
+        // Tentativa de inserção sequencial
         for (const d of defaults) {
             await db.funnelStages.create(d.n, d.o);
         }
+        
         await fetchData();
         alert("Funil inicializado com sucesso!");
     } catch (e: any) { 
         console.error("[CRM ERROR] Erro na inicialização:", e);
-        alert(`Erro ao inicializar: ${e.message || 'Verifique as permissões de RLS no Supabase.'}`); 
+        const msg = e.message || 'Erro desconhecido';
+        if (msg.includes('row-level security')) {
+            alert(`BLOQUEIO DE SEGURANÇA: O banco de dados recusou a criação das etapas. \n\nPOR FAVOR: Rode o script SQL que te enviei no painel do Supabase para destravar a tabela 'etapas_funil'.`);
+        } else {
+            alert(`Erro ao inicializar: ${msg}`);
+        }
     }
     finally { setIsSavingStage(false); }
   };
@@ -249,7 +258,7 @@ const CRM: React.FC = () => {
                                 <div>
                                     <h3 className="text-white font-bold text-lg">Erro no Banco de Dados</h3>
                                     <p className="text-red-400 text-sm mt-2 font-mono bg-slate-900 p-3 rounded-lg border border-red-500/30">{loadError}</p>
-                                    <p className="text-slate-400 text-xs mt-4">Isso geralmente é causado por travas de segurança (RLS) ou conexão instável.</p>
+                                    <p className="text-slate-400 text-xs mt-4">Isso geralmente é causado por travas de segurança (RLS). Rode o script SQL no Supabase.</p>
                                 </div>
                                 <button onClick={() => fetchData()} className="mt-4 px-6 py-3 bg-slate-700 text-white rounded-xl font-bold hover:bg-slate-600 transition flex items-center gap-2">Tentar Novamente</button>
                             </div>
