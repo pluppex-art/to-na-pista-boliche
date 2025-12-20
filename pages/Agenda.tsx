@@ -10,6 +10,43 @@ import { Link, useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { EVENT_TYPES } from '../constants';
 
+// Componente Interno para o Contador de 30 minutos
+const CountdownBadge: React.FC<{ createdAt: string }> = ({ createdAt }) => {
+    const [timeLeft, setTimeLeft] = useState<string>("");
+
+    useEffect(() => {
+        const updateTimer = () => {
+            const created = new Date(createdAt).getTime();
+            const expires = created + 30 * 60 * 1000;
+            const now = new Date().getTime();
+            const diff = expires - now;
+
+            if (diff <= 0) {
+                setTimeLeft("EXPIRADO");
+                return;
+            }
+
+            const mins = Math.floor(diff / 60000);
+            const secs = Math.floor((diff % 60000) / 1000);
+            setTimeLeft(`${mins}:${secs.toString().padStart(2, '0')}`);
+        };
+
+        updateTimer();
+        const interval = setInterval(updateTimer, 1000);
+        return () => clearInterval(interval);
+    }, [createdAt]);
+
+    if (timeLeft === "EXPIRADO") {
+        return <span className="text-[8px] font-black text-red-500 bg-red-500/10 border border-red-500/20 px-1.5 py-0.5 rounded uppercase">Tempo Esgotado</span>;
+    }
+
+    return (
+        <span className="text-[8px] font-black text-yellow-500 bg-yellow-500/10 border border-yellow-500/30 px-1.5 py-0.5 rounded uppercase flex items-center gap-1 animate-pulse">
+            <Clock size={8}/> Cancela em {timeLeft}
+        </span>
+    );
+};
+
 const Agenda: React.FC = () => {
   const navigate = useNavigate();
   const { settings, user: currentUser } = useApp(); 
@@ -176,7 +213,6 @@ const Agenda: React.FC = () => {
         return; 
     }
 
-    // REGRA SOLICITADA: Se confirmar uma reserva que está Pendente, vai para a tela de checkout
     if (status === ReservationStatus.CONFIRMADA && editingRes.status === ReservationStatus.PENDENTE) {
         navigate('/checkout', { 
             state: { 
@@ -296,7 +332,13 @@ const Agenda: React.FC = () => {
                                         {phone && <p className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5"><Phone size={10}/> {phone}</p>}
                                         
                                         <div className="flex items-center gap-1.5 mt-3 flex-wrap">
-                                            {isCI ? <span className="text-[8px] font-bold text-green-400 bg-green-500/20 px-1.5 py-0.5 rounded border border-green-500/30 uppercase">CHECK-IN</span> : isNS ? <span className="text-[8px] font-bold text-red-400 bg-red-600/20 px-1.5 py-0.5 rounded border border-green-500/30 uppercase">NO-SHOW</span> : <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border uppercase ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border-neon-blue/20' : 'text-yellow-400 bg-yellow-900/40 border-yellow-500/20'}`}>{res.status}</span>}
+                                            {isCI ? <span className="text-[8px] font-bold text-green-400 bg-green-500/20 px-1.5 py-0.5 rounded border border-green-500/30 uppercase">CHECK-IN</span> : isNS ? <span className="text-[8px] font-bold text-red-400 bg-red-600/20 px-1.5 py-0.5 rounded border border-red-500/30 uppercase">NO-SHOW</span> : <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border uppercase ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border-neon-blue/20' : 'text-yellow-400 bg-yellow-900/40 border-yellow-500/20'}`}>{res.status}</span>}
+                                            
+                                            {/* CONTAGEM DOS 30 MINUTOS */}
+                                            {res.status === ReservationStatus.PENDENTE && !res.payOnSite && res.createdAt && (
+                                                <CountdownBadge createdAt={res.createdAt} />
+                                            )}
+                                            
                                             {res.paymentStatus === PaymentStatus.PENDENTE && <span className="text-[8px] font-bold text-red-400 bg-red-500/10 border border-red-500/20 px-1.5 py-0.5 rounded animate-pulse">PAGAMENTO</span>}
                                         </div>
                                     </div>
@@ -405,7 +447,7 @@ const Agenda: React.FC = () => {
 
                         {editingRes.observations && (
                             <div className="bg-slate-900/80 p-5 rounded-2xl border-l-4 border-neon-blue shadow-inner">
-                                <p className="text-[10px] text-slate-500 font-bold uppercase mb-2 tracking-widest">Observações Operacionais</p>
+                                <p className="text-[10px] text-slate-500 font-bold uppercase mb-2 tracking-widest">Observações Operações</p>
                                 <p className="text-slate-300 text-sm italic">"{editingRes.observations}"</p>
                             </div>
                         )}

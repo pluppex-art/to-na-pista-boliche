@@ -20,12 +20,13 @@ const safeTags = (tags: any): string[] => {
 export const db = {
   feedbacks: {
     create: async (feedback: Feedback) => {
-      const { data, error } = await supabase.from('avaliacoes').insert({
+      const { data, error } = await supabase.from('avaliacoes').upsert({
         reserva_id: feedback.reserva_id,
         cliente_id: feedback.cliente_id,
         nota: feedback.nota,
         comentario: feedback.comentario
-      }).select().single();
+      }, { onConflict: 'reserva_id' }).select().single();
+      
       if (error) throw error;
       return data;
     },
@@ -37,13 +38,25 @@ export const db = {
 
   suggestions: {
     create: async (suggestion: Suggestion) => {
-      const { data, error } = await supabase.from('sugestoes').insert({
+      if (!suggestion.titulo || !suggestion.descricao) {
+          throw new Error("Título e descrição são obrigatórios.");
+      }
+
+      // CRITICAL: Removemos .select() para evitar erro de RLS "New row violates..." 
+      // O Supabase tenta ler a linha inserida para retornar, e se o RLS de SELECT estiver bloqueado, 
+      // ele dá erro no INSERT.
+      const { error } = await supabase.from('sugestoes').insert({
         cliente_id: suggestion.cliente_id,
         titulo: suggestion.titulo,
-        descricao: suggestion.descricao
-      }).select().single();
-      if (error) throw error;
-      return data;
+        descricao: suggestion.descricao,
+        status: 'Pendente'
+      });
+      
+      if (error) {
+          console.error("[SUPABASE ERROR]:", error);
+          throw error;
+      }
+      return { success: true };
     }
   },
 
@@ -155,7 +168,7 @@ export const db = {
       if (error || !data) return { error: 'Perfil de cliente não encontrado.' };
       return {
           client: {
-              id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url,
+              id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url, address: data.address,
               tags: safeTags(data.tags), createdAt: data.created_at, lastContactAt: data.last_contact_at,
               funnelStage: data.funnel_stage, loyaltyBalance: data.loyalty_balance || 0
           }
@@ -175,8 +188,9 @@ export const db = {
         name: client.name,
         phone: cleanPhone(client.phone),
         email: client.email,
+        address: client.address || null,
         tags: client.tags || [],
-        funnel_stage: client.funnelStage || 'Novo',
+        funnel_stage: client.funnel_stage || 'Novo',
         last_contact_at: new Date().toISOString()
       }).select().single();
 
@@ -184,7 +198,7 @@ export const db = {
       
       return {
           client: {
-              id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url,
+              id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url, address: data.address,
               tags: safeTags(data.tags), createdAt: data.created_at, lastContactAt: data.last_contact_at,
               funnelStage: data.funnel_stage, loyaltyBalance: data.loyalty_balance || 0
           }
@@ -205,7 +219,7 @@ export const db = {
       const { data, error } = await supabase.from('clientes').select('*');
       if (error) throw error;
       return (data || []).map((c: any) => ({
-          id: c.client_id, name: c.name || 'Sem Nome', phone: c.phone || '', email: c.email, photoUrl: c.photo_url,
+          id: c.client_id, name: c.name || 'Sem Nome', phone: c.phone || '', email: c.email, photoUrl: c.photo_url, address: c.address,
           tags: safeTags(c.tags), createdAt: c.created_at, lastContactAt: c.last_contact_at,
           funnelStage: c.funnel_stage, loyaltyBalance: c.loyalty_balance || 0
       }));
@@ -214,7 +228,7 @@ export const db = {
       const { data } = await supabase.from('clientes').select('*').eq('client_id', id).maybeSingle();
       if (!data) return null;
       return {
-        id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url,
+        id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url, address: data.address,
         tags: safeTags(data.tags), createdAt: data.created_at, lastContactAt: data.last_contact_at,
         funnelStage: data.funnel_stage, loyaltyBalance: data.loyalty_balance || 0
       };
@@ -224,7 +238,7 @@ export const db = {
       const { data } = await supabase.from('clientes').select('*').eq('phone', clean).maybeSingle();
       if (!data) return null;
       return {
-        id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url,
+        id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url, address: data.address,
         tags: safeTags(data.tags), createdAt: data.created_at, lastContactAt: data.last_contact_at,
         funnelStage: data.funnel_stage, loyaltyBalance: data.loyalty_balance || 0
       };
@@ -235,6 +249,7 @@ export const db = {
         name: client.name,
         phone: cleanPhone(client.phone),
         email: client.email || null,
+        address: client.address || null,
         tags: client.tags || ['Lead'],
         funnel_stage: client.funnelStage || 'Novo',
         last_contact_at: new Date().toISOString()
@@ -244,7 +259,7 @@ export const db = {
       if (userId) db.audit.log(userId, 'STAFF', 'CREATE_CLIENT', `Criou cliente ${client.name}`, data.client_id);
 
       return {
-          id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url,
+          id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url, address: data.address,
           tags: safeTags(data.tags), createdAt: data.created_at, lastContactAt: data.last_contact_at,
           funnelStage: data.funnel_stage, loyaltyBalance: data.loyalty_balance || 0
       };
@@ -252,6 +267,7 @@ export const db = {
     update: async (client: Client, updatedBy?: string) => {
       const { error } = await supabase.from('clientes').update({
         name: client.name, phone: cleanPhone(client.phone), email: client.email || null,
+        address: client.address || null,
         last_contact_at: client.lastContactAt, photo_url: client.photoUrl, funnel_stage: client.funnelStage
       }).eq('client_id', client.id);
       if (error) throw error;

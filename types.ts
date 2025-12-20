@@ -65,6 +65,7 @@ export interface Client {
   email?: string;
   password?: string;
   photoUrl?: string;
+  address?: string;
   tags: string[];
   createdAt: string;
   lastContactAt: string;
