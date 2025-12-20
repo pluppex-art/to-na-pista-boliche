@@ -2,7 +2,8 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { db, cleanPhone } from '../services/mockBackend';
 import { Client, Reservation, FunnelStage, FunnelStageConfig, User, UserRole, ReservationStatus, LoyaltyTransaction, PaymentStatus } from '../types';
-import { Search, MessageCircle, Calendar, Plus, Users, Loader2, LayoutList, Kanban as KanbanIcon, GripVertical, Pencil, Save, X, Crown, Star, Sparkles, Clock, LayoutGrid, Gift, Coins, History, ArrowDown, ArrowUp, CalendarPlus, Check, DollarSign, CheckCircle2, Ban, AlertCircle, MapPin, Cake, UserCheck, Utensils, Trash2, Hash, FileText, Store } from 'lucide-react';
+// Add AlertTriangle to the imports below
+import { Search, MessageCircle, Calendar, Plus, Users, Loader2, LayoutList, Kanban as KanbanIcon, GripVertical, Pencil, Save, X, Crown, Star, Sparkles, Clock, LayoutGrid, Gift, Coins, History, ArrowDown, ArrowUp, CalendarPlus, Check, DollarSign, CheckCircle2, Ban, AlertCircle, MapPin, Cake, UserCheck, Utensils, Trash2, Hash, FileText, Store, Zap, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabaseClient';
 
@@ -50,7 +51,6 @@ const CRM: React.FC = () => {
             db.funnelStages.getAll()
         ]);
         setClients(clientsData);
-        // Garante que as etapas fiquem na ordem correta da automação (1 a 5)
         setFunnelStages(stagesData.sort((a, b) => a.ordem - b.ordem));
 
         const metrics: Record<string, { count: number, tier: ClientTier }> = {};
@@ -134,15 +134,23 @@ const CRM: React.FC = () => {
       fetchData(true);
   };
 
-  const handleAddStage = async () => {
-    const nome = prompt("Nome da nova etapa:");
-    if (!nome) return;
+  const initDefaultStages = async () => {
+    if (!isAdmin) return;
     setIsSavingStage(true);
     try {
-      const nextOrdem = funnelStages.length > 0 ? Math.max(...funnelStages.map(s => s.ordem)) + 1 : 1;
-      await db.funnelStages.create(nome, nextOrdem);
-      fetchData(true);
-    } catch (e) { alert("Erro ao criar etapa."); } 
+        const defaults = [
+            { n: 'Novo contato', o: 1 },
+            { n: 'Interessado', o: 2 },
+            { n: 'Agendado', o: 3 },
+            { n: 'Pós Venda', o: 4 },
+            { n: 'No Show', o: 5 }
+        ];
+        for (const d of defaults) {
+            await db.funnelStages.create(d.n, d.o);
+        }
+        await fetchData();
+        alert("Funil inicializado com sucesso!");
+    } catch (e) { alert("Erro ao inicializar."); }
     finally { setIsSavingStage(false); }
   };
 
@@ -225,7 +233,21 @@ const CRM: React.FC = () => {
                     </div>
                 ) : (
                     <div className="flex-1 overflow-x-auto custom-scrollbar h-full bg-slate-900/10 rounded-2xl border border-slate-800/50">
-                        {loading ? <div className="flex justify-center items-center h-full"><Loader2 className="animate-spin text-neon-blue" size={48} /></div> : (
+                        {loading ? <div className="flex justify-center items-center h-full"><Loader2 className="animate-spin text-neon-blue" size={48} /></div> : funnelStages.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-8">
+                                <AlertTriangle size={48} className="text-yellow-500 opacity-50"/>
+                                <div>
+                                    <h3 className="text-white font-bold">Funil não configurado</h3>
+                                    <p className="text-slate-400 text-xs mt-1">Não encontramos nenhuma etapa de funil no seu banco de dados.</p>
+                                </div>
+                                {isAdmin && (
+                                    <button onClick={initDefaultStages} disabled={isSavingStage} className="mt-4 px-6 py-3 bg-neon-blue text-white rounded-xl font-bold flex items-center gap-2 hover:bg-blue-600 transition shadow-lg">
+                                        {isSavingStage ? <Loader2 className="animate-spin"/> : <Zap size={18}/>}
+                                        INICIALIZAR ETAPAS PADRÃO
+                                    </button>
+                                )}
+                            </div>
+                        ) : (
                             <div className="flex gap-4 h-full min-w-max pb-4 px-2">
                                 {funnelStages.map((stage) => {
                                     const stageClients = filteredAndSortedClients.filter(c => (c.funnelStage || '') === stage.nome);
@@ -358,7 +380,7 @@ const CRM: React.FC = () => {
                                                     )}
 
                                                     <div className="flex items-center gap-3 mt-2 flex-wrap">
-                                                        {isCheckedIn ? <span className="text-[9px] font-bold text-green-400 bg-green-500/20 px-1.5 py-0.5 rounded uppercase border border-green-500/30">CHECK-IN</span> : isNoShow ? <span className="text-[9px] font-bold text-red-400 bg-red-600/20 px-1.5 py-0.5 rounded uppercase border border-red-500/30">NO-SHOW</span> : <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border-neon-blue/30' : res.status === ReservationStatus.PENDENTE ? 'text-yellow-400 bg-yellow-900/40 border-yellow-500/30' : 'text-slate-400 bg-slate-800 border-slate-700'}`}>{res.status}</span>}
+                                                        {isCheckedIn ? <span className="text-[9px] font-bold text-green-400 bg-green-500/20 px-1.5 py-0.5 rounded uppercase border border-green-500/30">CHECK-IN</span> : isNoShow ? <span className="text-[9px] font-bold text-red-400 bg-red-600/20 px-1.5 py-0.5 rounded uppercase border border-green-500/30">NO-SHOW</span> : <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border-neon-blue/30' : res.status === ReservationStatus.PENDENTE ? 'text-yellow-400 bg-yellow-900/40 border-yellow-500/30' : 'text-slate-400 bg-slate-800 border-slate-700'}`}>{res.status}</span>}
                                                         {res.payOnSite && res.status === ReservationStatus.PENDENTE && (
                                                             <span className="text-[9px] font-bold text-white bg-slate-600 px-1.5 py-0.5 rounded flex items-center gap-1"><Store size={10}/> Local</span>
                                                         )}
