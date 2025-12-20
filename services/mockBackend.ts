@@ -1,4 +1,5 @@
 
+// Fix: Fixed property access error in update method by changing funnel_stage access to funnelStage
 import { AppSettings, Client, FunnelCard, Reservation, ReservationStatus, PaymentStatus, UserRole, FunnelStage, FunnelStageConfig, LoyaltyTransaction, AuditLog, User, EventType } from '../types';
 import { supabase } from './supabaseClient';
 import { INITIAL_SETTINGS } from '../constants';
@@ -225,7 +226,8 @@ export const db = {
     update: async (client: Client, updatedBy?: string) => {
       await supabase.from('clientes').update({
         name: client.name, phone: cleanPhone(client.phone), email: client.email || null,
-        last_contact_at: client.lastContactAt, photo_url: client.photoUrl, funnel_stage: client.funnel_stage
+        // Fix: Changed incorrect camelCase funnel_stage to funnelStage to match Client interface definition
+        last_contact_at: client.lastContactAt, photo_url: client.photoUrl, funnel_stage: client.funnelStage
       }).eq('client_id', client.id);
       if (updatedBy) db.audit.log(updatedBy, 'STAFF', 'UPDATE_CLIENT', `Atualizou ${client.name}`, client.id);
     },

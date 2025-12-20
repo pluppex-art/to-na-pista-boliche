@@ -2,7 +2,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { db, cleanPhone } from '../services/mockBackend';
 import { Client, Reservation, FunnelStage, FunnelStageConfig, User, UserRole, ReservationStatus, LoyaltyTransaction, PaymentStatus } from '../types';
-// Add AlertTriangle to the imports below
 import { Search, MessageCircle, Calendar, Plus, Users, Loader2, LayoutList, Kanban as KanbanIcon, GripVertical, Pencil, Save, X, Crown, Star, Sparkles, Clock, LayoutGrid, Gift, Coins, History, ArrowDown, ArrowUp, CalendarPlus, Check, DollarSign, CheckCircle2, Ban, AlertCircle, MapPin, Cake, UserCheck, Utensils, Trash2, Hash, FileText, Store, Zap, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabaseClient';
@@ -45,11 +44,15 @@ const CRM: React.FC = () => {
   const fetchData = async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
+        console.log("[CRM] Iniciando busca de dados...");
         const [clientsData, reservationsData, stagesData] = await Promise.all([
             db.clients.getAll(),
             db.reservations.getAll(),
             db.funnelStages.getAll()
         ]);
+        
+        console.log(`[CRM] Dados recebidos: ${clientsData.length} clientes, ${stagesData.length} etapas.`);
+        
         setClients(clientsData);
         setFunnelStages(stagesData.sort((a, b) => a.ordem - b.ordem));
 
@@ -70,7 +73,9 @@ const CRM: React.FC = () => {
             metrics[client.id] = { count: totalSlots, tier };
         });
         setClientMetrics(metrics);
-    } catch (e) { console.error(e); } 
+    } catch (e: any) { 
+        console.error("[CRM ERROR] Falha ao carregar dados:", e.message || e);
+    } 
     finally { if (!isBackground) setLoading(false); }
   };
 
@@ -150,7 +155,10 @@ const CRM: React.FC = () => {
         }
         await fetchData();
         alert("Funil inicializado com sucesso!");
-    } catch (e) { alert("Erro ao inicializar."); }
+    } catch (e: any) { 
+        console.error("[CRM ERROR] Erro na inicialização:", e);
+        alert(`Erro ao inicializar: ${e.message || 'Verifique as permissões de RLS no Supabase.'}`); 
+    }
     finally { setIsSavingStage(false); }
   };
 
