@@ -1,68 +1,46 @@
-// Added React to imports to resolve namespace errors
-import React, { useEffect, useState } from 'react';
+
+import React, { useEffect, useState, useMemo } from 'react';
 import { db } from '../services/mockBackend';
 import { supabase } from '../services/supabaseClient';
 import { Reservation, ReservationStatus, EventType, UserRole, PaymentStatus } from '../types';
 import { useApp } from '../contexts/AppContext'; 
 import { generateDailySlots, checkHourCapacity } from '../utils/availability'; 
-import { ChevronLeft, ChevronRight, Users, Pencil, Save, Loader2, Calendar, Check, Ban, AlertCircle, Plus, Phone, Utensils, Cake, X, MessageCircle, Clock, Store, LayoutGrid, DollarSign, FileText, Wallet, User as UserIcon, Info, Trash2, Layout, CheckCircle2 } from 'lucide-react';
+import { 
+  ChevronLeft, 
+  ChevronRight, 
+  Users, 
+  Pencil, 
+  Save, 
+  Loader2, 
+  Calendar, 
+  Check, 
+  Ban, 
+  AlertCircle, 
+  Plus, 
+  Phone, 
+  Utensils, 
+  Cake, 
+  X, 
+  MessageCircle, 
+  Clock, 
+  Store, 
+  LayoutGrid, 
+  DollarSign, 
+  FileText, 
+  Wallet, 
+  User as UserIcon, 
+  Info, 
+  Trash2, 
+  Layout, 
+  CheckCircle2,
+  AlertTriangle,
+  Bell,
+  Zap,
+  Timer
+} from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { EVENT_TYPES } from '../constants';
-
-const CountdownBadge: React.FC<{ res: Reservation, onExpire?: () => void }> = ({ res, onExpire }) => {
-    const [timeLeft, setTimeLeft] = useState<string>("");
-    const [isExpired, setIsExpired] = useState(false);
-    const { user: currentUser } = useApp();
-
-    useEffect(() => {
-        const updateTimer = () => {
-            const created = new Date(res.createdAt).getTime();
-            const expires = created + 30 * 60 * 1000;
-            const now = new Date().getTime();
-            const diff = expires - now;
-
-            if (diff <= 0) {
-                setTimeLeft("EXPIRADO");
-                setIsExpired(true);
-                return;
-            }
-
-            const mins = Math.floor(diff / 60000);
-            const secs = Math.floor((diff % 60000) / 1000);
-            setTimeLeft(`${mins}:${secs.toString().padStart(2, '0')}`);
-        };
-
-        updateTimer();
-        const interval = setInterval(updateTimer, 1000);
-        return () => clearInterval(interval);
-    }, [res.createdAt]);
-
-    const handleAutoCancel = async (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (window.confirm(`A reserva de ${res.clientName} expirou. Deseja liberar a pista agora?`)) {
-            await db.reservations.update({ ...res, status: ReservationStatus.CANCELADA }, currentUser?.id, 'Cancelamento Automático (Prazo de 30min excedido)');
-            if (onExpire) onExpire();
-        }
-    };
-
-    if (isExpired) {
-        return (
-            <button 
-                onClick={handleAutoCancel}
-                className="text-[8px] font-black text-white bg-red-600 border border-red-700 px-2 py-1 rounded uppercase flex items-center gap-1 hover:bg-red-500 transition shadow-lg animate-pulse"
-            >
-                <Trash2 size={8}/> Expirou - Liberar Pista
-            </button>
-        );
-    }
-
-    return (
-        <span className="text-[8px] font-black text-yellow-500 bg-yellow-500/10 border border-yellow-500/30 px-1.5 py-0.5 rounded uppercase flex items-center gap-1">
-            <Clock size={8}/> Cancela em {timeLeft}
-        </span>
-    );
-};
 
 const Agenda: React.FC = () => {
   const navigate = useNavigate();
@@ -74,8 +52,10 @@ const Agenda: React.FC = () => {
   });
 
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [allReservationsForAlerts, setAllReservationsForAlerts] = useState<Reservation[]>([]);
   const [clientPhones, setClientPhones] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [now, setNow] = useState(new Date());
   
   const [metrics, setMetrics] = useState({ totalSlots: 0, pendingSlots: 0, confirmedSlots: 0, checkInSlots: 0, noShowSlots: 0 });
   const [editingRes, setEditingRes] = useState<Reservation | null>(null);
@@ -88,30 +68,38 @@ const Agenda: React.FC = () => {
   
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
-  const [unpaidConfirmed, setUnpaidConfirmed] = useState<Reservation[]>([]);
 
   const canEdit = currentUser?.role === UserRole.ADMIN || currentUser?.perm_edit_reservation;
   const canDelete = currentUser?.role === UserRole.ADMIN || currentUser?.perm_delete_reservation;
   const canReceivePayment = currentUser?.role === UserRole.ADMIN || currentUser?.perm_receive_payment;
 
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
   const loadData = async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
-      const year = parseInt(selectedDate.split('-')[0]);
-      const month = parseInt(selectedDate.split('-')[1]);
-      const start = `${year}-${String(month).padStart(2, '0')}-01`;
-      const end = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`;
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(today.getDate() - 1);
+      
+      const startRange = [yesterday.getFullYear(), String(yesterday.getMonth() + 1).padStart(2, '0'), String(yesterday.getDate()).padStart(2, '0')].join('-');
+      const endRange = selectedDate > [today.getFullYear(), String(today.getMonth() + 1).padStart(2, '0'), String(today.getDate()).padStart(2, '0')].join('-') ? selectedDate : [today.getFullYear(), String(today.getMonth() + 1).padStart(2, '0'), String(today.getDate()).padStart(2, '0')].join('-');
 
-      const [monthReservations, allClients] = await Promise.all([
-          db.reservations.getByDateRange(start, end),
+      const [rangeReservations, allClients] = await Promise.all([
+          db.reservations.getByDateRange(startRange, endRange),
           db.clients.getAll()
       ]);
+
+      setAllReservationsForAlerts(rangeReservations);
 
       const phoneMap: Record<string, string> = {};
       allClients.forEach(c => { phoneMap[c.id] = c.phone; });
       setClientPhones(phoneMap);
 
-      const dayReservations = monthReservations
+      const dayReservations = rangeReservations
         .filter(r => r.date === selectedDate && r.status !== ReservationStatus.CANCELADA)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
@@ -128,23 +116,57 @@ const Agenda: React.FC = () => {
       });
 
       setMetrics({ totalSlots: total, pendingSlots: pending, confirmedSlots: confirmed, checkInSlots: checkIn, noShowSlots: noShow });
-
-      const unpaid = monthReservations.filter(r => {
-          if (r.date !== selectedDate) return false;
-          const isActive = r.status === ReservationStatus.CONFIRMADA || r.status === ReservationStatus.CHECK_IN;
-          return isActive && r.paymentStatus === PaymentStatus.PENDENTE;
-      });
-      setUnpaidConfirmed(unpaid);
     } finally { if (!isBackground) setLoading(false); }
   };
 
   useEffect(() => { 
     loadData();
-    const channel = supabase.channel(`agenda-sync-${selectedDate}`)
+    const channel = supabase.channel(`agenda-sync-global`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => loadData(true))
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [selectedDate]);
+
+  // --- LÓGICA DE ALERTAS ATUALIZADA (SEM 10 MIN) ---
+  const alerts = useMemo(() => {
+      const globalAlerts: { type: string, message: string, res: Reservation }[] = [];
+      const todayStr = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
+      const yesterday = new Date(now);
+      yesterday.setDate(now.getDate() - 1);
+      const yesterdayStr = [yesterday.getFullYear(), String(yesterday.getMonth() + 1).padStart(2, '0'), String(yesterday.getDate()).padStart(2, '0')].join('-');
+
+      allReservationsForAlerts.forEach(res => {
+          if (res.status === ReservationStatus.CANCELADA) return;
+
+          // Alerta 2: Pagamento Pendente de Ontem
+          if (res.date === yesterdayStr && res.paymentStatus === PaymentStatus.PENDENTE && res.payOnSite) {
+              globalAlerts.push({ type: 'OVERDUE_PAYMENT', message: `Pagamento pendente de ontem: ${res.clientName}`, res });
+          }
+
+          if (res.date === todayStr) {
+              const [h, m] = res.time.split(':').map(Number);
+              const startTime = new Date(now);
+              startTime.setHours(h, m, 0, 0);
+              const diffToStart = (now.getTime() - startTime.getTime()) / 60000;
+
+              // Alerta 3: Check-in Atrasado (20 min após início)
+              if (res.status === ReservationStatus.CONFIRMADA && diffToStart >= 20 && diffToStart < 60) {
+                  globalAlerts.push({ type: 'LATE_CHECKIN', message: `${res.clientName} está ${Math.ceil(diffToStart)}min atrasado para o check-in!`, res });
+              }
+
+              // Alerta 4: Expiração de Pré-Reserva Online (30 min após criação)
+              if (res.status === ReservationStatus.PENDENTE && !res.payOnSite && res.createdAt) {
+                  const created = new Date(res.createdAt);
+                  const diffCreated = (now.getTime() - created.getTime()) / 60000;
+                  if (diffCreated >= 25 && diffCreated < 35) {
+                      globalAlerts.push({ type: 'EXPIRING_PENDING', message: `Reserva online de ${res.clientName} expira em instantes!`, res });
+                  }
+              }
+          }
+      });
+
+      return globalAlerts;
+  }, [allReservationsForAlerts, now]);
 
   const handleGranularStatus = async (e: React.MouseEvent, res: Reservation, uniqueId: string, type: 'CHECK_IN' | 'NO_SHOW') => {
       e.stopPropagation(); 
@@ -234,34 +256,39 @@ const Agenda: React.FC = () => {
       loadData(true);
   };
 
-  const openEditLanes = () => {
-      if (!editingRes) return;
-      setLaneSelectorTargetRes(editingRes);
-      setTempSelectedLanes(editingRes.lanesAssigned || []);
-      setShowLaneSelector(true);
-  };
-
   return (
     <div className="flex flex-col h-full space-y-6 pb-20 md:pb-0">
-      <div className="space-y-2">
-        {unpaidConfirmed.length > 0 && (
-            <div className="bg-purple-500/10 border border-purple-500/50 rounded-xl p-4 animate-pulse">
-                <h3 className="text-purple-400 font-bold flex items-center gap-2 mb-2 uppercase text-xs tracking-widest"><Wallet size={16} /> Confirmados s/ Pagamento</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                    {unpaidConfirmed.map(r => (
-                        <div key={r.id} onClick={() => openResModal(r)} className="bg-slate-900/90 p-3 rounded-xl border border-purple-500/30 cursor-pointer hover:bg-slate-800 transition">
-                            <div className="flex justify-between items-start mb-1"><span className="text-xs font-bold text-white truncate">{r.clientName}</span><span className="text-[10px] text-green-400 font-bold">{r.totalValue.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</span></div>
-                            <span className="text-[10px] text-slate-500">{r.time}</span>
-                            <button onClick={(e) => handleQuickReceive(e, r)} className="w-full mt-2 bg-green-600 hover:bg-green-500 text-white text-[10px] font-black py-2 rounded-lg flex items-center justify-center gap-1 shadow-md uppercase">Receber</button>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        )}
-      </div>
+      
+      {alerts.length > 0 && (
+          <div className="space-y-2">
+              {alerts.slice(0, 3).map((alert, i) => (
+                  <div key={i} onClick={() => openResModal(alert.res)} className={`p-4 rounded-2xl border flex items-center justify-between cursor-pointer transition-all hover:scale-[1.01] shadow-lg animate-fade-in ${
+                      alert.type === 'OVERDUE_PAYMENT' ? 'bg-red-900/40 border-red-500 text-red-100' :
+                      alert.type === 'LATE_CHECKIN' ? 'bg-orange-900/40 border-orange-500 text-orange-100' :
+                      'bg-blue-900/40 border-blue-500 text-blue-100'
+                  }`}>
+                      <div className="flex items-center gap-3">
+                          <div className={`p-2 rounded-xl ${
+                              alert.type === 'OVERDUE_PAYMENT' ? 'bg-red-500/20' :
+                              alert.type === 'LATE_CHECKIN' ? 'bg-orange-500/20' :
+                              'bg-blue-500/20'
+                          }`}>
+                              <AlertTriangle size={20} />
+                          </div>
+                          <div>
+                              <p className="text-xs font-black uppercase tracking-widest leading-none mb-1">{alert.type.replace('_', ' ')}</p>
+                              <p className="text-sm font-bold">{alert.message}</p>
+                          </div>
+                      </div>
+                      <ChevronRight size={20} className="opacity-50" />
+                  </div>
+              ))}
+              {alerts.length > 3 && <p className="text-[10px] text-slate-500 font-bold uppercase text-center tracking-widest">+ {alerts.length - 3} outros alertas ativos</p>}
+          </div>
+      )}
 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-6">
-        <div><h1 className="text-3xl font-black text-white tracking-tight uppercase">Dashboard</h1><p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Gestão de {selectedDate.split('-').reverse().join('/')}</p></div>
+        <div><h1 className="text-3xl font-black text-white tracking-tight uppercase">Agenda</h1><p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Gestão de {selectedDate.split('-').reverse().join('/')}</p></div>
         <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
             <div className="flex items-center gap-4 bg-slate-800 p-2 rounded-2xl border border-slate-700 shadow-xl w-full md:w-auto justify-between md:justify-start">
                 <button onClick={() => { const [y,m,d] = selectedDate.split('-').map(Number); const nd = new Date(y,m-1,d-1); setSelectedDate([nd.getFullYear(),String(nd.getMonth()+1).padStart(2,'0'),String(nd.getDate()).padStart(2,'0')].join('-')); }} className="p-2 hover:bg-slate-700 rounded-full text-slate-300"><ChevronLeft size={20} /></button>
@@ -316,16 +343,26 @@ const Agenda: React.FC = () => {
                                const uid = `${res.id}_${currentHourInt}:00_${idx+1}`;
                                const isCI = res.checkedInIds?.includes(uid);
                                const isNS = res.noShowIds?.includes(uid);
-                               const phone = clientPhones[res.clientId] || '';
+                               const cardAlert = alerts.find(a => a.res.id === res.id);
+
                                return (
-                               <div key={uid} onClick={() => openResModal(res)} className={`relative p-5 rounded-2xl border cursor-pointer hover:scale-[1.02] active:scale-95 transition-all shadow-lg ${isCI ? 'border-green-500 bg-slate-900 opacity-95' : isNS ? 'border-red-500 bg-red-900/10 grayscale opacity-80' : res.status === ReservationStatus.CONFIRMADA ? 'border-neon-blue bg-blue-900/10' : 'border-yellow-500/50 bg-yellow-900/10'}`}>
+                               <div key={uid} onClick={() => openResModal(res)} className={`relative p-5 rounded-2xl border cursor-pointer hover:scale-[1.02] active:scale-95 transition-all shadow-lg ${
+                                   isCI ? 'border-green-500 bg-slate-900 opacity-95' : 
+                                   isNS ? 'border-red-500 bg-red-900/10 grayscale opacity-80' : 
+                                   cardAlert?.type === 'LATE_CHECKIN' ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/20' :
+                                   res.status === ReservationStatus.CONFIRMADA ? 'border-neon-blue bg-blue-900/10' : 
+                                   'border-yellow-500/50 bg-yellow-900/10'
+                               }`}>
+                                  {cardAlert && !isCI && !isNS && (
+                                      <div className="absolute -top-2 -right-2 bg-orange-600 text-white p-1.5 rounded-full shadow-xl animate-bounce border-2 border-slate-800">
+                                          <Bell size={14}/>
+                                      </div>
+                                  )}
                                   <div className="flex justify-between items-start mb-4">
                                     <div className="min-w-0 pr-2">
                                         <h4 className={`font-bold truncate text-sm text-slate-100 uppercase tracking-wide leading-tight ${isNS ? 'line-through text-slate-500' : ''}`}>{res.clientName}</h4>
-                                        {phone && <p className="text-[10px] text-slate-500 font-medium flex items-center gap-1 mt-1.5 font-mono tracking-tighter">{phone}</p>}
                                         <div className="flex items-center gap-1.5 mt-4 flex-wrap">
                                             {isCI ? <span className="text-[8px] font-black text-green-400 bg-green-500/20 px-2 py-0.5 rounded-lg border border-green-500/30 uppercase">CHECK-IN</span> : isNS ? <span className="text-[8px] font-black text-red-400 bg-red-600/20 px-2 py-0.5 rounded-lg border border-red-500/30 uppercase tracking-widest">NO-SHOW</span> : <span className={`text-[8px] font-black px-2 py-0.5 rounded-lg border uppercase tracking-widest ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border-neon-blue/30 shadow-blue-900/20 shadow-lg' : 'text-yellow-400 bg-yellow-900/40 border-yellow-500/30 shadow-yellow-900/20 shadow-lg'}`}>{res.status}</span>}
-                                            {res.status === ReservationStatus.PENDENTE && !res.payOnSite && res.createdAt && ( <CountdownBadge res={res} onExpire={() => loadData(true)} /> )}
                                             {res.paymentStatus === PaymentStatus.PENDENTE && <span className="text-[8px] font-black text-red-400 bg-red-500/10 border border-red-500/20 px-2 py-0.5 rounded-lg animate-pulse uppercase">Pagamento Pendente</span>}
                                         </div>
                                     </div>
@@ -334,7 +371,6 @@ const Agenda: React.FC = () => {
                                             <button disabled={!canEdit} onClick={(e) => handleGranularStatus(e, res, uid, 'CHECK_IN')} className={`w-8 h-8 flex items-center justify-center rounded-xl border transition-all shadow-md ${isCI ? 'bg-green-600 text-white border-green-500' : 'bg-slate-800 text-slate-500 border-slate-700 hover:text-green-400 hover:border-green-400'}`}><Check size={16}/></button>
                                             <button disabled={!canEdit} onClick={(e) => handleGranularStatus(e, res, uid, 'NO_SHOW')} className={`w-8 h-8 flex items-center justify-center rounded-xl border transition-all shadow-md ${isNS ? 'bg-red-600 text-white border-red-500' : 'bg-slate-800 text-slate-500 border-slate-700 hover:text-red-400 hover:border-red-400'}`}><Ban size={16}/></button>
                                         </div>
-                                        {isCI && res.lanesAssigned && res.lanesAssigned.length > 0 && <div className="w-7 h-7 bg-white/10 rounded-full flex items-center justify-center border border-white/20 text-white font-black text-xs shadow-inner">{res.lanesAssigned[0]}</div>}
                                     </div>
                                   </div>
                                   <div className="pt-4 border-t border-slate-700/50 space-y-1.5 mt-2">
@@ -390,9 +426,25 @@ const Agenda: React.FC = () => {
                             <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner"><p className="text-[7px] md:text-[9px] text-slate-500 font-bold uppercase mb-1 md:mb-2 tracking-widest">Grupo</p><p className="text-white font-bold text-sm md:text-xl leading-tight">{editingRes.peopleCount} Jogadores</p></div>
                             <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner"><p className="text-[7px] md:text-[9px] text-slate-500 font-bold uppercase mb-1 md:mb-2 tracking-widest">Financeiro</p><p className="text-neon-green font-black text-sm md:text-xl leading-tight">{editingRes.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p></div>
                         </div>
+                        
+                        {editingRes.paymentStatus === PaymentStatus.PENDENTE && (
+                            <div className="bg-red-950/30 border border-red-500/50 p-4 rounded-2xl flex items-center justify-between shadow-lg animate-pulse">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-red-500/20 rounded-xl text-red-500"><DollarSign size={20}/></div>
+                                    <div>
+                                        <p className="text-[10px] font-black text-red-400 uppercase tracking-widest">Pagamento Pendente</p>
+                                        <p className="text-xs font-bold text-red-200">Aguardando recebimento</p>
+                                    </div>
+                                </div>
+                                {canReceivePayment && (
+                                    <button onClick={(e) => handleQuickReceive(e, editingRes)} className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-colors shadow-lg">Receber</button>
+                                )}
+                            </div>
+                        )}
+
                         {editingRes.status === ReservationStatus.CHECK_IN && (
                              <div className="bg-slate-900/80 p-4 md:p-6 rounded-2xl border border-slate-700 shadow-xl space-y-3">
-                                <div className="flex justify-between items-center"><h4 className="text-[8px] md:text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1.5 tracking-widest"><LayoutGrid size={12} className="text-neon-blue"/> Pistas Ativas</h4>{canEdit && <button onClick={openEditLanes} className="text-[8px] md:text-[10px] font-bold text-neon-blue uppercase flex items-center gap-1 hover:underline"><Pencil size={10}/> Editar</button>}</div>
+                                <div className="flex justify-between items-center"><h4 className="text-[8px] md:text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1.5 tracking-widest"><LayoutGrid size={12} className="text-neon-blue"/> Pistas Ativas</h4>{canEdit && <button onClick={() => { setLaneSelectorTargetRes(editingRes); setTempSelectedLanes(editingRes.lanesAssigned || []); setShowLaneSelector(true); }} className="text-[8px] md:text-[10px] font-bold text-neon-blue uppercase flex items-center gap-1 hover:underline"><Pencil size={10}/> Editar</button>}</div>
                                 <div className="flex flex-wrap gap-2">{editingRes.lanesAssigned && editingRes.lanesAssigned.length > 0 ? ( editingRes.lanesAssigned.map(l => ( <div key={l} className="w-10 h-10 md:w-12 md:h-12 bg-neon-blue text-white rounded-xl flex items-center justify-center font-black text-lg md:text-xl shadow-lg border border-white/10">{l}</div> )) ) : <div className="text-slate-500 italic text-[10px] py-1">Nenhuma pista definida</div>}</div>
                              </div>
                         )}
