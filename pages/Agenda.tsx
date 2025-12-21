@@ -77,10 +77,7 @@ const Agenda: React.FC = () => {
   const [clientPhones, setClientPhones] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   
-  const [metrics, setMetrics] = useState({
-      totalSlots: 0, pendingSlots: 0, confirmedSlots: 0, checkInSlots: 0, noShowSlots: 0
-  });
-
+  const [metrics, setMetrics] = useState({ totalSlots: 0, pendingSlots: 0, confirmedSlots: 0, checkInSlots: 0, noShowSlots: 0 });
   const [editingRes, setEditingRes] = useState<Reservation | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Reservation>>({});
@@ -91,7 +88,6 @@ const Agenda: React.FC = () => {
   
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
-  
   const [unpaidConfirmed, setUnpaidConfirmed] = useState<Reservation[]>([]);
 
   const canEdit = currentUser?.role === UserRole.ADMIN || currentUser?.perm_edit_reservation;
@@ -125,10 +121,8 @@ const Agenda: React.FC = () => {
       dayReservations.forEach(r => {
           const slotCount = (r.laneCount || 1) * Math.ceil(r.duration || 1);
           total += slotCount;
-          
           if (r.status === ReservationStatus.CHECK_IN) checkIn += (r.checkedInIds?.length || 0);
           else if (r.status === ReservationStatus.NO_SHOW) noShow += (r.noShowIds?.length || 0);
-          
           if (r.paymentStatus === PaymentStatus.PENDENTE) pending += slotCount;
           else confirmed += slotCount;
       });
@@ -141,14 +135,12 @@ const Agenda: React.FC = () => {
           return isActive && r.paymentStatus === PaymentStatus.PENDENTE;
       });
       setUnpaidConfirmed(unpaid);
-    } finally {
-      if (!isBackground) setLoading(false);
-    }
+    } finally { if (!isBackground) setLoading(false); }
   };
 
   useEffect(() => { 
     loadData();
-    const channel = supabase.channel('agenda-realtime-v8')
+    const channel = supabase.channel(`agenda-sync-${selectedDate}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => loadData(true))
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -181,9 +173,7 @@ const Agenda: React.FC = () => {
           setLaneSelectorTargetRes(updatedRes);
           setTempSelectedLanes(updatedRes.lanesAssigned || []);
           setShowLaneSelector(true);
-      } else {
-          loadData(true);
-      }
+      } else { loadData(true); }
   };
 
   const handleQuickReceive = async (e: React.MouseEvent, res: Reservation) => {
@@ -201,9 +191,7 @@ const Agenda: React.FC = () => {
       await db.reservations.update(updatedRes, currentUser?.id, 'Atualizou pistas atribuídas');
       setShowLaneSelector(false);
       setLaneSelectorTargetRes(null);
-      if (editingRes && editingRes.id === updatedRes.id) {
-          setEditingRes(updatedRes);
-      }
+      if (editingRes && editingRes.id === updatedRes.id) { setEditingRes(updatedRes); }
       loadData(true);
   };
 
@@ -216,37 +204,18 @@ const Agenda: React.FC = () => {
 
   const handleStatusChange = async (status: ReservationStatus) => {
     if (!editingRes) return;
-
-    if (status === ReservationStatus.CANCELADA) { 
-        setIsCancelling(true); 
-        return; 
-    }
-
+    if (status === ReservationStatus.CANCELADA) { setIsCancelling(true); return; }
     if (status === ReservationStatus.CONFIRMADA && editingRes.status === ReservationStatus.PENDENTE) {
         navigate('/checkout', { 
             state: { 
-                clientId: editingRes.clientId,
-                name: editingRes.clientName,
-                whatsapp: clientPhones[editingRes.clientId] || '',
-                date: editingRes.date,
-                time: editingRes.time,
-                people: editingRes.peopleCount,
-                lanes: editingRes.laneCount,
-                duration: editingRes.duration,
-                type: editingRes.eventType,
-                totalValue: editingRes.totalValue,
-                reservationIds: [editingRes.id]
+                clientId: editingRes.clientId, name: editingRes.clientName, whatsapp: clientPhones[editingRes.clientId] || '',
+                date: editingRes.date, time: editingRes.time, people: editingRes.peopleCount, lanes: editingRes.laneCount,
+                duration: editingRes.duration, type: editingRes.eventType, totalValue: editingRes.totalValue, reservationIds: [editingRes.id]
             } 
         });
         return;
     }
-
-    const updated = { 
-        ...editingRes, 
-        status, 
-        paymentStatus: status === ReservationStatus.CONFIRMADA && !editingRes.payOnSite ? PaymentStatus.PAGO : editingRes.paymentStatus 
-    };
-    
+    const updated = { ...editingRes, status, paymentStatus: status === ReservationStatus.CONFIRMADA && !editingRes.payOnSite ? PaymentStatus.PAGO : editingRes.paymentStatus };
     await db.reservations.update(updated, currentUser?.id, `Alterou status para ${status}`);
     setEditingRes(null); 
     loadData(true); 
@@ -254,13 +223,11 @@ const Agenda: React.FC = () => {
 
   const handleSaveFullEdit = async () => {
       if (!editingRes || !editForm) return;
-      
       const [y, m, d] = (editForm.date || '').split('-').map(Number);
       const date = new Date(y, m - 1, d);
       const isWeekend = [0, 5, 6].includes(date.getDay());
       const price = isWeekend ? settings.weekendPrice : settings.weekdayPrice;
       const total = price * (editForm.laneCount || 1) * (editForm.duration || 1);
-
       const finalUpdate = { ...editingRes, ...editForm, totalValue: total } as Reservation;
       await db.reservations.update(finalUpdate, currentUser?.id, 'Edição completa de agendamento');
       setEditingRes(null);
@@ -276,7 +243,6 @@ const Agenda: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full space-y-6 pb-20 md:pb-0">
-      {/* Alertas de Operação */}
       <div className="space-y-2">
         {unpaidConfirmed.length > 0 && (
             <div className="bg-purple-500/10 border border-purple-500/50 rounded-xl p-4 animate-pulse">
@@ -306,34 +272,21 @@ const Agenda: React.FC = () => {
         </div>
       </div>
 
-      {/* MÉTRICAS: Ajustado grid para 1 coluna no mobile (um em cima do outro) e rótulos conforme pedido */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
          <div className="p-4 rounded-2xl border flex items-center justify-between shadow-xl bg-slate-800 border-slate-700">
-             <div className="flex items-center gap-3">
-                 <div className="p-2 bg-slate-500/10 rounded-xl text-slate-500"><CheckCircle2 size={20} /></div>
-                 <span className="text-[10px] uppercase font-black text-slate-500 tracking-widest">Confirmada</span>
-             </div>
+             <div className="flex items-center gap-3"><div className="p-2 bg-slate-500/10 rounded-xl text-slate-500"><CheckCircle2 size={20} /></div><span className="text-[10px] uppercase font-black text-slate-500 tracking-widest">Confirmada</span></div>
              <span className="text-2xl font-black text-slate-200">{loading ? '-' : metrics.confirmedSlots}</span>
          </div>
          <div className="p-4 rounded-2xl border flex items-center justify-between shadow-xl bg-slate-800 border-yellow-500/30">
-             <div className="flex items-center gap-3">
-                 <div className="p-2 bg-yellow-500/10 rounded-xl text-yellow-500"><AlertCircle size={20} /></div>
-                 <span className="text-[10px] uppercase font-black text-yellow-500 tracking-widest">Pendente</span>
-             </div>
+             <div className="flex items-center gap-3"><div className="p-2 bg-yellow-500/10 rounded-xl text-yellow-500"><AlertCircle size={20} /></div><span className="text-[10px] uppercase font-black text-yellow-500 tracking-widest">Pendente</span></div>
              <span className="text-2xl font-black text-yellow-500">{loading ? '-' : metrics.pendingSlots}</span>
          </div>
          <div className="bg-green-900/20 p-4 rounded-2xl border border-green-500/30 flex items-center justify-between shadow-xl">
-             <div className="flex items-center gap-3">
-                 <div className="p-2 bg-green-500/20 rounded-xl text-green-400"><Users size={20} /></div>
-                 <span className="text-[10px] text-green-400 uppercase font-black tracking-widest">Check-in</span>
-             </div>
+             <div className="flex items-center gap-3"><div className="p-2 bg-green-500/20 rounded-xl text-green-400"><Users size={20} /></div><span className="text-[10px] text-green-400 uppercase font-black tracking-widest">Check-in</span></div>
              <span className="text-2xl font-black text-green-400">{loading ? '-' : metrics.checkInSlots}</span>
          </div>
          <div className="bg-red-900/20 p-4 rounded-2xl border border-red-500/30 flex items-center justify-between shadow-xl">
-             <div className="flex items-center gap-3">
-                 <div className="p-2 bg-red-500/20 rounded-xl text-red-400"><Ban size={20} /></div>
-                 <span className="text-[10px] text-red-400 uppercase font-black tracking-widest">No-Show</span>
-             </div>
+             <div className="flex items-center gap-3"><div className="p-2 bg-red-500/20 rounded-xl text-red-400"><Ban size={20} /></div><span className="text-[10px] text-red-400 uppercase font-black tracking-widest">No-Show</span></div>
              <span className="text-2xl font-black text-red-400">{loading ? '-' : metrics.noShowSlots}</span>
          </div>
       </div>
@@ -364,19 +317,15 @@ const Agenda: React.FC = () => {
                                const isCI = res.checkedInIds?.includes(uid);
                                const isNS = res.noShowIds?.includes(uid);
                                const phone = clientPhones[res.clientId] || '';
-                               
                                return (
                                <div key={uid} onClick={() => openResModal(res)} className={`relative p-5 rounded-2xl border cursor-pointer hover:scale-[1.02] active:scale-95 transition-all shadow-lg ${isCI ? 'border-green-500 bg-slate-900 opacity-95' : isNS ? 'border-red-500 bg-red-900/10 grayscale opacity-80' : res.status === ReservationStatus.CONFIRMADA ? 'border-neon-blue bg-blue-900/10' : 'border-yellow-500/50 bg-yellow-900/10'}`}>
                                   <div className="flex justify-between items-start mb-4">
                                     <div className="min-w-0 pr-2">
                                         <h4 className={`font-bold truncate text-sm text-slate-100 uppercase tracking-wide leading-tight ${isNS ? 'line-through text-slate-500' : ''}`}>{res.clientName}</h4>
                                         {phone && <p className="text-[10px] text-slate-500 font-medium flex items-center gap-1 mt-1.5 font-mono tracking-tighter">{phone}</p>}
-                                        
                                         <div className="flex items-center gap-1.5 mt-4 flex-wrap">
                                             {isCI ? <span className="text-[8px] font-black text-green-400 bg-green-500/20 px-2 py-0.5 rounded-lg border border-green-500/30 uppercase">CHECK-IN</span> : isNS ? <span className="text-[8px] font-black text-red-400 bg-red-600/20 px-2 py-0.5 rounded-lg border border-red-500/30 uppercase tracking-widest">NO-SHOW</span> : <span className={`text-[8px] font-black px-2 py-0.5 rounded-lg border uppercase tracking-widest ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border-neon-blue/30 shadow-blue-900/20 shadow-lg' : 'text-yellow-400 bg-yellow-900/40 border-yellow-500/30 shadow-yellow-900/20 shadow-lg'}`}>{res.status}</span>}
-                                            {res.status === ReservationStatus.PENDENTE && !res.payOnSite && res.createdAt && (
-                                                <CountdownBadge res={res} onExpire={() => loadData(true)} />
-                                            )}
+                                            {res.status === ReservationStatus.PENDENTE && !res.payOnSite && res.createdAt && ( <CountdownBadge res={res} onExpire={() => loadData(true)} /> )}
                                             {res.paymentStatus === PaymentStatus.PENDENTE && <span className="text-[8px] font-black text-red-400 bg-red-500/10 border border-red-500/20 px-2 py-0.5 rounded-lg animate-pulse uppercase">Pagamento Pendente</span>}
                                         </div>
                                     </div>
@@ -388,7 +337,6 @@ const Agenda: React.FC = () => {
                                         {isCI && res.lanesAssigned && res.lanesAssigned.length > 0 && <div className="w-7 h-7 bg-white/10 rounded-full flex items-center justify-center border border-white/20 text-white font-black text-xs shadow-inner">{res.lanesAssigned[0]}</div>}
                                     </div>
                                   </div>
-
                                   <div className="pt-4 border-t border-slate-700/50 space-y-1.5 mt-2">
                                       {res.hasTableReservation && <div className="flex items-center gap-1.5 text-[10px] font-black text-orange-400 uppercase tracking-tighter"><Utensils size={14} className="opacity-50"/> MESA: {res.tableSeatCount} LUG.</div>}
                                       {res.birthdayName && <div className="flex items-center gap-1.5 text-[10px] font-black text-blue-400 uppercase tracking-tighter"><Cake size={14} className="opacity-50"/> {res.birthdayName}</div>}
@@ -406,28 +354,20 @@ const Agenda: React.FC = () => {
         )}
       </div>
 
-      {/* MODAL DETALHADO DE RESERVA */}
       {editingRes && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-xl p-3 md:p-4">
           <div className="bg-slate-800 border border-slate-600 w-full max-w-lg md:max-w-2xl rounded-[1.5rem] md:rounded-[2.5rem] shadow-2xl animate-scale-in flex flex-col max-h-[95vh] overflow-hidden">
-            
-            {/* Header Redimensionado */}
             <div className="p-4 md:p-8 border-b border-slate-700 flex justify-between items-center bg-slate-900/50">
               <div className="flex items-center gap-3 md:gap-4 flex-1 min-w-0">
                   <div className="w-10 h-10 md:w-12 md:h-12 bg-neon-blue/10 rounded-xl flex items-center justify-center text-neon-blue border border-neon-blue/20 shadow-inner flex-shrink-0"><Info size={20} className="md:w-6 md:h-6"/></div>
-                  <div className="min-w-0">
-                      <h3 className="text-base md:text-xl font-bold text-white tracking-tight uppercase leading-tight mb-1 truncate">{editingRes.clientName}</h3>
-                      <p className="text-[8px] md:text-[10px] text-slate-500 font-bold uppercase tracking-widest">Reserva #{editingRes.id.slice(0,8)}</p>
-                  </div>
+                  <div className="min-w-0"><h3 className="text-base md:text-xl font-bold text-white tracking-tight uppercase leading-tight mb-1 truncate">{editingRes.clientName}</h3><p className="text-[8px] md:text-[10px] text-slate-500 font-bold uppercase tracking-widest">Reserva #{editingRes.id.slice(0,8)}</p></div>
               </div>
               <div className="flex items-center gap-2 md:gap-3 ml-2">
                   {canEdit && <button onClick={() => setIsEditMode(!isEditMode)} className={`p-2.5 md:p-3 rounded-xl border transition-all ${isEditMode ? 'bg-neon-blue text-white border-neon-blue shadow-lg' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}><Pencil size={18} className="md:w-5 md:h-5"/></button>}
                   <button onClick={() => setEditingRes(null)} className="text-slate-400 hover:text-white p-2.5 md:p-3 bg-slate-800 rounded-xl border border-slate-700 transition-colors"><X size={20} className="md:w-6 md:h-6"/></button>
               </div>
             </div>
-
             <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-4 md:space-y-8 custom-scrollbar bg-slate-800">
-                
                 {isEditMode ? (
                     <div className="space-y-6 animate-fade-in">
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
@@ -444,57 +384,22 @@ const Agenda: React.FC = () => {
                     </div>
                 ) : (
                     <div className="space-y-5 md:space-y-8 animate-fade-in">
-                        {/* Grid de Informações Otimizado */}
                         <div className="grid grid-cols-2 gap-3 md:gap-4">
-                            <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner">
-                                <p className="text-[7px] md:text-[9px] text-slate-500 font-bold uppercase mb-1 md:mb-2 tracking-widest">Agenda</p>
-                                <p className="text-white font-bold text-xs md:text-sm">{editingRes.date.split('-').reverse().join('/')}</p>
-                                <p className="text-neon-blue text-sm md:text-lg font-black">{editingRes.time}</p>
-                            </div>
-                            <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner">
-                                <p className="text-[7px] md:text-[9px] text-slate-500 font-bold uppercase mb-1 md:mb-2 tracking-widest">Grade</p>
-                                <p className="text-white font-bold text-xs md:text-sm uppercase leading-tight">{editingRes.laneCount} Pistas</p>
-                                <p className="text-slate-400 text-xs md:text-base font-bold">{editingRes.duration} Horas</p>
-                            </div>
-                            <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner">
-                                <p className="text-[7px] md:text-[9px] text-slate-500 font-bold uppercase mb-1 md:mb-2 tracking-widest">Grupo</p>
-                                <p className="text-white font-bold text-sm md:text-xl leading-tight">{editingRes.peopleCount} Jogadores</p>
-                            </div>
-                            <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner">
-                                <p className="text-[7px] md:text-[9px] text-slate-500 font-bold uppercase mb-1 md:mb-2 tracking-widest">Financeiro</p>
-                                <p className="text-neon-green font-black text-sm md:text-xl leading-tight">{editingRes.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
-                            </div>
+                            <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner"><p className="text-[7px] md:text-[9px] text-slate-500 font-bold uppercase mb-1 md:mb-2 tracking-widest">Agenda</p><p className="text-white font-bold text-xs md:text-sm">{editingRes.date.split('-').reverse().join('/')}</p><p className="text-neon-blue text-sm md:text-lg font-black">{editingRes.time}</p></div>
+                            <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner"><p className="text-[7px] md:text-[9px] text-slate-500 font-bold uppercase mb-1 md:mb-2 tracking-widest">Grade</p><p className="text-white font-bold text-xs md:text-sm uppercase leading-tight">{editingRes.laneCount} Pistas</p><p className="text-slate-400 text-xs md:text-base font-bold">{editingRes.duration} Horas</p></div>
+                            <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner"><p className="text-[7px] md:text-[9px] text-slate-500 font-bold uppercase mb-1 md:mb-2 tracking-widest">Grupo</p><p className="text-white font-bold text-sm md:text-xl leading-tight">{editingRes.peopleCount} Jogadores</p></div>
+                            <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner"><p className="text-[7px] md:text-[9px] text-slate-500 font-bold uppercase mb-1 md:mb-2 tracking-widest">Financeiro</p><p className="text-neon-green font-black text-sm md:text-xl leading-tight">{editingRes.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p></div>
                         </div>
-
-                        {/* Pistas Atribuídas */}
                         {editingRes.status === ReservationStatus.CHECK_IN && (
                              <div className="bg-slate-900/80 p-4 md:p-6 rounded-2xl border border-slate-700 shadow-xl space-y-3">
-                                <div className="flex justify-between items-center">
-                                    <h4 className="text-[8px] md:text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1.5 tracking-widest"><LayoutGrid size={12} className="text-neon-blue"/> Pistas Ativas</h4>
-                                    {canEdit && <button onClick={openEditLanes} className="text-[8px] md:text-[10px] font-bold text-neon-blue uppercase flex items-center gap-1 hover:underline"><Pencil size={10}/> Editar</button>}
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                    {editingRes.lanesAssigned && editingRes.lanesAssigned.length > 0 ? (
-                                        editingRes.lanesAssigned.map(l => (
-                                            <div key={l} className="w-10 h-10 md:w-12 md:h-12 bg-neon-blue text-white rounded-xl flex items-center justify-center font-black text-lg md:text-xl shadow-lg border border-white/10">{l}</div>
-                                        ))
-                                    ) : <div className="text-slate-500 italic text-[10px] py-1">Nenhuma pista definida</div>}
-                                </div>
+                                <div className="flex justify-between items-center"><h4 className="text-[8px] md:text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1.5 tracking-widest"><LayoutGrid size={12} className="text-neon-blue"/> Pistas Ativas</h4>{canEdit && <button onClick={openEditLanes} className="text-[8px] md:text-[10px] font-bold text-neon-blue uppercase flex items-center gap-1 hover:underline"><Pencil size={10}/> Editar</button>}</div>
+                                <div className="flex flex-wrap gap-2">{editingRes.lanesAssigned && editingRes.lanesAssigned.length > 0 ? ( editingRes.lanesAssigned.map(l => ( <div key={l} className="w-10 h-10 md:w-12 md:h-12 bg-neon-blue text-white rounded-xl flex items-center justify-center font-black text-lg md:text-xl shadow-lg border border-white/10">{l}</div> )) ) : <div className="text-slate-500 italic text-[10px] py-1">Nenhuma pista definida</div>}</div>
                              </div>
                         )}
-
-                        {/* Notas do Atendimento */}
-                        {editingRes.observations && (
-                            <div className="bg-slate-900/80 p-4 rounded-2xl border-l-4 border-neon-blue shadow-lg">
-                                <p className="text-[8px] md:text-[10px] font-bold text-slate-500 uppercase mb-2 tracking-widest">Observações Equipe</p>
-                                <p className="text-slate-300 text-xs md:text-sm italic font-medium leading-relaxed truncate-2-lines">"{editingRes.observations}"</p>
-                            </div>
-                        )}
+                        {editingRes.observations && (<div className="bg-slate-900/80 p-4 rounded-2xl border-l-4 border-neon-blue shadow-lg"><p className="text-[8px] md:text-[10px] font-bold text-slate-500 uppercase mb-2 tracking-widest">Observações Equipe</p><p className="text-slate-300 text-xs md:text-sm italic font-medium leading-relaxed truncate-2-lines">"{editingRes.observations}"</p></div>)}
                     </div>
                 )}
             </div>
-
-            {/* Footer de Ações Redimensionado */}
             <div className="p-4 md:p-8 bg-slate-900 border-t border-slate-700">
                 {!isEditMode && !isCancelling && (
                     <div className="flex flex-col gap-2">
@@ -505,14 +410,10 @@ const Agenda: React.FC = () => {
                         </div>
                     </div>
                 )}
-
                 {isCancelling && (
                     <div className="space-y-4 animate-scale-in">
                         <textarea className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 md:p-4 text-white text-xs md:text-sm focus:border-red-500 transition-all font-medium h-20 md:h-24" placeholder="Motivo do cancelamento..." value={cancelReason} onChange={e => setCancelReason(e.target.value)} />
-                        <div className="flex gap-2">
-                            <button onClick={() => setIsCancelling(false)} className="flex-1 py-3 bg-slate-800 text-white rounded-xl text-[10px] font-black uppercase">Voltar</button>
-                            <button onClick={async () => { if(!cancelReason.trim()) return; await db.reservations.update({...editingRes, status: ReservationStatus.CANCELADA}, currentUser?.id, `Cancelado: ${cancelReason}`); setEditingRes(null); loadData(true); }} className="flex-[2] py-3 bg-red-600 text-white rounded-xl text-[10px] font-black uppercase shadow-lg">Anular Reserva</button>
-                        </div>
+                        <div className="flex gap-2"><button onClick={() => setIsCancelling(false)} className="flex-1 py-3 bg-slate-800 text-white rounded-xl text-[10px] font-black uppercase">Voltar</button><button onClick={async () => { if(!cancelReason.trim()) return; await db.reservations.update({...editingRes, status: ReservationStatus.CANCELADA}, currentUser?.id, `Cancelado: ${cancelReason}`); setEditingRes(null); loadData(true); }} className="flex-[2] py-3 bg-red-600 text-white rounded-xl text-[10px] font-black uppercase shadow-lg">Anular Reserva</button></div>
                     </div>
                 )}
             </div>
@@ -523,24 +424,9 @@ const Agenda: React.FC = () => {
       {showLaneSelector && laneSelectorTargetRes && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/95 p-4 backdrop-blur-xl">
               <div className="bg-slate-800 border border-slate-600 w-full max-w-sm rounded-[2.5rem] p-8 md:p-12 shadow-2xl animate-scale-in">
-                  <div className="text-center mb-8">
-                      <div className="w-16 h-16 md:w-20 md:h-20 bg-neon-blue/20 rounded-2xl flex items-center justify-center mx-auto mb-6 text-neon-blue border border-neon-blue/30 shadow-inner animate-pulse"><LayoutGrid size={32}/></div>
-                      <h3 className="text-xl md:text-2xl font-black text-white uppercase tracking-tighter leading-none mb-2">Atribuir Pista</h3>
-                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest truncate">{laneSelectorTargetRes.clientName}</p>
-                  </div>
-                  <div className="grid grid-cols-3 gap-3 md:gap-4 mb-10">
-                      {Array.from({ length: settings.activeLanes }).map((_, i) => { 
-                          const n = i + 1; 
-                          const sel = tempSelectedLanes.includes(n); 
-                          return (
-                              <button key={n} onClick={() => setTempSelectedLanes(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n])} className={`h-14 md:h-16 rounded-xl md:rounded-2xl flex items-center justify-center text-xl md:text-2xl font-black transition-all border-2 shadow-lg active:scale-90 ${sel ? 'bg-neon-blue border-white text-white shadow-blue-500/50' : 'bg-slate-900 border-slate-700 text-slate-600 hover:border-slate-500'}`}>{n}</button>
-                          )
-                      })}
-                  </div>
-                  <div className="flex gap-2">
-                      <button onClick={() => setShowLaneSelector(false)} className="flex-1 py-4 bg-slate-700 text-white rounded-xl md:rounded-2xl font-black uppercase text-[10px] tracking-widest">Voltar</button>
-                      <button onClick={saveLaneSelection} className="flex-[2] py-4 bg-green-600 hover:bg-green-500 text-white rounded-xl md:rounded-2xl font-black uppercase text-[10px] md:text-xs tracking-[0.2em] shadow-xl transition-all active:scale-95">CONFIRMAR</button>
-                  </div>
+                  <div className="text-center mb-8"><div className="w-16 h-16 md:w-20 md:h-20 bg-neon-blue/20 rounded-2xl flex items-center justify-center mx-auto mb-6 text-neon-blue border border-neon-blue/30 shadow-inner animate-pulse"><LayoutGrid size={32}/></div><h3 className="text-xl md:text-2xl font-black text-white uppercase tracking-tighter leading-none mb-2">Atribuir Pista</h3><p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest truncate">{laneSelectorTargetRes.clientName}</p></div>
+                  <div className="grid grid-cols-3 gap-3 md:gap-4 mb-10">{Array.from({ length: settings.activeLanes }).map((_, i) => { const n = i + 1; const sel = tempSelectedLanes.includes(n); return ( <button key={n} onClick={() => setTempSelectedLanes(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n])} className={`h-14 md:h-16 rounded-xl md:rounded-2xl flex items-center justify-center text-xl md:text-2xl font-black transition-all border-2 shadow-lg active:scale-90 ${sel ? 'bg-neon-blue border-white text-white shadow-blue-500/50' : 'bg-slate-900 border-slate-700 text-slate-600 hover:border-slate-500'}`}>{n}</button> ) })}</div>
+                  <div className="flex gap-2"><button onClick={() => setShowLaneSelector(false)} className="flex-1 py-4 bg-slate-700 text-white rounded-xl md:rounded-2xl font-black uppercase text-[10px] tracking-widest">Voltar</button><button onClick={saveLaneSelection} className="flex-[2] py-4 bg-green-600 hover:bg-green-500 text-white rounded-xl md:rounded-2xl font-black uppercase text-[10px] md:text-xs tracking-[0.2em] shadow-xl transition-all active:scale-95">CONFIRMAR</button></div>
               </div>
           </div>
       )}
