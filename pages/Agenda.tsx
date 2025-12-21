@@ -210,7 +210,6 @@ const Agenda: React.FC = () => {
       const updatedRes = { ...res, paymentStatus: PaymentStatus.PAGO };
       await db.reservations.update(updatedRes, currentUser?.id, 'Recebimento Rápido');
       
-      // Atualiza o estado local para refletir no modal imediatamente
       if (editingRes && editingRes.id === res.id) {
           setEditingRes(updatedRes);
       }
@@ -263,7 +262,6 @@ const Agenda: React.FC = () => {
       const duration = editForm.duration || editingRes.duration;
       const peopleReq = editForm.peopleCount || 1;
 
-      // Validação de limite máximo de pistas e pessoas configurado no banco
       const maxLanes = settings.activeLanes;
       const maxPeople = maxLanes * 6;
 
@@ -277,7 +275,6 @@ const Agenda: React.FC = () => {
           return;
       }
 
-      // Validação rigorosa de capacidade para todas as horas da reserva
       const startH = parseInt(timeStr.split(':')[0]);
       const allRes = await db.reservations.getAll();
 
@@ -292,7 +289,6 @@ const Agenda: React.FC = () => {
 
       let total = editForm.totalValue || editingRes.totalValue;
       
-      // Se não for Admin, recalculamos o valor automaticamente baseados na regra de preço
       if (!isAdmin) {
           const [y, m, d] = dateStr.split('-').map(Number);
           const dateObj = new Date(y, m - 1, d);
@@ -410,14 +406,26 @@ const Agenda: React.FC = () => {
                                    res.status === ReservationStatus.CONFIRMADA ? 'border-neon-blue bg-blue-900/10' : 
                                    'border-yellow-500/50 bg-yellow-900/10'
                                }`}>
-                                  {/* Indicador lateral de origem */}
                                   <div className={`absolute top-0 left-0 w-1 h-full ${isStaffRes ? 'bg-purple-500' : 'bg-neon-orange'}`} title={isStaffRes ? 'Equipe' : 'Online'}></div>
 
                                   <div className="flex justify-between items-start mb-4">
                                     <div className="min-w-0 flex-1">
-                                        <div className="flex items-center gap-2 mb-1">
+                                        <div className="flex flex-col gap-1.5 mb-1">
+                                            {/* BADGE DE STATUS CLARO E IMPORTANTE */}
+                                            <div className="flex items-center gap-2">
+                                                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded border uppercase flex items-center gap-1 ${
+                                                    res.status === ReservationStatus.CONFIRMADA ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
+                                                    res.status === ReservationStatus.PENDENTE ? 'bg-yellow-500/20 text-yellow-500 border-yellow-500/30 animate-pulse' :
+                                                    res.status === ReservationStatus.CHECK_IN ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+                                                    'bg-slate-700 text-slate-400 border-slate-600'
+                                                }`}>
+                                                    {res.status === ReservationStatus.PENDENTE && <AlertCircle size={8}/>}
+                                                    {res.status}
+                                                </span>
+                                                {!isStaffRes && <Monitor size={10} className="text-neon-orange opacity-60" />}
+                                            </div>
+
                                             <h4 className={`font-black text-sm text-slate-100 uppercase tracking-tight leading-tight break-words ${isNS ? 'line-through text-slate-500' : ''}`}>{res.clientName}</h4>
-                                            {!isStaffRes && <Monitor size={12} className="text-neon-orange opacity-60 flex-shrink-0" />}
                                         </div>
                                     </div>
                                     <div className="flex flex-col items-end gap-2 ml-2">
@@ -428,7 +436,6 @@ const Agenda: React.FC = () => {
                                     </div>
                                   </div>
 
-                                  {/* Grid de Detalhes Operacionais */}
                                   <div className="grid grid-cols-2 gap-y-2 gap-x-4 mb-4 pt-3 border-t border-slate-700/50">
                                       <div className="flex items-center gap-2 text-slate-400">
                                           <Users size={12} className="text-slate-500"/>
@@ -491,15 +498,19 @@ const Agenda: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-xl p-2 md:p-4 overflow-y-auto">
           <div className="bg-slate-800 border border-slate-600 w-full max-w-3xl rounded-[1.5rem] md:rounded-[2.5rem] shadow-2xl animate-scale-in flex flex-col my-auto max-h-none lg:max-h-[95vh] overflow-hidden">
             
-            {/* Header do Modal */}
             <div className="p-4 md:p-8 border-b border-slate-700 flex justify-between items-start bg-slate-900/50 sticky top-0 z-10 backdrop-blur-md">
               <div className="flex items-start gap-3 md:gap-4 flex-1 min-w-0 pr-2">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-neon-blue/10 rounded-xl flex items-center justify-center text-neon-blue border border-neon-blue/20 shadow-inner flex-shrink-0 mt-0.5"><Info size={20} className="md:w-6 md:h-6"/></div>
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-neon-blue/10 rounded-xl flex items-center justify-center text-neon-blue border border-neon-blue/30 shadow-inner flex-shrink-0 mt-0.5"><Info size={20} className="md:w-6 md:h-6"/></div>
                   <div className="min-w-0">
                     <h3 className="text-sm md:text-2xl font-black text-white tracking-tight uppercase leading-tight mb-1 break-words">{editingRes.clientName}</h3>
                     <div className="flex flex-wrap gap-2 items-center">
                       <p className="text-[8px] md:text-[10px] text-slate-500 font-bold uppercase tracking-widest">Reserva #{editingRes.id.slice(0,8)}</p>
-                      <span className={`text-[8px] px-1.5 py-0.5 rounded font-black uppercase ${editingRes.status === ReservationStatus.CONFIRMADA ? 'bg-green-600 text-white' : 'bg-yellow-500 text-black'}`}>{editingRes.status}</span>
+                      <span className={`text-[8px] px-1.5 py-0.5 rounded font-black uppercase ${
+                          editingRes.status === ReservationStatus.CONFIRMADA ? 'bg-green-600 text-white' : 
+                          editingRes.status === ReservationStatus.PENDENTE ? 'bg-yellow-500 text-black' :
+                          editingRes.status === ReservationStatus.CHECK_IN ? 'bg-blue-600 text-white' :
+                          'bg-slate-700 text-slate-300'
+                      }`}>{editingRes.status}</span>
                     </div>
                   </div>
               </div>
@@ -568,7 +579,6 @@ const Agenda: React.FC = () => {
                             <div className="col-span-2 md:col-span-1"><label className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase block mb-1 tracking-widest">Evento</label><select className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 md:p-4 text-white text-xs md:text-sm font-bold" value={editForm.eventType} onChange={e => setEditForm({...editForm, eventType: e.target.value as EventType})}>{EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
                         </div>
 
-                        {/* NOVOS CAMPOS DE EDIÇÃO: ADMIN VALOR + MESA */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 pt-4 border-t border-slate-700/50">
                              {isAdmin && (
                                  <div>
@@ -612,7 +622,6 @@ const Agenda: React.FC = () => {
                 ) : (
                     <div className="space-y-6 animate-fade-in">
                         
-                        {/* Seção de Dados Logísticos */}
                         <div className="bg-slate-900/30 p-4 md:p-6 rounded-[2rem] border border-slate-700/50 shadow-inner">
                             <h4 className="text-[9px] font-black text-slate-500 uppercase mb-4 tracking-widest flex items-center gap-2"><LayoutGrid size={14}/> Logística da Reserva</h4>
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
@@ -635,7 +644,6 @@ const Agenda: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* Seção do Cliente e Contato */}
                         <div className="bg-slate-900/30 p-4 md:p-6 rounded-[2rem] border border-slate-700/50 shadow-inner">
                             <h4 className="text-[9px] font-black text-slate-500 uppercase mb-4 tracking-widest flex items-center gap-2"><UserIcon size={14}/> Identificação e Contato</h4>
                             <div className="flex flex-col md:flex-row gap-4">
@@ -660,7 +668,6 @@ const Agenda: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* Eventos Especiais (Aniversário / Mesa) */}
                         {(editingRes.birthdayName || editingRes.hasTableReservation) && (
                             <div className="bg-slate-900/30 p-4 md:p-6 rounded-[2rem] border border-slate-700/50 shadow-inner">
                                 <h4 className="text-[9px] font-black text-slate-500 uppercase mb-4 tracking-widest flex items-center gap-2"><Zap size={14}/> Informações de Evento</h4>
@@ -687,7 +694,6 @@ const Agenda: React.FC = () => {
                             </div>
                         )}
 
-                        {/* Seção Financeira Detalhada */}
                         <div className="bg-slate-900/30 p-4 md:p-6 rounded-[2rem] border border-slate-700/50 shadow-inner">
                             <h4 className="text-[9px] font-black text-slate-500 uppercase mb-4 tracking-widest flex items-center gap-2"><DollarSign size={14}/> Financeiro e Pagamento</h4>
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -722,7 +728,6 @@ const Agenda: React.FC = () => {
                             )}
                         </div>
 
-                        {/* Observações da Equipe */}
                         <div className="bg-slate-900/30 p-4 md:p-6 rounded-[2rem] border border-slate-700/50 shadow-inner">
                             <h4 className="text-[9px] font-black text-slate-500 uppercase mb-3 tracking-widest flex items-center gap-2"><FileText size={14}/> Observações Internas</h4>
                             <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-700 shadow-inner">
@@ -732,7 +737,6 @@ const Agenda: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* Metadados Técnicos (Logs) */}
                         <div className="bg-slate-950/20 p-4 rounded-2xl border border-slate-800 flex flex-wrap gap-x-6 gap-y-2 opacity-50">
                             <div className="flex items-center gap-2">
                                 <Calendar size={12} className="text-slate-600"/>
@@ -746,7 +750,6 @@ const Agenda: React.FC = () => {
                             )}
                         </div>
 
-                        {/* Pistas Atribuídas (Se houver Check-in) */}
                         {editingRes.status === ReservationStatus.CHECK_IN && (
                              <div className="bg-slate-900/80 p-4 md:p-6 rounded-2xl border border-slate-700 shadow-xl space-y-3">
                                 <div className="flex justify-between items-center"><h4 className="text-[8px] md:text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1.5 tracking-widest"><LayoutGrid size={12} className="text-neon-blue"/> Pistas Operacionais Ativas</h4>{canEdit && <button onClick={() => { setLaneSelectorTargetRes(editingRes); setTempSelectedLanes(editingRes.lanesAssigned || []); setShowLaneSelector(true); }} className="text-[8px] md:text-[10px] font-bold text-neon-blue uppercase flex items-center gap-1 hover:underline"><Pencil size={10}/> Editar Pistas</button>}</div>
@@ -757,7 +760,6 @@ const Agenda: React.FC = () => {
                 )}
             </div>
 
-            {/* Ações do Footer */}
             <div className="p-4 md:p-8 bg-slate-900 border-t border-slate-700 sticky bottom-0 z-10 shadow-[0_-10px_20px_rgba(0,0,0,0.3)]">
                 {!isEditMode && !isCancelling && (
                     <div className="flex flex-col gap-3">
@@ -785,7 +787,7 @@ const Agenda: React.FC = () => {
               <div className="bg-slate-800 border border-slate-600 w-full max-w-sm rounded-[2.5rem] p-8 md:p-12 shadow-2xl animate-scale-in">
                   <div className="text-center mb-8"><div className="w-16 h-16 md:w-20 md:h-20 bg-neon-blue/20 rounded-2xl flex items-center justify-center mx-auto mb-6 text-neon-blue border border-neon-blue/30 shadow-inner animate-pulse"><LayoutGrid size={32}/></div><h3 className="text-xl md:text-2xl font-black text-white uppercase tracking-tighter leading-none mb-2">Atribuir Pista</h3><p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest truncate">{laneSelectorTargetRes.clientName}</p></div>
                   <div className="grid grid-cols-3 gap-3 md:gap-4 mb-10">{Array.from({ length: settings.activeLanes }).map((_, i) => { const n = i + 1; const sel = tempSelectedLanes.includes(n); return ( <button key={n} onClick={() => setTempSelectedLanes(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n])} className={`h-14 md:h-16 rounded-xl md:rounded-2xl flex items-center justify-center text-xl md:text-2xl font-black transition-all border-2 shadow-lg active:scale-90 ${sel ? 'bg-neon-blue border-white text-white shadow-blue-500/50' : 'bg-slate-900 border-slate-700 text-slate-600 hover:border-slate-500'}`}>{n}</button> ) })}</div>
-                  <div className="flex gap-2"><button onClick={() => setShowLaneSelector(false)} className="flex-1 py-4 bg-slate-700 text-white rounded-xl md:rounded-2xl font-black uppercase text-[10px] tracking-widest">Voltar</button><button onClick={saveLaneSelection} className="flex-[2] py-4 bg-green-600 hover:bg-green-500 text-white rounded-xl md:rounded-2xl font-black uppercase text-[10px] md:text-xs tracking-[0.2em] shadow-xl transition-all active:scale-95">CONFIRMAR</button></div>
+                  <div className="flex gap-2"><button onClick={() => setShowLaneSelector(false)} className="flex-1 py-4 bg-slate-700 text-white rounded-xl md:rounded-[2.5rem] font-black uppercase text-[10px] tracking-widest">Voltar</button><button onClick={saveLaneSelection} className="flex-[2] py-4 bg-green-600 hover:bg-green-500 text-white rounded-xl md:rounded-[2.5rem] font-black uppercase text-[10px] md:text-xs tracking-[0.2em] shadow-xl transition-all active:scale-95">CONFIRMAR</button></div>
               </div>
           </div>
       )}
