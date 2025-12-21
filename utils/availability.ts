@@ -34,7 +34,8 @@ export const getDayConfiguration = (dateStr: string, settings: AppSettings) => {
 };
 
 /**
- * Calcula a disponibilidade de pistas para uma hora específica
+ * Calcula a disponibilidade de pistas para uma hora específica.
+ * REGRA CRÍTICA: Limite máximo inegociável de 6 pistas.
  */
 export const checkHourCapacity = (
   hourInt: number,
@@ -45,22 +46,20 @@ export const checkHourCapacity = (
 ): { occupied: number; left: number; available: boolean } => {
   
   const now = new Date();
+  const MAX_LIMIT_LANES = 6; // Limite físico de pistas do boliche
 
   // Filtra reservas do dia (exceto canceladas e a própria reserva se estiver editando)
   const dayReservations = allReservations.filter(r => {
-    // 1. Filtros Básicos
     if (r.date !== dateStr) return false;
     if (r.status === ReservationStatus.CANCELADA) return false;
     if (r.id === excludeReservationId) return false;
 
-    // 2. REGRA DE 30 MINUTOS (CRÍTICA PARA LIBERAR PISTAS)
-    // Se a reserva está pendente há mais de 30 minutos e não é pagamento no local,
-    // ela NÃO ocupa mais espaço na grade de horários disponível.
+    // Regra de expiração de 30 minutos para reservas pendentes online
     if (r.status === ReservationStatus.PENDENTE && !r.payOnSite && r.createdAt) {
         const created = new Date(r.createdAt);
         const diffMinutes = (now.getTime() - created.getTime()) / (1000 * 60);
         if (diffMinutes >= 30) {
-            return false; // Libera a pista instantaneamente para o site
+            return false; 
         }
     }
 
@@ -69,23 +68,32 @@ export const checkHourCapacity = (
 
   let occupied = 0;
 
+  // SOMA RIGOROSA: Itera por cada reserva e soma a quantidade de pistas (laneCount)
   dayReservations.forEach(r => {
     const rStart = parseInt(r.time.split(':')[0]);
     const rEnd = rStart + r.duration;
+    // Se a hora consultada estiver dentro do intervalo ocupado pela reserva
     if (hourInt >= rStart && hourInt < rEnd) {
-      occupied += r.laneCount;
+      occupied += (r.laneCount || 1);
     }
   });
 
-  const left = totalLanes - occupied;
+  // O limite real disponível é o menor entre o configurado e o limite físico de 6
+  const capacity = Math.min(totalLanes, MAX_LIMIT_LANES);
+  const left = capacity - occupied;
+  
+  // Disponível apenas se houver pelo menos 1 pista vaga
   const available = left > 0; 
 
-  return { occupied, left, available };
+  return { 
+    occupied, 
+    left: Math.max(0, left), 
+    available 
+  };
 };
 
 /**
  * Gera todos os slots de horário para um dia, com status de disponibilidade e tempo.
- * Retorna lista vazia se o dia estiver bloqueado (blockedDates).
  */
 export const generateDailySlots = (
   dateStr: string,
@@ -95,11 +103,8 @@ export const generateDailySlots = (
   isStaff: boolean = false
 ): TimeSlot[] => {
   const dayConfig = getDayConfiguration(dateStr, settings);
-  
-  // VERIFICAÇÃO DE DATA BLOQUEADA
   const isBlocked = settings?.blockedDates?.includes(dateStr);
 
-  // Se o dia estiver configurado como fechado OU estiver na lista de datas bloqueadas
   if (!dayConfig || !dayConfig.isOpen || isBlocked) return [];
 
   let start = dayConfig.start;
@@ -117,8 +122,7 @@ export const generateDailySlots = (
 
   for (let h = start; h < end; h++) {
     const displayHourInt = h >= 24 ? h - 24 : h;
-    const timeLabel = `${displayHourInt}:00`;
-    const timeValue = `${displayHourInt}:00`; 
+    const timeValue = `${String(displayHourInt).padStart(2, '0')}:00`; 
 
     const { left, available } = checkHourCapacity(
       displayHourInt,
@@ -143,7 +147,7 @@ export const generateDailySlots = (
 
     slots.push({
       time: timeValue,
-      label: timeLabel,
+      label: timeValue,
       available: available && !isPast, 
       left,
       isPast

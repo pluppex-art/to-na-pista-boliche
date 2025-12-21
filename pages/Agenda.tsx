@@ -36,7 +36,14 @@ import {
   AlertTriangle,
   Bell,
   Zap,
-  Timer
+  Timer,
+  Hash,
+  Tag,
+  Monitor,
+  Mail,
+  Smartphone,
+  UserCheck,
+  History
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
@@ -127,7 +134,6 @@ const Agenda: React.FC = () => {
     return () => { supabase.removeChannel(channel); };
   }, [selectedDate]);
 
-  // --- LÓGICA DE ALERTAS ATUALIZADA (SEM 10 MIN) ---
   const alerts = useMemo(() => {
       const globalAlerts: { type: string, message: string, res: Reservation }[] = [];
       const todayStr = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
@@ -138,7 +144,6 @@ const Agenda: React.FC = () => {
       allReservationsForAlerts.forEach(res => {
           if (res.status === ReservationStatus.CANCELADA) return;
 
-          // Alerta 2: Pagamento Pendente de Ontem
           if (res.date === yesterdayStr && res.paymentStatus === PaymentStatus.PENDENTE && res.payOnSite) {
               globalAlerts.push({ type: 'OVERDUE_PAYMENT', message: `Pagamento pendente de ontem: ${res.clientName}`, res });
           }
@@ -149,17 +154,15 @@ const Agenda: React.FC = () => {
               startTime.setHours(h, m, 0, 0);
               const diffToStart = (now.getTime() - startTime.getTime()) / 60000;
 
-              // Alerta 3: Check-in Atrasado (20 min após início)
               if (res.status === ReservationStatus.CONFIRMADA && diffToStart >= 20 && diffToStart < 60) {
-                  globalAlerts.push({ type: 'LATE_CHECKIN', message: `${res.clientName} está ${Math.ceil(diffToStart)}min atrasado para o check-in!`, res });
+                  globalAlerts.push({ type: 'LATE_CHECKIN', message: `${res.clientName} está ${Math.ceil(diffToStart)}min atrasado!`, res });
               }
 
-              // Alerta 4: Expiração de Pré-Reserva Online (30 min após criação)
               if (res.status === ReservationStatus.PENDENTE && !res.payOnSite && res.createdAt) {
                   const created = new Date(res.createdAt);
                   const diffCreated = (now.getTime() - created.getTime()) / 60000;
                   if (diffCreated >= 25 && diffCreated < 35) {
-                      globalAlerts.push({ type: 'EXPIRING_PENDING', message: `Reserva online de ${res.clientName} expira em instantes!`, res });
+                      globalAlerts.push({ type: 'EXPIRING_PENDING', message: `Pré-reserva de ${res.clientName} expira agora!`, res });
                   }
               }
           }
@@ -256,6 +259,11 @@ const Agenda: React.FC = () => {
       loadData(true);
   };
 
+  const openWhatsApp = (phone?: string) => {
+    if(!phone) return;
+    window.open(`https://wa.me/55${phone.replace(/\D/g, '')}`, '_blank');
+  };
+
   return (
     <div className="flex flex-col h-full space-y-6 pb-20 md:pb-0">
       
@@ -283,19 +291,18 @@ const Agenda: React.FC = () => {
                       <ChevronRight size={20} className="opacity-50" />
                   </div>
               ))}
-              {alerts.length > 3 && <p className="text-[10px] text-slate-500 font-bold uppercase text-center tracking-widest">+ {alerts.length - 3} outros alertas ativos</p>}
           </div>
       )}
 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-6">
-        <div><h1 className="text-3xl font-black text-white tracking-tight uppercase">Agenda</h1><p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Gestão de {selectedDate.split('-').reverse().join('/')}</p></div>
+        <div><h1 className="text-3xl font-black text-white tracking-tight uppercase">Dashboard Equipe</h1><p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Painel Operacional • {selectedDate.split('-').reverse().join('/')}</p></div>
         <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
             <div className="flex items-center gap-4 bg-slate-800 p-2 rounded-2xl border border-slate-700 shadow-xl w-full md:w-auto justify-between md:justify-start">
-                <button onClick={() => { const [y,m,d] = selectedDate.split('-').map(Number); const nd = new Date(y,m-1,d-1); setSelectedDate([nd.getFullYear(),String(nd.getMonth()+1).padStart(2,'0'),String(nd.getDate()).padStart(2,'0')].join('-')); }} className="p-2 hover:bg-slate-700 rounded-full text-slate-300"><ChevronLeft size={20} /></button>
+                <button onClick={() => { const [y,m,d] = selectedDate.split('-').map(Number); const nd = new Date(y,m-1,d-1); setSelectedDate([nd.getFullYear(),String(nd.getMonth()+1).padStart(2,'0'),String(nd.getDate()).padStart(2,'0')].join('-')); }} className="p-2 hover:bg-slate-700 rounded-full text-slate-300 transition-colors"><ChevronLeft size={20} /></button>
                 <input type="date" className="bg-transparent text-white font-black text-center focus:outline-none uppercase text-xs tracking-widest cursor-pointer" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}/>
-                <button onClick={() => { const [y,m,d] = selectedDate.split('-').map(Number); const nd = new Date(y,m-1,d+1); setSelectedDate([nd.getFullYear(),String(nd.getMonth()+1).padStart(2,'0'),String(nd.getDate()).padStart(2,'0')].join('-')); }} className="p-2 hover:bg-slate-700 rounded-full text-slate-300"><ChevronRight size={20} /></button>
+                <button onClick={() => { const [y,m,d] = selectedDate.split('-').map(Number); const nd = new Date(y,m-1,d+1); setSelectedDate([nd.getFullYear(),String(nd.getMonth()+1).padStart(2,'0'),String(nd.getDate()).padStart(2,'0')].join('-')); }} className="p-2 hover:bg-slate-700 rounded-full text-slate-300 transition-colors"><ChevronRight size={20} /></button>
             </div>
-            {currentUser?.perm_create_reservation && <Link to="/agendamento" className="bg-neon-orange hover:bg-orange-500 text-white px-8 py-3 rounded-2xl font-black shadow-xl flex items-center justify-center gap-2 transition transform hover:scale-105 w-full sm:w-auto uppercase text-xs tracking-[0.2em]"><Plus size={20} /> Nova Reserva</Link>}
+            {currentUser?.perm_create_reservation && <Link to="/agendamento" className="bg-neon-orange hover:bg-orange-500 text-white px-8 py-3 rounded-2xl font-black shadow-xl flex items-center justify-center gap-2 transition transform active:scale-95 w-full sm:w-auto uppercase text-xs tracking-[0.2em]"><Plus size={20} /> Nova Reserva</Link>}
         </div>
       </div>
 
@@ -344,38 +351,65 @@ const Agenda: React.FC = () => {
                                const isCI = res.checkedInIds?.includes(uid);
                                const isNS = res.noShowIds?.includes(uid);
                                const cardAlert = alerts.find(a => a.res.id === res.id);
+                               const isStaffRes = !!res.createdBy;
 
                                return (
-                               <div key={uid} onClick={() => openResModal(res)} className={`relative p-5 rounded-2xl border cursor-pointer hover:scale-[1.02] active:scale-95 transition-all shadow-lg ${
+                               <div key={uid} onClick={() => openResModal(res)} className={`relative p-5 rounded-2xl border cursor-pointer hover:scale-[1.02] active:scale-95 transition-all shadow-lg overflow-hidden ${
                                    isCI ? 'border-green-500 bg-slate-900 opacity-95' : 
                                    isNS ? 'border-red-500 bg-red-900/10 grayscale opacity-80' : 
                                    cardAlert?.type === 'LATE_CHECKIN' ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/20' :
                                    res.status === ReservationStatus.CONFIRMADA ? 'border-neon-blue bg-blue-900/10' : 
                                    'border-yellow-500/50 bg-yellow-900/10'
                                }`}>
-                                  {cardAlert && !isCI && !isNS && (
-                                      <div className="absolute -top-2 -right-2 bg-orange-600 text-white p-1.5 rounded-full shadow-xl animate-bounce border-2 border-slate-800">
-                                          <Bell size={14}/>
-                                      </div>
-                                  )}
+                                  {/* Indicador lateral de origem */}
+                                  <div className={`absolute top-0 left-0 w-1 h-full ${isStaffRes ? 'bg-purple-500' : 'bg-neon-orange'}`} title={isStaffRes ? 'Equipe' : 'Online'}></div>
+
                                   <div className="flex justify-between items-start mb-4">
-                                    <div className="min-w-0 pr-2">
-                                        <h4 className={`font-bold truncate text-sm text-slate-100 uppercase tracking-wide leading-tight ${isNS ? 'line-through text-slate-500' : ''}`}>{res.clientName}</h4>
-                                        <div className="flex items-center gap-1.5 mt-4 flex-wrap">
-                                            {isCI ? <span className="text-[8px] font-black text-green-400 bg-green-500/20 px-2 py-0.5 rounded-lg border border-green-500/30 uppercase">CHECK-IN</span> : isNS ? <span className="text-[8px] font-black text-red-400 bg-red-600/20 px-2 py-0.5 rounded-lg border border-red-500/30 uppercase tracking-widest">NO-SHOW</span> : <span className={`text-[8px] font-black px-2 py-0.5 rounded-lg border uppercase tracking-widest ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border-neon-blue/30 shadow-blue-900/20 shadow-lg' : 'text-yellow-400 bg-yellow-900/40 border-yellow-500/30 shadow-yellow-900/20 shadow-lg'}`}>{res.status}</span>}
-                                            {res.paymentStatus === PaymentStatus.PENDENTE && <span className="text-[8px] font-black text-red-400 bg-red-500/10 border border-red-500/20 px-2 py-0.5 rounded-lg animate-pulse uppercase">Pagamento Pendente</span>}
+                                    <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <h4 className={`font-black text-sm text-slate-100 uppercase tracking-tight leading-tight break-words ${isNS ? 'line-through text-slate-500' : ''}`}>{res.clientName}</h4>
+                                            {!isStaffRes && <Monitor size={12} className="text-neon-orange opacity-60 flex-shrink-0" />}
                                         </div>
                                     </div>
-                                    <div className="flex flex-col items-end gap-3">
-                                        <div className="flex gap-1.5">
+                                    <div className="flex flex-col items-end gap-2 ml-2">
+                                        <div className="flex gap-1">
                                             <button disabled={!canEdit} onClick={(e) => handleGranularStatus(e, res, uid, 'CHECK_IN')} className={`w-8 h-8 flex items-center justify-center rounded-xl border transition-all shadow-md ${isCI ? 'bg-green-600 text-white border-green-500' : 'bg-slate-800 text-slate-500 border-slate-700 hover:text-green-400 hover:border-green-400'}`}><Check size={16}/></button>
                                             <button disabled={!canEdit} onClick={(e) => handleGranularStatus(e, res, uid, 'NO_SHOW')} className={`w-8 h-8 flex items-center justify-center rounded-xl border transition-all shadow-md ${isNS ? 'bg-red-600 text-white border-red-500' : 'bg-slate-800 text-slate-500 border-slate-700 hover:text-red-400 hover:border-red-400'}`}><Ban size={16}/></button>
                                         </div>
                                     </div>
                                   </div>
-                                  <div className="pt-4 border-t border-slate-700/50 space-y-1.5 mt-2">
-                                      {res.hasTableReservation && <div className="flex items-center gap-1.5 text-[10px] font-black text-orange-400 uppercase tracking-tighter"><Utensils size={14} className="opacity-50"/> MESA: {res.tableSeatCount} LUG.</div>}
-                                      {res.birthdayName && <div className="flex items-center gap-1.5 text-[10px] font-black text-blue-400 uppercase tracking-tighter"><Cake size={14} className="opacity-50"/> {res.birthdayName}</div>}
+
+                                  {/* Grid de Detalhes Operacionais */}
+                                  <div className="grid grid-cols-2 gap-y-2 gap-x-4 mb-4 pt-3 border-t border-slate-700/50">
+                                      <div className="flex items-center gap-2 text-slate-400">
+                                          <Users size={12} className="text-slate-500"/>
+                                          <span className="text-[10px] font-bold uppercase">{res.peopleCount} Jogadores</span>
+                                      </div>
+                                      <div className="flex items-center gap-2 text-slate-400">
+                                          <Clock size={12} className="text-slate-500"/>
+                                          <span className="text-[10px] font-bold uppercase">{res.duration} Horas</span>
+                                      </div>
+                                      <div className="flex items-center gap-2 text-slate-400">
+                                          <Tag size={12} className="text-slate-500"/>
+                                          <span className="text-[10px] font-bold uppercase truncate">{res.eventType}</span>
+                                      </div>
+                                      <div className="flex items-center gap-2 text-slate-400">
+                                          <Hash size={12} className="text-slate-500"/>
+                                          <span className="text-[10px] font-bold uppercase">{res.laneCount} Pista(s)</span>
+                                      </div>
+                                  </div>
+
+                                  <div className="space-y-1.5">
+                                      {res.hasTableReservation && (
+                                          <div className="flex items-center gap-1.5 text-[10px] font-black text-orange-400 uppercase tracking-tighter bg-orange-900/10 p-1.5 rounded-lg border border-orange-500/20">
+                                              <Utensils size={14} className="opacity-70"/> MESA: {res.tableSeatCount} LUG.
+                                          </div>
+                                      )}
+                                      {res.birthdayName && (
+                                          <div className="flex items-center gap-1.5 text-[10px] font-black text-blue-400 uppercase tracking-tighter bg-blue-900/10 p-1.5 rounded-lg border border-blue-500/20">
+                                              <Cake size={14} className="opacity-70"/> {res.birthdayName}
+                                          </div>
+                                      )}
                                   </div>
                                </div>
                              )});
@@ -391,19 +425,28 @@ const Agenda: React.FC = () => {
       </div>
 
       {editingRes && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-xl p-3 md:p-4">
-          <div className="bg-slate-800 border border-slate-600 w-full max-w-lg md:max-w-2xl rounded-[1.5rem] md:rounded-[2.5rem] shadow-2xl animate-scale-in flex flex-col max-h-[95vh] overflow-hidden">
-            <div className="p-4 md:p-8 border-b border-slate-700 flex justify-between items-center bg-slate-900/50">
-              <div className="flex items-center gap-3 md:gap-4 flex-1 min-w-0">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-neon-blue/10 rounded-xl flex items-center justify-center text-neon-blue border border-neon-blue/20 shadow-inner flex-shrink-0"><Info size={20} className="md:w-6 md:h-6"/></div>
-                  <div className="min-w-0"><h3 className="text-base md:text-xl font-bold text-white tracking-tight uppercase leading-tight mb-1 truncate">{editingRes.clientName}</h3><p className="text-[8px] md:text-[10px] text-slate-500 font-bold uppercase tracking-widest">Reserva #{editingRes.id.slice(0,8)}</p></div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-xl p-2 md:p-4 overflow-y-auto">
+          <div className="bg-slate-800 border border-slate-600 w-full max-w-3xl rounded-[1.5rem] md:rounded-[2.5rem] shadow-2xl animate-scale-in flex flex-col my-auto max-h-none lg:max-h-[95vh] overflow-hidden">
+            
+            {/* Header do Modal */}
+            <div className="p-4 md:p-8 border-b border-slate-700 flex justify-between items-start bg-slate-900/50 sticky top-0 z-10 backdrop-blur-md">
+              <div className="flex items-start gap-3 md:gap-4 flex-1 min-w-0 pr-2">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-neon-blue/10 rounded-xl flex items-center justify-center text-neon-blue border border-neon-blue/20 shadow-inner flex-shrink-0 mt-0.5"><Info size={20} className="md:w-6 md:h-6"/></div>
+                  <div className="min-w-0">
+                    <h3 className="text-sm md:text-2xl font-black text-white tracking-tight uppercase leading-tight mb-1 break-words">{editingRes.clientName}</h3>
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <p className="text-[8px] md:text-[10px] text-slate-500 font-bold uppercase tracking-widest">Reserva #{editingRes.id.slice(0,8)}</p>
+                      <span className={`text-[8px] px-1.5 py-0.5 rounded font-black uppercase ${editingRes.status === ReservationStatus.CONFIRMADA ? 'bg-green-600 text-white' : 'bg-yellow-500 text-black'}`}>{editingRes.status}</span>
+                    </div>
+                  </div>
               </div>
-              <div className="flex items-center gap-2 md:gap-3 ml-2">
+              <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
                   {canEdit && <button onClick={() => setIsEditMode(!isEditMode)} className={`p-2.5 md:p-3 rounded-xl border transition-all ${isEditMode ? 'bg-neon-blue text-white border-neon-blue shadow-lg' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}><Pencil size={18} className="md:w-5 md:h-5"/></button>}
                   <button onClick={() => setEditingRes(null)} className="text-slate-400 hover:text-white p-2.5 md:p-3 bg-slate-800 rounded-xl border border-slate-700 transition-colors"><X size={20} className="md:w-6 md:h-6"/></button>
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-4 md:space-y-8 custom-scrollbar bg-slate-800">
+
+            <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 custom-scrollbar bg-slate-800">
                 {isEditMode ? (
                     <div className="space-y-6 animate-fade-in">
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
@@ -419,53 +462,169 @@ const Agenda: React.FC = () => {
                         <button onClick={handleSaveFullEdit} className="w-full py-4 md:py-5 bg-neon-blue hover:bg-blue-600 text-white rounded-xl md:rounded-2xl font-black uppercase text-[10px] md:text-xs tracking-[0.2em] shadow-xl flex items-center justify-center gap-3 transition-all active:scale-95"><Save size={18}/> Salvar Dados</button>
                     </div>
                 ) : (
-                    <div className="space-y-5 md:space-y-8 animate-fade-in">
-                        <div className="grid grid-cols-2 gap-3 md:gap-4">
-                            <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner"><p className="text-[7px] md:text-[9px] text-slate-500 font-bold uppercase mb-1 md:mb-2 tracking-widest">Agenda</p><p className="text-white font-bold text-xs md:text-sm">{editingRes.date.split('-').reverse().join('/')}</p><p className="text-neon-blue text-sm md:text-lg font-black">{editingRes.time}</p></div>
-                            <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner"><p className="text-[7px] md:text-[9px] text-slate-500 font-bold uppercase mb-1 md:mb-2 tracking-widest">Grade</p><p className="text-white font-bold text-xs md:text-sm uppercase leading-tight">{editingRes.laneCount} Pistas</p><p className="text-slate-400 text-xs md:text-base font-bold">{editingRes.duration} Horas</p></div>
-                            <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner"><p className="text-[7px] md:text-[9px] text-slate-500 font-bold uppercase mb-1 md:mb-2 tracking-widest">Grupo</p><p className="text-white font-bold text-sm md:text-xl leading-tight">{editingRes.peopleCount} Jogadores</p></div>
-                            <div className="bg-slate-900/50 p-3 md:p-5 rounded-2xl border border-slate-700/50 shadow-inner"><p className="text-[7px] md:text-[9px] text-slate-500 font-bold uppercase mb-1 md:mb-2 tracking-widest">Financeiro</p><p className="text-neon-green font-black text-sm md:text-xl leading-tight">{editingRes.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p></div>
-                        </div>
+                    <div className="space-y-6 animate-fade-in">
                         
-                        {editingRes.paymentStatus === PaymentStatus.PENDENTE && (
-                            <div className="bg-red-950/30 border border-red-500/50 p-4 rounded-2xl flex items-center justify-between shadow-lg animate-pulse">
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 bg-red-500/20 rounded-xl text-red-500"><DollarSign size={20}/></div>
+                        {/* Seção de Dados Logísticos */}
+                        <div className="bg-slate-900/30 p-4 md:p-6 rounded-[2rem] border border-slate-700/50 shadow-inner">
+                            <h4 className="text-[9px] font-black text-slate-500 uppercase mb-4 tracking-widest flex items-center gap-2"><LayoutGrid size={14}/> Logística da Reserva</h4>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+                                <div className="bg-slate-800/80 p-3 md:p-4 rounded-2xl border border-slate-700/50">
+                                    <p className="text-[7px] text-slate-500 font-bold uppercase mb-1 tracking-widest">Data</p>
+                                    <p className="text-white font-bold text-xs md:text-sm">{editingRes.date.split('-').reverse().join('/')}</p>
+                                </div>
+                                <div className="bg-slate-800/80 p-3 md:p-4 rounded-2xl border border-slate-700/50">
+                                    <p className="text-[7px] text-slate-500 font-bold uppercase mb-1 tracking-widest">Horário</p>
+                                    <p className="text-neon-blue text-sm md:text-lg font-black">{editingRes.time}</p>
+                                </div>
+                                <div className="bg-slate-800/80 p-3 md:p-4 rounded-2xl border border-slate-700/50">
+                                    <p className="text-[7px] text-slate-500 font-bold uppercase mb-1 tracking-widest">Duração</p>
+                                    <p className="text-white font-bold text-xs md:text-sm">{editingRes.duration} Horas</p>
+                                </div>
+                                <div className="bg-slate-800/80 p-3 md:p-4 rounded-2xl border border-slate-700/50">
+                                    <p className="text-[7px] text-slate-500 font-bold uppercase mb-1 tracking-widest">Recursos</p>
+                                    <p className="text-white font-bold text-xs md:text-sm">{editingRes.laneCount} Pistas • {editingRes.peopleCount} Jog.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Seção do Cliente e Contato */}
+                        <div className="bg-slate-900/30 p-4 md:p-6 rounded-[2rem] border border-slate-700/50 shadow-inner">
+                            <h4 className="text-[9px] font-black text-slate-500 uppercase mb-4 tracking-widest flex items-center gap-2"><UserIcon size={14}/> Identificação e Contato</h4>
+                            <div className="flex flex-col md:flex-row gap-4">
+                                <div className="flex-1 bg-slate-800/80 p-4 rounded-2xl border border-slate-700/50 flex items-center justify-between">
                                     <div>
-                                        <p className="text-[10px] font-black text-red-400 uppercase tracking-widest">Pagamento Pendente</p>
-                                        <p className="text-xs font-bold text-red-200">Aguardando recebimento</p>
+                                        <p className="text-[7px] text-slate-500 font-bold uppercase mb-1">WhatsApp</p>
+                                        <p className="text-white font-mono font-bold text-xs md:text-sm">{clientPhones[editingRes.clientId] || 'Não cadastrado'}</p>
+                                    </div>
+                                    {clientPhones[editingRes.clientId] && (
+                                        <button onClick={() => openWhatsApp(clientPhones[editingRes.clientId])} className="p-2 bg-green-600/20 text-green-500 rounded-xl border border-green-500/20 hover:bg-green-600 hover:text-white transition-all shadow-lg"><MessageCircle size={20}/></button>
+                                    )}
+                                </div>
+                                <div className="flex-1 bg-slate-800/80 p-4 rounded-2xl border border-slate-700/50 flex items-center gap-3">
+                                    <div className={`p-2 rounded-xl ${!!editingRes.createdBy ? 'bg-purple-900/20 text-purple-400 border border-purple-500/20' : 'bg-neon-orange/10 text-neon-orange border border-neon-orange/20'}`}>
+                                        {!!editingRes.createdBy ? <Smartphone size={18}/> : <Monitor size={18}/>}
+                                    </div>
+                                    <div>
+                                        <p className="text-[7px] text-slate-500 font-bold uppercase mb-1">Canal de Origem</p>
+                                        <p className="text-white font-bold text-[10px] md:text-xs uppercase tracking-tight">{!!editingRes.createdBy ? 'Lançado pela Equipe' : 'Reserva Online (Cliente)'}</p>
                                     </div>
                                 </div>
-                                {canReceivePayment && (
-                                    <button onClick={(e) => handleQuickReceive(e, editingRes)} className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-colors shadow-lg">Receber</button>
-                                )}
+                            </div>
+                        </div>
+
+                        {/* Eventos Especiais (Aniversário / Mesa) */}
+                        {(editingRes.birthdayName || editingRes.hasTableReservation) && (
+                            <div className="bg-slate-900/30 p-4 md:p-6 rounded-[2rem] border border-slate-700/50 shadow-inner">
+                                <h4 className="text-[9px] font-black text-slate-500 uppercase mb-4 tracking-widest flex items-center gap-2"><Zap size={14}/> Informações de Evento</h4>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {editingRes.birthdayName && (
+                                        <div className="bg-blue-900/20 p-4 rounded-2xl border border-blue-500/20 flex items-center gap-4">
+                                            <div className="w-10 h-10 bg-blue-500/20 rounded-xl flex items-center justify-center text-blue-400"><Cake size={20}/></div>
+                                            <div>
+                                                <p className="text-[7px] text-blue-400 font-bold uppercase mb-1">Aniversariante</p>
+                                                <p className="text-white font-black text-xs md:text-sm uppercase">{editingRes.birthdayName}</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {editingRes.hasTableReservation && (
+                                        <div className="bg-orange-900/20 p-4 rounded-2xl border border-orange-500/20 flex items-center gap-4">
+                                            <div className="w-10 h-10 bg-orange-500/20 rounded-xl flex items-center justify-center text-orange-400"><Utensils size={20}/></div>
+                                            <div>
+                                                <p className="text-[7px] text-orange-400 font-bold uppercase mb-1">Mesa no Restaurante</p>
+                                                <p className="text-white font-black text-xs md:text-sm uppercase">{editingRes.tableSeatCount} LUGARES RESERVADOS</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         )}
 
+                        {/* Seção Financeira Detalhada */}
+                        <div className="bg-slate-900/30 p-4 md:p-6 rounded-[2rem] border border-slate-700/50 shadow-inner">
+                            <h4 className="text-[9px] font-black text-slate-500 uppercase mb-4 tracking-widest flex items-center gap-2"><DollarSign size={14}/> Financeiro e Pagamento</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700/50 shadow-lg">
+                                    <p className="text-[7px] text-slate-500 font-bold uppercase mb-1">Valor do Agendamento</p>
+                                    <p className="text-neon-green font-black text-base md:text-xl leading-tight">{editingRes.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+                                </div>
+                                <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700/50 flex flex-col justify-center">
+                                    <p className="text-[7px] text-slate-500 font-bold uppercase mb-2">Status do Pagamento</p>
+                                    <span className={`w-fit text-[9px] font-black px-3 py-1 rounded-full border uppercase ${editingRes.paymentStatus === PaymentStatus.PAGO ? 'bg-green-900/30 text-green-400 border-green-500/30' : 'bg-red-900/30 text-red-400 border-red-500/30 animate-pulse'}`}>{editingRes.paymentStatus}</span>
+                                </div>
+                                <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700/50 shadow-lg">
+                                    <p className="text-[7px] text-slate-500 font-bold uppercase mb-1">Identificação Comercial</p>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <Hash size={14} className="text-slate-500"/>
+                                        <span className="text-white font-bold text-xs uppercase">{editingRes.comandaId || 'Sem Comanda'}</span>
+                                    </div>
+                                    {editingRes.payOnSite && <span className="text-[7px] text-neon-orange font-bold uppercase block mt-1 tracking-tighter">* Pagamento marcado para o local</span>}
+                                </div>
+                            </div>
+                            
+                            {editingRes.paymentStatus === PaymentStatus.PENDENTE && (
+                                <div className="mt-4 bg-red-950/30 border border-red-500/50 p-4 rounded-2xl flex items-center justify-between shadow-lg">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-red-500/20 rounded-xl text-red-500"><DollarSign size={20}/></div>
+                                        <p className="text-[10px] font-black text-red-400 uppercase tracking-widest">Aguardando recebimento financeiro</p>
+                                    </div>
+                                    {canReceivePayment && (
+                                        <button onClick={(e) => handleQuickReceive(e, editingRes)} className="bg-red-600 hover:bg-red-500 text-white px-5 py-2 rounded-xl text-[10px] font-black uppercase transition-colors shadow-lg active:scale-95">Receber</button>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Observações da Equipe */}
+                        <div className="bg-slate-900/30 p-4 md:p-6 rounded-[2rem] border border-slate-700/50 shadow-inner">
+                            <h4 className="text-[9px] font-black text-slate-500 uppercase mb-3 tracking-widest flex items-center gap-2"><FileText size={14}/> Observações Internas</h4>
+                            <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-700 shadow-inner">
+                                <p className="text-slate-300 text-xs md:text-sm italic font-medium leading-relaxed">
+                                    {editingRes.observations ? `"${editingRes.observations}"` : 'Nenhuma observação técnica para esta reserva.'}
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Metadados Técnicos (Logs) */}
+                        <div className="bg-slate-950/20 p-4 rounded-2xl border border-slate-800 flex flex-wrap gap-x-6 gap-y-2 opacity-50">
+                            <div className="flex items-center gap-2">
+                                <Calendar size={12} className="text-slate-600"/>
+                                <span className="text-[8px] font-bold uppercase text-slate-600 tracking-widest">Criada em: {new Date(editingRes.createdAt).toLocaleString('pt-BR')}</span>
+                            </div>
+                            {editingRes.createdBy && (
+                                <div className="flex items-center gap-2">
+                                    <UserCheck size={12} className="text-slate-600"/>
+                                    <span className="text-[8px] font-bold uppercase text-slate-600 tracking-widest">Lançado por ID: {editingRes.createdBy.slice(0,8)}</span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Pistas Atribuídas (Se houver Check-in) */}
                         {editingRes.status === ReservationStatus.CHECK_IN && (
                              <div className="bg-slate-900/80 p-4 md:p-6 rounded-2xl border border-slate-700 shadow-xl space-y-3">
-                                <div className="flex justify-between items-center"><h4 className="text-[8px] md:text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1.5 tracking-widest"><LayoutGrid size={12} className="text-neon-blue"/> Pistas Ativas</h4>{canEdit && <button onClick={() => { setLaneSelectorTargetRes(editingRes); setTempSelectedLanes(editingRes.lanesAssigned || []); setShowLaneSelector(true); }} className="text-[8px] md:text-[10px] font-bold text-neon-blue uppercase flex items-center gap-1 hover:underline"><Pencil size={10}/> Editar</button>}</div>
-                                <div className="flex flex-wrap gap-2">{editingRes.lanesAssigned && editingRes.lanesAssigned.length > 0 ? ( editingRes.lanesAssigned.map(l => ( <div key={l} className="w-10 h-10 md:w-12 md:h-12 bg-neon-blue text-white rounded-xl flex items-center justify-center font-black text-lg md:text-xl shadow-lg border border-white/10">{l}</div> )) ) : <div className="text-slate-500 italic text-[10px] py-1">Nenhuma pista definida</div>}</div>
+                                <div className="flex justify-between items-center"><h4 className="text-[8px] md:text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1.5 tracking-widest"><LayoutGrid size={12} className="text-neon-blue"/> Pistas Operacionais Ativas</h4>{canEdit && <button onClick={() => { setLaneSelectorTargetRes(editingRes); setTempSelectedLanes(editingRes.lanesAssigned || []); setShowLaneSelector(true); }} className="text-[8px] md:text-[10px] font-bold text-neon-blue uppercase flex items-center gap-1 hover:underline"><Pencil size={10}/> Editar Pistas</button>}</div>
+                                <div className="flex flex-wrap gap-3">{editingRes.lanesAssigned && editingRes.lanesAssigned.length > 0 ? ( editingRes.lanesAssigned.map(l => ( <div key={l} className="w-10 h-10 md:w-14 md:h-14 bg-neon-blue text-white rounded-xl md:rounded-2xl flex items-center justify-center font-black text-lg md:text-2xl shadow-lg border border-white/10">{l}</div> )) ) : <div className="text-slate-500 italic text-[10px] py-1">Nenhuma pista física atribuída ainda</div>}</div>
                              </div>
                         )}
-                        {editingRes.observations && (<div className="bg-slate-900/80 p-4 rounded-2xl border-l-4 border-neon-blue shadow-lg"><p className="text-[8px] md:text-[10px] font-bold text-slate-500 uppercase mb-2 tracking-widest">Observações Equipe</p><p className="text-slate-300 text-xs md:text-sm italic font-medium leading-relaxed truncate-2-lines">"{editingRes.observations}"</p></div>)}
                     </div>
                 )}
             </div>
-            <div className="p-4 md:p-8 bg-slate-900 border-t border-slate-700">
+
+            {/* Ações do Footer */}
+            <div className="p-4 md:p-8 bg-slate-900 border-t border-slate-700 sticky bottom-0 z-10 shadow-[0_-10px_20px_rgba(0,0,0,0.3)]">
                 {!isEditMode && !isCancelling && (
-                    <div className="flex flex-col gap-2">
-                        <button disabled={!canEdit} onClick={() => handleStatusChange(ReservationStatus.CONFIRMADA)} className={`w-full py-3.5 md:py-5 rounded-xl md:rounded-2xl text-[10px] md:text-xs font-black uppercase tracking-[0.2em] transition-all border flex items-center justify-center gap-2 shadow-xl ${editingRes.status === ReservationStatus.CONFIRMADA ? 'bg-green-600 text-white border-green-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}><Check size={18}/> Confirmar Reserva</button>
-                        <div className="flex gap-2">
-                            <button disabled={!canEdit} onClick={() => handleStatusChange(ReservationStatus.PENDENTE)} className={`flex-1 py-3 md:py-4 rounded-xl md:rounded-2xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all border flex items-center justify-center gap-2 ${editingRes.status === ReservationStatus.PENDENTE ? 'bg-yellow-500 text-black border-yellow-500' : 'bg-slate-800 text-slate-400 border-slate-700'}`}><Clock size={14}/> Pendente</button>
-                            <button disabled={!canDelete} onClick={() => setIsCancelling(true)} className="flex-1 py-3 md:py-4 rounded-xl md:rounded-2xl text-[9px] md:text-[10px] font-black uppercase tracking-widest bg-red-600/10 text-red-500 border border-red-500/20 flex items-center justify-center gap-2"><Ban size={14}/> Cancelar</button>
+                    <div className="flex flex-col gap-3">
+                        <button disabled={!canEdit} onClick={() => handleStatusChange(ReservationStatus.CONFIRMADA)} className={`w-full py-4 md:py-6 rounded-2xl text-[10px] md:text-xs font-black uppercase tracking-[0.2em] transition-all border flex items-center justify-center gap-3 shadow-xl active:scale-[0.98] ${editingRes.status === ReservationStatus.CONFIRMADA ? 'bg-green-600 text-white border-green-500 shadow-green-900/20' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}><Check size={20}/> Confirmar Reserva e Vaga</button>
+                        <div className="flex gap-3">
+                            <button disabled={!canEdit} onClick={() => handleStatusChange(ReservationStatus.PENDENTE)} className={`flex-1 py-4 md:py-5 rounded-2xl text-[9px] md:text-[11px] font-black uppercase tracking-widest transition-all border flex items-center justify-center gap-2 active:scale-[0.98] ${editingRes.status === ReservationStatus.PENDENTE ? 'bg-yellow-500 text-black border-yellow-500 shadow-yellow-900/20' : 'bg-slate-800 text-slate-400 border-slate-700'}`}><Clock size={16}/> Pendente</button>
+                            <button disabled={!canDelete} onClick={() => setIsCancelling(true)} className="flex-1 py-4 md:py-5 rounded-2xl text-[9px] md:text-[11px] font-black uppercase tracking-widest bg-red-600/10 text-red-500 border border-red-500/20 flex items-center justify-center gap-2 hover:bg-red-600 hover:text-white transition-all active:scale-[0.98] shadow-lg shadow-red-900/10"><Ban size={16}/> Cancelar</button>
                         </div>
                     </div>
                 )}
                 {isCancelling && (
                     <div className="space-y-4 animate-scale-in">
-                        <textarea className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 md:p-4 text-white text-xs md:text-sm focus:border-red-500 transition-all font-medium h-20 md:h-24" placeholder="Motivo do cancelamento..." value={cancelReason} onChange={e => setCancelReason(e.target.value)} />
-                        <div className="flex gap-2"><button onClick={() => setIsCancelling(false)} className="flex-1 py-3 bg-slate-800 text-white rounded-xl text-[10px] font-black uppercase">Voltar</button><button onClick={async () => { if(!cancelReason.trim()) return; await db.reservations.update({...editingRes, status: ReservationStatus.CANCELADA}, currentUser?.id, `Cancelado: ${cancelReason}`); setEditingRes(null); loadData(true); }} className="flex-[2] py-3 bg-red-600 text-white rounded-xl text-[10px] font-black uppercase shadow-lg">Anular Reserva</button></div>
+                        <div className="flex items-center gap-2 mb-2"><AlertCircle size={18} className="text-red-500"/><h5 className="text-[10px] font-black text-white uppercase tracking-widest">Motivo do Cancelamento</h5></div>
+                        <textarea className="w-full bg-slate-950 border border-slate-700 rounded-2xl p-4 text-white text-xs md:text-sm focus:border-red-500 transition-all font-medium h-24 shadow-inner outline-none" placeholder="Informe por que a reserva está sendo anulada..." value={cancelReason} onChange={e => setCancelReason(e.target.value)} />
+                        <div className="flex gap-3"><button onClick={() => setIsCancelling(false)} className="flex-1 py-4 bg-slate-800 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg">Voltar</button><button onClick={async () => { if(!cancelReason.trim()) return; await db.reservations.update({...editingRes, status: ReservationStatus.CANCELADA}, currentUser?.id, `Cancelado: ${cancelReason}`); setEditingRes(null); loadData(true); }} className="flex-[2] py-4 bg-red-600 hover:bg-red-500 text-white rounded-2xl font-black uppercase text-[10px] md:text-xs tracking-[0.2em] shadow-xl shadow-red-900/30 transition-all active:scale-95">Anular Reserva Permanentemente</button></div>
                     </div>
                 )}
             </div>

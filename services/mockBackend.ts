@@ -42,9 +42,6 @@ export const db = {
           throw new Error("Título e descrição são obrigatórios.");
       }
 
-      // CRITICAL: Removemos .select() para evitar erro de RLS "New row violates..." 
-      // O Supabase tenta ler a linha inserida para retornar, e se o RLS de SELECT estiver bloqueado, 
-      // ele dá erro no INSERT.
       const { error } = await supabase.from('sugestoes').insert({
         cliente_id: suggestion.cliente_id,
         titulo: suggestion.titulo,
@@ -63,6 +60,7 @@ export const db = {
   audit: {
       log: async (userId: string, userName: string, actionType: string, details: string, entityId?: string) => {
           try {
+              // Fix: Changed action_type: action_type to action_type: actionType
               await supabase.from('audit_logs').insert({
                   user_id: userId, user_name: userName, action_type: actionType, details: details, entity_id: entityId
               });
@@ -235,6 +233,7 @@ export const db = {
     },
     getByPhone: async (phone: string): Promise<Client | null> => {
       const clean = cleanPhone(phone);
+      if (!clean) return null;
       const { data } = await supabase.from('clientes').select('*').eq('phone', clean).maybeSingle();
       if (!data) return null;
       return {
@@ -244,10 +243,12 @@ export const db = {
       };
     },
     create: async (client: any, userId?: string): Promise<Client> => {
+      const phoneCleaned = cleanPhone(client.phone);
+      
       const { data, error } = await supabase.from('clientes').insert({
         client_id: client.id || uuidv4(),
         name: client.name,
-        phone: cleanPhone(client.phone),
+        phone: phoneCleaned,
         email: client.email || null,
         address: client.address || null,
         tags: client.tags || ['Lead'],
@@ -255,7 +256,16 @@ export const db = {
         last_contact_at: new Date().toISOString()
       }).select().single();
       
-      if (error) throw error;
+      if (error) {
+          // Erro 23505 = Unique Violation (Telefone duplicado)
+          if (error.code === '23505' || error.message.includes('unique')) {
+              console.warn("[DB] Telefone duplicado detectado, buscando cliente existente...");
+              const existing = await db.clients.getByPhone(phoneCleaned);
+              if (existing) return existing;
+          }
+          throw error;
+      }
+      
       if (userId) db.audit.log(userId, 'STAFF', 'CREATE_CLIENT', `Criou cliente ${client.name}`, data.client_id);
 
       return {
@@ -331,6 +341,7 @@ export const db = {
             noShowIds: r.no_show_ids || [],
             hasTableReservation: r.has_table_reservation, 
             birthdayName: r.birthday_name, 
+            // Fix: Changed table_seat_count to tableSeatCount to match Reservation interface
             tableSeatCount: r.table_seat_count,
             payOnSite: r.pay_on_site, 
             comandaId: r.comanda_id, 
@@ -339,23 +350,27 @@ export const db = {
         }));
     },
     create: async (res: Reservation, createdByUserId?: string) => {
+      // Fix: Changed snake_case properties to camelCase on the 'res' object to match Reservation interface
       const { error } = await supabase.from('reservas').insert({
         id: res.id, client_id: res.clientId || null, client_name: res.clientName, date: res.date, time: res.time,
         people_count: res.peopleCount, lane_count: res.laneCount, duration: res.duration, total_value: res.totalValue,
         event_type: res.eventType, observations: res.observations, status: res.status, payment_status: res.paymentStatus,
         created_at: res.createdAt, has_table_reservation: res.hasTableReservation, birthday_name: res.birthdayName,
-        table_seat_count: res.tableSeatCount, created_by: createdByUserId || null
+        table_seat_count: res.tableSeatCount, created_by: createdByUserId || null,
+        pay_on_site: res.payOnSite || false, comanda_id: res.comandaId || null
       });
       if (error) throw error;
       return res;
     },
     update: async (res: Reservation, updatedByUserId?: string, actionDetail?: string) => {
+      // Fix: Changed snake_case properties to camelCase on the 'res' object to match Reservation interface
       const { error } = await supabase.from('reservas').update({
         date: res.date, time: res.time, people_count: res.peopleCount, lane_count: res.laneCount, duration: res.duration,
         total_value: res.totalValue, event_type: res.eventType, observations: res.observations, status: res.status,
         payment_status: res.paymentStatus, checked_in_ids: res.checkedInIds || [], 
         no_show_ids: res.noShowIds || [], has_table_reservation: res.hasTableReservation, 
-        table_seat_count: res.tableSeatCount, pistas_usadas: res.lanesAssigned
+        table_seat_count: res.tableSeatCount, pistas_usadas: res.lanesAssigned,
+        pay_on_site: res.payOnSite, comanda_id: res.comandaId
       }).eq('id', res.id);
       if (error) throw error;
     }
