@@ -4,9 +4,13 @@ import { supabase } from './supabaseClient';
 import { INITIAL_SETTINGS } from '../constants';
 import { v4 as uuidv4 } from 'uuid';
 
-export const cleanPhone = (phone: string) => {
-  if (!phone) return '';
-  return phone.replace(/\D/g, ''); 
+/**
+ * Limpa e normaliza o telefone.
+ */
+export const cleanPhone = (phone: string | null | undefined): string | null => {
+  if (!phone) return null;
+  const cleaned = phone.replace(/\D/g, '');
+  return cleaned.length > 0 ? cleaned : null;
 };
 
 const safeTags = (tags: any): string[] => {
@@ -180,11 +184,14 @@ export const db = {
       if (authError) return { error: authError.message };
       if (!authData.user) return { error: 'Erro ao criar usuário.' };
 
+      const phoneToInsert = cleanPhone(client.phone);
+      if (!phoneToInsert) throw new Error("O telefone é obrigatório para cadastros com conta de acesso.");
+
       const { data, error } = await supabase.from('clientes').insert({
         client_id: authData.user.id,
         name: client.name,
-        phone: cleanPhone(client.phone),
-        email: client.email,
+        phone: phoneToInsert,
+        email: client.email || null,
         address: client.address || null,
         tags: client.tags || [],
         funnel_stage: client.funnel_stage || 'Novo',
@@ -230,7 +237,7 @@ export const db = {
         funnelStage: data.funnel_stage, loyaltyBalance: data.loyalty_balance || 0
       };
     },
-    getByPhone: async (phone: string): Promise<Client | null> => {
+    getByPhone: async (phone: string | null): Promise<Client | null> => {
       const clean = cleanPhone(phone);
       if (!clean) return null;
       const { data } = await supabase.from('clientes').select('*').eq('phone', clean).maybeSingle();
@@ -243,19 +250,26 @@ export const db = {
     },
     create: async (client: any, userId?: string): Promise<Client> => {
       const phoneCleaned = cleanPhone(client.phone);
+      const emailCleaned = client.email?.trim() || null;
       
-      // Verificação preventiva antes do insert
-      const existingClient = await db.clients.getByPhone(phoneCleaned);
-      if (existingClient) {
-          console.log("[DB] Cliente já existe com este telefone, retornando existente...");
-          return existingClient;
+      if (phoneCleaned) {
+          const existingClient = await db.clients.getByPhone(phoneCleaned);
+          if (existingClient) return existingClient;
       }
 
+      // Se não houver telefone nem email, este método não deve ser chamado no novo fluxo de checkout
+      // para evitar violar restrições NOT NULL do banco de dados na tabela clientes.
+      if (!phoneCleaned) {
+          throw new Error("Não é possível criar um registro de cliente persistente sem telefone.");
+      }
+
+      const clientId = client.id || uuidv4();
+
       const { data, error } = await supabase.from('clientes').insert({
-        client_id: client.id || uuidv4(),
+        client_id: clientId,
         name: client.name,
-        phone: phoneCleaned,
-        email: client.email || null,
+        phone: phoneCleaned, 
+        email: emailCleaned, 
         address: client.address || null,
         tags: client.tags || ['Lead'],
         funnel_stage: client.funnelStage || 'Novo',
@@ -263,9 +277,12 @@ export const db = {
       }).select().single();
       
       if (error) {
+          console.error("[DB ERROR] Falha ao criar cliente:", error);
           if (error.code === '23505' || error.message.includes('unique')) {
-              const retryExisting = await db.clients.getByPhone(phoneCleaned);
-              if (retryExisting) return retryExisting;
+              if (phoneCleaned) {
+                  const retryExisting = await db.clients.getByPhone(phoneCleaned);
+                  if (retryExisting) return retryExisting;
+              }
           }
           throw error;
       }
@@ -279,8 +296,12 @@ export const db = {
       };
     },
     update: async (client: Client, updatedBy?: string) => {
+      const phoneToUpdate = cleanPhone(client.phone);
+      
       const { error } = await supabase.from('clientes').update({
-        name: client.name, phone: cleanPhone(client.phone), email: client.email || null,
+        name: client.name, 
+        phone: phoneToUpdate, 
+        email: client.email?.trim() || null,
         address: client.address || null,
         last_contact_at: client.lastContactAt, photo_url: client.photoUrl, funnel_stage: client.funnelStage
       }).eq('client_id', client.id);
@@ -368,7 +389,6 @@ export const db = {
       const { error } = await supabase.from('reservas').update({
         date: res.date, time: res.time, people_count: res.peopleCount, lane_count: res.laneCount, duration: res.duration,
         total_value: res.totalValue, event_type: res.eventType, observations: res.observations, status: res.status,
-        // Fix for Error in file services/mockBackend.ts: use checkedInIds and noShowIds from Reservation interface
         payment_status: res.paymentStatus, checked_in_ids: res.checkedInIds || [], 
         no_show_ids: res.noShowIds || [], has_table_reservation: res.hasTableReservation, 
         table_seat_count: res.tableSeatCount, pistas_usadas: res.lanesAssigned,
@@ -411,7 +431,8 @@ export const db = {
       const { error } = await supabase.from('configuracoes').upsert({
         id: 1, establishment_name: s.establishmentName, address: s.address, phone: s.phone,
         whatsapp_link: s.whatsappLink, logo_url: s.logoUrl, active_lanes: s.activeLanes,
-        weekday_price: s.weekdayPrice, weekend_price: s.weekendPrice,
+        weekday_price: s.weekdayPrice, 
+        weekend_price: s.weekendPrice,
         online_payment_enabled: s.onlinePaymentEnabled, mercadopago_public_key: s.mercadopagoPublicKey,
         blocked_dates: s.blockedDates
       });

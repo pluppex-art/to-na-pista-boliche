@@ -61,7 +61,8 @@ const Checkout: React.FC = () => {
     
     try {
         let client = null;
-        const normalizedPhone = cleanPhone(reservationData.whatsapp || '');
+        const normalizedPhone = cleanPhone(reservationData.whatsapp);
+        const emailClean = reservationData.email?.trim() || null;
 
         // 1. Resolver Cliente
         if (reservationData.clientId) {
@@ -72,24 +73,31 @@ const Checkout: React.FC = () => {
             client = await db.clients.getByPhone(normalizedPhone);
         }
         
-        if (!client) {
-          client = await db.clients.create({
-              id: uuidv4(), 
-              name: reservationData.name || 'Cliente Avulso', 
-              phone: normalizedPhone, 
-              email: reservationData.email || '',
-              tags: ['Lead novo'], 
-              createdAt: new Date().toISOString(), 
-              lastContactAt: new Date().toISOString(), 
-              funnelStage: FunnelStage.NOVO
-          }, currentUser?.id); 
+        // 2. Criar novo cliente APENAS se houver dados mínimos de contato (Tel ou Email)
+        // Isso evita "clientes fantasmas" sem informação e erros de NOT NULL no banco.
+        if (!client && (normalizedPhone || emailClean)) {
+          try {
+              client = await db.clients.create({
+                  id: uuidv4(), 
+                  name: reservationData.name || 'Cliente Avulso', 
+                  phone: normalizedPhone, 
+                  email: emailClean,
+                  tags: ['Lead novo'], 
+                  createdAt: new Date().toISOString(), 
+                  lastContactAt: new Date().toISOString(), 
+                  funnelStage: FunnelStage.NOVO
+              }, currentUser?.id); 
+          } catch (createErr) {
+              console.warn("Não foi possível persistir cliente no CRM, continuando apenas com a reserva:", createErr);
+              // Mantemos client como null para seguir com a reserva "avulsa"
+          }
         }
 
-        if (!currentUser && mode === 'CLIENT_ONLINE') {
+        if (!currentUser && mode === 'CLIENT_ONLINE' && client) {
             localStorage.setItem('tonapista_client_auth', JSON.stringify(client));
         }
 
-        // 2. Definir Estados Finais
+        // 3. Definir Estados Finais da Reserva
         let finalStatus = ReservationStatus.PENDENTE;
         let paymentStatus = PaymentStatus.PENDENTE;
         let isPayOnSite = false;
@@ -105,7 +113,7 @@ const Checkout: React.FC = () => {
         const currentTrackedIds: string[] = [];
         let firstReservationId = '';
 
-        // 3. Atualizar ou Criar Reservas
+        // 4. Atualizar ou Criar Reservas vinculadas ao Cliente (ou null se for avulso)
         if (existingIds.length > 0) {
             const allRes = await db.reservations.getAll();
             for (const id of existingIds) {
@@ -113,6 +121,7 @@ const Checkout: React.FC = () => {
                  if (existingRes) {
                      await db.reservations.update({ 
                          ...existingRes, 
+                         clientId: client?.id || null, // Se não tem cliente, vincula a nulo (Reserva Avulsa)
                          status: finalStatus, 
                          paymentStatus: paymentStatus, 
                          payOnSite: isPayOnSite, 
@@ -126,8 +135,8 @@ const Checkout: React.FC = () => {
             const resId = uuidv4();
             const newRes: Reservation = {
                 id: resId, 
-                clientId: client.id, 
-                clientName: reservationData.name, 
+                clientId: client?.id || '', // Pode ser vazio/nulo para reservas de balcão
+                clientName: reservationData.name || 'Cliente Avulso', 
                 date: reservationData.date, 
                 time: reservationData.time,
                 peopleCount: reservationData.people, 
@@ -148,7 +157,7 @@ const Checkout: React.FC = () => {
         
         setTrackedReservationIds(currentTrackedIds);
 
-        // 4. Fluxo de Saída
+        // 5. Fluxo de Saída
         if (mode === 'CLIENT_ONLINE' && settings?.onlinePaymentEnabled) {
              const checkoutUrl = await Integrations.createMercadoPagoPreference({ id: firstReservationId }, settings);
              if (checkoutUrl) { 
