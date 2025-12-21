@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { db } from '../services/mockBackend';
+import { db, cleanPhone } from '../services/mockBackend';
 import { Integrations } from '../services/integrations';
 import { Reservation, ReservationStatus, FunnelStage, User, PaymentStatus, EventType } from '../types';
 import { CheckCircle, CreditCard, Loader2, ShieldCheck, Store, Lock, Hash, ArrowRight, User as UserIcon, Calendar, RefreshCw, ExternalLink, Shield } from 'lucide-react';
@@ -61,20 +61,22 @@ const Checkout: React.FC = () => {
     
     try {
         let client = null;
+        const normalizedPhone = cleanPhone(reservationData.whatsapp || '');
+
         // 1. Resolver Cliente
         if (reservationData.clientId) {
             client = await db.clients.getById(reservationData.clientId);
         }
         
-        if (!client && reservationData.whatsapp) {
-            client = await db.clients.getByPhone(reservationData.whatsapp);
+        if (!client && normalizedPhone) {
+            client = await db.clients.getByPhone(normalizedPhone);
         }
         
         if (!client) {
           client = await db.clients.create({
               id: uuidv4(), 
               name: reservationData.name || 'Cliente Avulso', 
-              phone: reservationData.whatsapp || '', 
+              phone: normalizedPhone, 
               email: reservationData.email || '',
               tags: ['Lead novo'], 
               createdAt: new Date().toISOString(), 

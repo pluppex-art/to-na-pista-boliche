@@ -60,7 +60,6 @@ export const db = {
   audit: {
       log: async (userId: string, userName: string, actionType: string, details: string, entityId?: string) => {
           try {
-              // Fix: Changed action_type: action_type to action_type: actionType
               await supabase.from('audit_logs').insert({
                   user_id: userId, user_name: userName, action_type: actionType, details: details, entity_id: entityId
               });
@@ -245,6 +244,13 @@ export const db = {
     create: async (client: any, userId?: string): Promise<Client> => {
       const phoneCleaned = cleanPhone(client.phone);
       
+      // Verificação preventiva antes do insert
+      const existingClient = await db.clients.getByPhone(phoneCleaned);
+      if (existingClient) {
+          console.log("[DB] Cliente já existe com este telefone, retornando existente...");
+          return existingClient;
+      }
+
       const { data, error } = await supabase.from('clientes').insert({
         client_id: client.id || uuidv4(),
         name: client.name,
@@ -257,11 +263,9 @@ export const db = {
       }).select().single();
       
       if (error) {
-          // Erro 23505 = Unique Violation (Telefone duplicado)
           if (error.code === '23505' || error.message.includes('unique')) {
-              console.warn("[DB] Telefone duplicado detectado, buscando cliente existente...");
-              const existing = await db.clients.getByPhone(phoneCleaned);
-              if (existing) return existing;
+              const retryExisting = await db.clients.getByPhone(phoneCleaned);
+              if (retryExisting) return retryExisting;
           }
           throw error;
       }
@@ -341,7 +345,6 @@ export const db = {
             noShowIds: r.no_show_ids || [],
             hasTableReservation: r.has_table_reservation, 
             birthdayName: r.birthday_name, 
-            // Fix: Changed table_seat_count to tableSeatCount to match Reservation interface
             tableSeatCount: r.table_seat_count,
             payOnSite: r.pay_on_site, 
             comandaId: r.comanda_id, 
@@ -350,7 +353,6 @@ export const db = {
         }));
     },
     create: async (res: Reservation, createdByUserId?: string) => {
-      // Fix: Changed snake_case properties to camelCase on the 'res' object to match Reservation interface
       const { error } = await supabase.from('reservas').insert({
         id: res.id, client_id: res.clientId || null, client_name: res.clientName, date: res.date, time: res.time,
         people_count: res.peopleCount, lane_count: res.laneCount, duration: res.duration, total_value: res.totalValue,
@@ -363,10 +365,10 @@ export const db = {
       return res;
     },
     update: async (res: Reservation, updatedByUserId?: string, actionDetail?: string) => {
-      // Fix: Changed snake_case properties to camelCase on the 'res' object to match Reservation interface
       const { error } = await supabase.from('reservas').update({
         date: res.date, time: res.time, people_count: res.peopleCount, lane_count: res.laneCount, duration: res.duration,
         total_value: res.totalValue, event_type: res.eventType, observations: res.observations, status: res.status,
+        // Fix for Error in file services/mockBackend.ts: use checkedInIds and noShowIds from Reservation interface
         payment_status: res.paymentStatus, checked_in_ids: res.checkedInIds || [], 
         no_show_ids: res.noShowIds || [], has_table_reservation: res.hasTableReservation, 
         table_seat_count: res.tableSeatCount, pistas_usadas: res.lanesAssigned,
