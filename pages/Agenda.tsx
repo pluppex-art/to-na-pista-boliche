@@ -1,5 +1,5 @@
-
-import { useEffect, useState } from 'react';
+// Added React to imports to resolve namespace errors
+import React, { useEffect, useState } from 'react';
 import { db } from '../services/mockBackend';
 import { supabase } from '../services/supabaseClient';
 import { Reservation, ReservationStatus, EventType, UserRole, PaymentStatus } from '../types';

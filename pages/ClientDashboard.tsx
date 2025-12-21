@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Client, Reservation, LoyaltyTransaction, ReservationStatus, PaymentStatus, Feedback, Suggestion, EventType } from '../types';
 import { db } from '../services/mockBackend';
@@ -114,11 +114,14 @@ const ClientDashboard: React.FC = () => {
       return sum / feedbacks.length;
   }, [feedbacks]);
 
-  const loadData = async (isBackground = false) => {
+  // Função de carregamento centralizada com suporte a background update
+  const loadData = useCallback(async (isBackground = false) => {
       const stored = localStorage.getItem('tonapista_client_auth');
       if (!stored) { navigate('/login'); return; }
       const clientData = JSON.parse(stored);
+      
       if (!isBackground) setLoading(true);
+      
       try {
           const freshClient = await db.clients.getById(clientData.id);
           const activeClient = freshClient || clientData;
@@ -140,28 +143,66 @@ const ClientDashboard: React.FC = () => {
           setHistory(myRes);
           setLoyalty(pts);
           setFeedbacks(fbacks);
-      } catch (e) { console.error(e); } finally { if (!isBackground) setLoading(false); }
-  };
+      } catch (e) { 
+          console.error("Erro ao carregar dados do dashboard:", e); 
+      } finally { 
+          if (!isBackground) setLoading(false); 
+      }
+  }, [navigate]);
 
+  // Efeito inicial de carregamento e inscrição REALTIME
   useEffect(() => { 
     loadData();
     
-    // REAL-TIME PARA O CLIENTE
     const stored = localStorage.getItem('tonapista_client_auth');
     if (stored) {
         const clientData = JSON.parse(stored);
-        const channel = supabase.channel(`client-realtime-${clientData.id}`)
-            // Monitorar reservas do cliente
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas', filter: `client_id=eq.${clientData.id}` }, () => loadData(true))
-            // Monitorar dados do perfil e saldo de pontos
-            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clientes', filter: `client_id=eq.${clientData.id}` }, () => loadData(true))
-            // Monitorar transações de fidelidade
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'loyalty_transactions', filter: `client_id=eq.${clientData.id}` }, () => loadData(true))
-            .subscribe();
+        const clientId = clientData.id;
 
-        return () => { supabase.removeChannel(channel); };
+        console.log(`[Realtime] Iniciando monitoramento para cliente: ${clientId}`);
+
+        // Inscrição em múltiplos canais para garantir atualizações snappy
+        const channel = supabase.channel(`dashboard-client-${clientId}`)
+            // 1. Escuta mudanças nas reservas DESTE cliente
+            .on('postgres_changes', { 
+                event: '*', 
+                schema: 'public', 
+                table: 'reservas', 
+                filter: `client_id=eq.${clientId}` 
+            }, () => {
+                console.log("[Realtime] Reserva atualizada");
+                loadData(true);
+            })
+            // 2. Escuta mudanças no registro do cliente (pontos, nome, etc)
+            .on('postgres_changes', { 
+                event: 'UPDATE', 
+                schema: 'public', 
+                table: 'clientes', 
+                filter: `client_id=eq.${clientId}` 
+            }, () => {
+                console.log("[Realtime] Dados do perfil/pontos atualizados");
+                loadData(true);
+            })
+            // 3. Escuta novas transações de fidelidade
+            .on('postgres_changes', { 
+                event: 'INSERT', 
+                schema: 'public', 
+                table: 'loyalty_transactions', 
+                filter: `client_id=eq.${clientId}` 
+            }, () => {
+                console.log("[Realtime] Nova transação de pontos detectada");
+                loadData(true);
+            })
+            .subscribe((status) => {
+                console.log(`[Realtime] Status da conexão: ${status}`);
+            });
+
+        return () => {
+            console.log("[Realtime] Removendo canal");
+            supabase.removeChannel(channel);
+        };
     }
-  }, [navigate]);
+  }, [loadData]);
 
   const handleLogout = async () => {
       localStorage.removeItem('tonapista_client_auth');
