@@ -35,7 +35,7 @@ export const getDayConfiguration = (dateStr: string, settings: AppSettings) => {
 
 /**
  * Calcula a disponibilidade de pistas para uma hora específica.
- * REGRA CRÍTICA: Limite máximo inegociável de 6 pistas.
+ * Respeita rigorosamente o valor totalLanes passado (configurado no banco).
  */
 export const checkHourCapacity = (
   hourInt: number,
@@ -46,7 +46,6 @@ export const checkHourCapacity = (
 ): { occupied: number; left: number; available: boolean } => {
   
   const now = new Date();
-  const MAX_LIMIT_LANES = 6; // Limite físico de pistas do boliche
 
   // Filtra reservas do dia (exceto canceladas e a própria reserva se estiver editando)
   const dayReservations = allReservations.filter(r => {
@@ -78,9 +77,7 @@ export const checkHourCapacity = (
     }
   });
 
-  // O limite real disponível é o menor entre o configurado e o limite físico de 6
-  const capacity = Math.min(totalLanes, MAX_LIMIT_LANES);
-  const left = capacity - occupied;
+  const left = totalLanes - occupied;
   
   // Disponível apenas se houver pelo menos 1 pista vaga
   const available = left > 0; 

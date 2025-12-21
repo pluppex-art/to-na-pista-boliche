@@ -79,6 +79,7 @@ const Agenda: React.FC = () => {
   const canEdit = currentUser?.role === UserRole.ADMIN || currentUser?.perm_edit_reservation;
   const canDelete = currentUser?.role === UserRole.ADMIN || currentUser?.perm_delete_reservation;
   const canReceivePayment = currentUser?.role === UserRole.ADMIN || currentUser?.perm_receive_payment;
+  const isAdmin = currentUser?.role === UserRole.ADMIN;
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30000);
@@ -205,8 +206,15 @@ const Agenda: React.FC = () => {
       e.stopPropagation();
       if (!canReceivePayment) return;
       if (!window.confirm(`Confirmar recebimento de ${res.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}?`)) return;
+      
       const updatedRes = { ...res, paymentStatus: PaymentStatus.PAGO };
       await db.reservations.update(updatedRes, currentUser?.id, 'Recebimento Rápido');
+      
+      // Atualiza o estado local para refletir no modal imediatamente
+      if (editingRes && editingRes.id === res.id) {
+          setEditingRes(updatedRes);
+      }
+      
       loadData(true);
   };
 
@@ -242,20 +250,61 @@ const Agenda: React.FC = () => {
     }
     const updated = { ...editingRes, status, paymentStatus: status === ReservationStatus.CONFIRMADA && !editingRes.payOnSite ? PaymentStatus.PAGO : editingRes.paymentStatus };
     await db.reservations.update(updated, currentUser?.id, `Alterou status para ${status}`);
-    setEditingRes(null); 
+    setEditingRes(updated); 
     loadData(true); 
   };
 
   const handleSaveFullEdit = async () => {
       if (!editingRes || !editForm) return;
-      const [y, m, d] = (editForm.date || '').split('-').map(Number);
-      const date = new Date(y, m - 1, d);
-      const isWeekend = [0, 5, 6].includes(date.getDay());
-      const price = isWeekend ? settings.weekendPrice : settings.weekdayPrice;
-      const total = price * (editForm.laneCount || 1) * (editForm.duration || 1);
-      const finalUpdate = { ...editingRes, ...editForm, totalValue: total } as Reservation;
+
+      const dateStr = editForm.date || editingRes.date;
+      const timeStr = editForm.time || editingRes.time;
+      const lanesReq = editForm.laneCount || 1;
+      const duration = editForm.duration || editingRes.duration;
+      const peopleReq = editForm.peopleCount || 1;
+
+      // Validação de limite máximo de pistas e pessoas configurado no banco
+      const maxLanes = settings.activeLanes;
+      const maxPeople = maxLanes * 6;
+
+      if (lanesReq > maxLanes) {
+          alert(`Capacidade máxima excedida! O sistema permite no máximo ${maxLanes} pistas.`);
+          return;
+      }
+
+      if (peopleReq > maxPeople) {
+          alert(`Capacidade máxima excedida! O limite é de 6 pessoas por pista (${maxPeople} no total).`);
+          return;
+      }
+
+      // Validação rigorosa de capacidade para todas as horas da reserva
+      const startH = parseInt(timeStr.split(':')[0]);
+      const allRes = await db.reservations.getAll();
+
+      for (let i = 0; i < Math.ceil(duration); i++) {
+          const currentH = (startH + i) % 24;
+          const { left } = checkHourCapacity(currentH, dateStr, allRes, settings.activeLanes, editingRes.id);
+          if (left < lanesReq) {
+              alert(`Indisponível! O horário das ${currentH}:00 já atingiu o limite de pistas configurado (${settings.activeLanes}).`);
+              return;
+          }
+      }
+
+      let total = editForm.totalValue || editingRes.totalValue;
+      
+      // Se não for Admin, recalculamos o valor automaticamente baseados na regra de preço
+      if (!isAdmin) {
+          const [y, m, d] = dateStr.split('-').map(Number);
+          const dateObj = new Date(y, m - 1, d);
+          const isWeekend = [0, 5, 6].includes(dateObj.getDay());
+          const price = isWeekend ? settings.weekendPrice : settings.weekdayPrice;
+          total = price * lanesReq * duration;
+      }
+
+      const finalUpdate = { ...editingRes, ...editForm, laneCount: lanesReq, peopleCount: peopleReq, totalValue: total } as Reservation;
       await db.reservations.update(finalUpdate, currentUser?.id, 'Edição completa de agendamento');
-      setEditingRes(null);
+      setEditingRes(finalUpdate);
+      setIsEditMode(false);
       loadData(true);
   };
 
@@ -395,11 +444,15 @@ const Agenda: React.FC = () => {
                                       </div>
                                       <div className="flex items-center gap-2 text-slate-400">
                                           <Hash size={12} className="text-slate-500"/>
-                                          <span className="text-[10px] font-bold uppercase">{res.laneCount} Pista(s)</span>
+                                          <span className="text-[10px] font-bold uppercase">
+                                              {isCI && res.lanesAssigned && res.lanesAssigned[idx] 
+                                                  ? `Pista: ${res.lanesAssigned[idx]}` 
+                                                  : `${res.laneCount} Pista(s)`}
+                                          </span>
                                       </div>
                                   </div>
 
-                                  <div className="space-y-1.5">
+                                  <div className="flex flex-wrap gap-1.5">
                                       {res.hasTableReservation && (
                                           <div className="flex items-center gap-1.5 text-[10px] font-black text-orange-400 uppercase tracking-tighter bg-orange-900/10 p-1.5 rounded-lg border border-orange-500/20">
                                               <Utensils size={14} className="opacity-70"/> MESA: {res.tableSeatCount} LUG.
@@ -407,7 +460,17 @@ const Agenda: React.FC = () => {
                                       )}
                                       {res.birthdayName && (
                                           <div className="flex items-center gap-1.5 text-[10px] font-black text-blue-400 uppercase tracking-tighter bg-blue-900/10 p-1.5 rounded-lg border border-blue-500/20">
-                                              <Cake size={14} className="opacity-70"/> {res.birthdayName}
+                                              <Cake size={14} className="opacity-70"/> ANIV: {res.birthdayName.toUpperCase()}
+                                          </div>
+                                      )}
+                                      {res.payOnSite && (
+                                          <div className="flex items-center gap-1.5 text-[10px] font-black text-slate-400 uppercase tracking-tighter bg-slate-800 p-1.5 rounded-lg border border-slate-700">
+                                              <Store size={14} className="opacity-70"/> PGTO LOCAL
+                                          </div>
+                                      )}
+                                      {res.comandaId && (
+                                          <div className="flex items-center gap-1.5 text-[10px] font-black text-purple-400 uppercase tracking-tighter bg-purple-900/10 p-1.5 rounded-lg border border-purple-500/20">
+                                              <Hash size={14} className="opacity-70"/> COMANDA: {res.comandaId}
                                           </div>
                                       )}
                                   </div>
@@ -455,10 +518,95 @@ const Agenda: React.FC = () => {
                             <div><label className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase block mb-1 tracking-widest">Horas</label><input type="number" step="0.5" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 md:p-4 text-white text-xs md:text-sm font-bold" value={editForm.duration} onChange={e => setEditForm({...editForm, duration: parseFloat(e.target.value)})} /></div>
                         </div>
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-                            <div><label className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase block mb-1 tracking-widest">Pistas</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 md:p-4 text-white text-xs md:text-sm font-black" value={editForm.laneCount} onChange={e => setEditForm({...editForm, laneCount: parseInt(e.target.value)})} /></div>
-                            <div><label className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase block mb-1 tracking-widest">Pessoas</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 md:p-4 text-white text-xs md:text-sm font-black" value={editForm.peopleCount} onChange={e => setEditForm({...editForm, peopleCount: parseInt(e.target.value)})} /></div>
+                            <div>
+                                <label className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase block mb-1 tracking-widest">Pistas</label>
+                                <input 
+                                    type="text" 
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 md:p-4 text-white text-xs md:text-sm font-black" 
+                                    value={editForm.laneCount === undefined ? '' : editForm.laneCount} 
+                                    onChange={e => {
+                                        const val = e.target.value;
+                                        if (val === '') {
+                                            setEditForm({...editForm, laneCount: undefined});
+                                            return;
+                                        }
+                                        const num = parseInt(val);
+                                        if (isNaN(num)) return;
+                                        if (num > settings.activeLanes) {
+                                            alert(`Capacidade máxima excedida! O boliche possui ${settings.activeLanes} pistas.`);
+                                            setEditForm({...editForm, laneCount: settings.activeLanes});
+                                        } else {
+                                            setEditForm({...editForm, laneCount: num});
+                                        }
+                                    }} 
+                                />
+                            </div>
+                            <div>
+                                <label className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase block mb-1 tracking-widest">Pessoas</label>
+                                <input 
+                                    type="text" 
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 md:p-4 text-white text-xs md:text-sm font-black" 
+                                    value={editForm.peopleCount === undefined ? '' : editForm.peopleCount} 
+                                    onChange={e => {
+                                        const val = e.target.value;
+                                        if (val === '') {
+                                            setEditForm({...editForm, peopleCount: undefined});
+                                            return;
+                                        }
+                                        const num = parseInt(val);
+                                        const maxPeople = settings.activeLanes * 6;
+                                        if (isNaN(num)) return;
+                                        if (num > maxPeople) {
+                                            alert(`Capacidade máxima excedida! O limite total é de ${maxPeople} pessoas.`);
+                                            setEditForm({...editForm, peopleCount: maxPeople});
+                                        } else {
+                                            setEditForm({...editForm, peopleCount: num});
+                                        }
+                                    }} 
+                                />
+                            </div>
                             <div className="col-span-2 md:col-span-1"><label className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase block mb-1 tracking-widest">Evento</label><select className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 md:p-4 text-white text-xs md:text-sm font-bold" value={editForm.eventType} onChange={e => setEditForm({...editForm, eventType: e.target.value as EventType})}>{EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
                         </div>
+
+                        {/* NOVOS CAMPOS DE EDIÇÃO: ADMIN VALOR + MESA */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 pt-4 border-t border-slate-700/50">
+                             {isAdmin && (
+                                 <div>
+                                     <label className="text-[8px] md:text-[10px] font-black text-neon-orange uppercase block mb-1 tracking-widest">Valor Total (ADMIN)</label>
+                                     <div className="relative">
+                                         <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14}/>
+                                         <input type="number" step="0.01" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 md:p-4 pl-10 text-neon-green text-sm font-black outline-none focus:border-neon-green" value={editForm.totalValue} onChange={e => setEditForm({...editForm, totalValue: parseFloat(e.target.value)})} />
+                                     </div>
+                                 </div>
+                             )}
+                             <div className={`${!isAdmin ? 'md:col-span-2' : ''}`}>
+                                <label className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase block mb-1 tracking-widest">Nome do Aniversariante</label>
+                                <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 md:p-4 text-white text-sm font-bold" value={editForm.birthdayName || ''} onChange={e => setEditForm({...editForm, birthdayName: e.target.value})} placeholder="Se aplicável" />
+                             </div>
+                        </div>
+
+                        <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700">
+                             <div className="flex items-center justify-between">
+                                 <div className="flex items-center gap-3">
+                                     <Utensils size={20} className="text-neon-orange"/>
+                                     <div>
+                                         <p className="text-xs font-bold text-white uppercase tracking-tighter">Reserva de Mesa</p>
+                                         <p className="text-[9px] text-slate-500 uppercase">Solicitar lugares no restaurante</p>
+                                     </div>
+                                 </div>
+                                 <label className="relative inline-flex items-center cursor-pointer">
+                                     <input type="checkbox" className="sr-only peer" checked={editForm.hasTableReservation} onChange={e => setEditForm({...editForm, hasTableReservation: e.target.checked})} />
+                                     <div className="w-11 h-6 bg-slate-700 rounded-full peer peer-checked:after:translate-x-full peer-checked:bg-neon-orange after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+                                 </label>
+                             </div>
+                             {editForm.hasTableReservation && (
+                                 <div className="mt-4 pt-4 border-t border-slate-800 animate-scale-in">
+                                     <label className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase block mb-1 tracking-widest">Lugares na Mesa</label>
+                                     <input type="number" className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white text-sm font-black" value={editForm.tableSeatCount || 0} onChange={e => setEditForm({...editForm, tableSeatCount: parseInt(e.target.value)})} />
+                                 </div>
+                             )}
+                        </div>
+
                         <button onClick={handleSaveFullEdit} className="w-full py-4 md:py-5 bg-neon-blue hover:bg-blue-600 text-white rounded-xl md:rounded-2xl font-black uppercase text-[10px] md:text-xs tracking-[0.2em] shadow-xl flex items-center justify-center gap-3 transition-all active:scale-95"><Save size={18}/> Salvar Dados</button>
                     </div>
                 ) : (
@@ -562,13 +710,13 @@ const Agenda: React.FC = () => {
                             </div>
                             
                             {editingRes.paymentStatus === PaymentStatus.PENDENTE && (
-                                <div className="mt-4 bg-red-950/30 border border-red-500/50 p-4 rounded-2xl flex items-center justify-between shadow-lg">
+                                <div className="mt-4 bg-red-600/10 border border-red-600/40 p-5 rounded-2xl flex items-center justify-between shadow-lg">
                                     <div className="flex items-center gap-3">
-                                        <div className="p-2 bg-red-500/20 rounded-xl text-red-500"><DollarSign size={20}/></div>
-                                        <p className="text-[10px] font-black text-red-400 uppercase tracking-widest">Aguardando recebimento financeiro</p>
+                                        <div className="p-2.5 bg-red-600/20 rounded-xl text-red-500"><DollarSign size={24}/></div>
+                                        <p className="text-xs font-black text-red-500 uppercase tracking-widest">Aguardando recebimento financeiro</p>
                                     </div>
                                     {canReceivePayment && (
-                                        <button onClick={(e) => handleQuickReceive(e, editingRes)} className="bg-red-600 hover:bg-red-500 text-white px-5 py-2 rounded-xl text-[10px] font-black uppercase transition-colors shadow-lg active:scale-95">Receber</button>
+                                        <button onClick={(e) => handleQuickReceive(e, editingRes)} className="bg-red-600 hover:bg-red-500 text-white px-8 py-3 rounded-xl text-xs font-black uppercase transition-all shadow-xl active:scale-95">Receber</button>
                                     )}
                                 </div>
                             )}
@@ -621,7 +769,7 @@ const Agenda: React.FC = () => {
                     </div>
                 )}
                 {isCancelling && (
-                    <div className="space-y-4 animate-scale-in">
+                    <div className="space-y-4 animate-fade-in">
                         <div className="flex items-center gap-2 mb-2"><AlertCircle size={18} className="text-red-500"/><h5 className="text-[10px] font-black text-white uppercase tracking-widest">Motivo do Cancelamento</h5></div>
                         <textarea className="w-full bg-slate-950 border border-slate-700 rounded-2xl p-4 text-white text-xs md:text-sm focus:border-red-500 transition-all font-medium h-24 shadow-inner outline-none" placeholder="Informe por que a reserva está sendo anulada..." value={cancelReason} onChange={e => setCancelReason(e.target.value)} />
                         <div className="flex gap-3"><button onClick={() => setIsCancelling(false)} className="flex-1 py-4 bg-slate-800 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg">Voltar</button><button onClick={async () => { if(!cancelReason.trim()) return; await db.reservations.update({...editingRes, status: ReservationStatus.CANCELADA}, currentUser?.id, `Cancelado: ${cancelReason}`); setEditingRes(null); loadData(true); }} className="flex-[2] py-4 bg-red-600 hover:bg-red-500 text-white rounded-2xl font-black uppercase text-[10px] md:text-xs tracking-[0.2em] shadow-xl shadow-red-900/30 transition-all active:scale-95">Anular Reserva Permanentemente</button></div>

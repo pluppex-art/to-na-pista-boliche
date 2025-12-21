@@ -18,7 +18,6 @@ const PublicBooking: React.FC = () => {
   const location = useLocation(); 
   const { settings, user: staffUser, loading: appLoading } = useApp();
   
-  // Inicialização imediata do clientUser para evitar flicker no header
   const [clientUser, setClientUser] = useState<any>(() => {
       const stored = localStorage.getItem('tonapista_client_auth');
       return stored ? JSON.parse(stored) : null;
@@ -75,7 +74,6 @@ const PublicBooking: React.FC = () => {
 
   const [viewDate, setViewDate] = useState(new Date());
 
-  // Sincroniza dados se o login mudar
   useEffect(() => {
       const storedClient = localStorage.getItem('tonapista_client_auth');
       if (storedClient) {
@@ -186,33 +184,38 @@ const PublicBooking: React.FC = () => {
   const handlePeopleChange = (val: string) => {
       setPeopleInput(val); 
       if (val === '') return;
-      const num = parseInt(val);
+      let num = parseInt(val);
+      const maxAllowed = settings.activeLanes * 6;
+      
       if (!isNaN(num)) {
+          if (num > maxAllowed) num = maxAllowed;
           const suggestedLanes = Math.ceil(num / 6);
           setFormData(prev => {
               let newSeatCount = prev.tableSeatCount;
-              let maxAllowed = 25;
-              if (num > 25) maxAllowed = num;
-              if (maxAllowed > 36) maxAllowed = 36;
-              if (prev.tableSeatCount > maxAllowed) newSeatCount = maxAllowed;
+              let maxSeats = 25;
+              if (num > 25) maxSeats = num;
+              if (maxSeats > 36) maxSeats = 36;
+              if (prev.tableSeatCount > maxSeats) newSeatCount = maxSeats;
               return { ...prev, people: num, lanes: suggestedLanes, tableSeatCount: newSeatCount };
           });
           setLanesInput(suggestedLanes.toString());
+          setPeopleInput(num.toString());
       }
   };
 
   const handlePeopleBlur = () => {
       let num = parseInt(peopleInput);
+      const maxAllowed = settings.activeLanes * 6;
       if (isNaN(num) || num < 1) num = 1;
-      if (num > 36) { num = 36; alert("Máximo de 36 pessoas por reserva."); }
+      if (num > maxAllowed) { num = maxAllowed; alert(`Capacidade máxima do boliche é de ${maxAllowed} pessoas.`); }
       setPeopleInput(num.toString());
       const suggestedLanes = Math.ceil(num / 6);
       setFormData(prev => {
           let newSeatCount = prev.tableSeatCount;
-          let maxAllowed = 25;
-          if (num > 25) maxAllowed = num;
-          if (maxAllowed > 36) maxAllowed = 36;
-          if (prev.tableSeatCount > maxAllowed) newSeatCount = maxAllowed;
+          let maxSeats = 25;
+          if (num > 25) maxSeats = num;
+          if (maxSeats > 36) maxSeats = 36;
+          if (prev.tableSeatCount > maxSeats) newSeatCount = maxSeats;
           return { ...prev, people: num, lanes: suggestedLanes, tableSeatCount: newSeatCount };
       });
       setLanesInput(suggestedLanes.toString());
@@ -230,8 +233,13 @@ const PublicBooking: React.FC = () => {
   const handleLanesChange = (val: string) => {
       setLanesInput(val);
       if (val === '') return;
-      const num = parseInt(val);
-      if (!isNaN(num)) { setFormData(prev => ({ ...prev, lanes: num })); setSelectedTimes([]); }
+      let num = parseInt(val);
+      if (!isNaN(num)) { 
+          if (num > settings.activeLanes) num = settings.activeLanes;
+          setFormData(prev => ({ ...prev, lanes: num })); 
+          setLanesInput(num.toString());
+          setSelectedTimes([]); 
+      }
   };
 
   const handleLanesBlur = () => {
@@ -661,7 +669,6 @@ const PublicBooking: React.FC = () => {
              settings?.logoUrl ? <img src={settings.logoUrl} className="h-12 md:h-16 object-contain" onError={() => setImgError(true)} /> : <img src="/logo.png" className="h-12 md:h-16 object-contain" onError={() => setImgError(true)} />
            ) : <h1 className="text-2xl font-bold text-neon-orange">{settings?.establishmentName}</h1>}
           <div className="flex items-center gap-4">
-            {/* PRIORIDADE NO HEADER: Se for cliente logado, volta para a conta do cliente */}
             {clientUser ? (
                 <Link to="/minha-conta" className="text-neon-green bg-slate-800 px-3 py-2 rounded-lg text-sm border border-slate-700 flex items-center gap-2 transition hover:bg-slate-700">
                     <UserIcon size={16}/> Minha Conta
@@ -726,8 +733,8 @@ const PublicBooking: React.FC = () => {
                     )}
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Pessoas</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white" value={peopleInput} onChange={e => handlePeopleChange(e.target.value)} onBlur={handlePeopleBlur} /></div>
-                        <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Pistas</label><input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white" value={lanesInput} onChange={e => handleLanesChange(e.target.value)} onBlur={handleLanesBlur} /></div>
+                        <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Pessoas</label><input type="number" min="1" max={settings.activeLanes * 6} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white" value={peopleInput} onChange={e => handlePeopleChange(e.target.value)} onBlur={handlePeopleBlur} /></div>
+                        <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Pistas</label><input type="number" min="1" max={settings.activeLanes} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white" value={lanesInput} onChange={e => handleLanesChange(e.target.value)} onBlur={handleLanesBlur} /></div>
                         <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Tipo de Evento</label><select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white" value={formData.type} onChange={e => handleInputChange('type', e.target.value)}>{EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
                     </div>
 
@@ -754,9 +761,28 @@ const PublicBooking: React.FC = () => {
                     <div className="mb-8">
                         <h3 className="text-xs font-bold text-slate-500 uppercase mb-4 tracking-widest border-b border-slate-800 pb-2">Horários Disponíveis</h3>
                         <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
-                            {timeSlots.map(slot => (
-                                <button key={slot.time} disabled={!slot.available} onClick={() => toggleTimeSelection(slot.time)} className={`p-3 rounded-lg text-xs font-bold border transition-all ${selectedTimes.includes(slot.time) ? 'bg-neon-blue text-white border-neon-blue shadow-lg scale-105' : !slot.available ? 'bg-slate-900 text-slate-700 border-slate-800 cursor-not-allowed opacity-50' : 'bg-slate-800 text-slate-300 border-slate-700 hover:border-slate-500'}`}>{slot.label}</button>
-                            ))}
+                            {timeSlots.map(slot => {
+                                const isInsufficient = slot.left < formData.lanes;
+                                const isBlocked = !slot.available || isInsufficient;
+                                return (
+                                <button 
+                                    key={slot.time} 
+                                    disabled={isBlocked} 
+                                    onClick={() => toggleTimeSelection(slot.time)} 
+                                    className={`p-3 rounded-xl flex flex-col items-center justify-center border transition-all ${
+                                        selectedTimes.includes(slot.time) 
+                                            ? 'bg-neon-blue text-white border-neon-blue shadow-lg scale-105' 
+                                            : isBlocked 
+                                                ? 'bg-slate-900 text-slate-700 border-slate-800 cursor-not-allowed opacity-50' 
+                                                : 'bg-slate-800 text-slate-300 border-slate-700 hover:border-slate-500 shadow-md active:scale-95'
+                                    }`}
+                                >
+                                    <span className="text-[11px] font-black">{slot.label}</span>
+                                    <span className={`text-[8px] font-bold uppercase mt-1 ${isInsufficient ? 'text-red-500' : 'text-slate-500'}`}>
+                                        {isInsufficient ? 'Lotado' : `${slot.left} vagas`}
+                                    </span>
+                                </button>
+                            )})}
                         </div>
                     </div>
                 )}
