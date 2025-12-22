@@ -13,6 +13,7 @@ export interface TimeSlot {
  * Verifica se uma data específica é "Hoje"
  */
 export const isDateToday = (dateStr: string): boolean => {
+  if (!dateStr) return false;
   const now = new Date();
   const todayStr = [
     now.getFullYear(),
@@ -27,7 +28,10 @@ export const isDateToday = (dateStr: string): boolean => {
  */
 export const getDayConfiguration = (dateStr: string, settings: AppSettings) => {
   if (!dateStr || !settings) return null;
-  const [y, m, d] = dateStr.split('-').map(Number);
+  const parts = dateStr.split('-');
+  if (parts.length < 3) return null;
+  
+  const [y, m, d] = parts.map(Number);
   const date = new Date(y, m - 1, d);
   const dayOfWeek = date.getDay(); // 0 = Domingo
   return settings.businessHours[dayOfWeek];
@@ -35,7 +39,6 @@ export const getDayConfiguration = (dateStr: string, settings: AppSettings) => {
 
 /**
  * Calcula a disponibilidade de pistas para uma hora específica.
- * Respeita rigorosamente o valor totalLanes passado (configurado no banco).
  */
 export const checkHourCapacity = (
   hourInt: number,
@@ -47,13 +50,11 @@ export const checkHourCapacity = (
   
   const now = new Date();
 
-  // Filtra reservas do dia (exceto canceladas e a própria reserva se estiver editando)
   const dayReservations = allReservations.filter(r => {
-    if (r.date !== dateStr) return false;
+    if (!r || r.date !== dateStr) return false;
     if (r.status === ReservationStatus.CANCELADA) return false;
     if (r.id === excludeReservationId) return false;
 
-    // Regra de expiração de 30 minutos para reservas pendentes online
     if (r.status === ReservationStatus.PENDENTE && !r.payOnSite && r.createdAt) {
         const created = new Date(r.createdAt);
         const diffMinutes = (now.getTime() - created.getTime()) / (1000 * 60);
@@ -67,19 +68,18 @@ export const checkHourCapacity = (
 
   let occupied = 0;
 
-  // SOMA RIGOROSA: Itera por cada reserva e soma a quantidade de pistas (laneCount)
   dayReservations.forEach(r => {
-    const rStart = parseInt(r.time.split(':')[0]);
-    const rEnd = rStart + r.duration;
-    // Se a hora consultada estiver dentro do intervalo ocupado pela reserva
+    // Proteção contra r.time indefinido
+    const timeStr = r.time || "00:00";
+    const rStart = parseInt(timeStr.split(':')[0] || "0");
+    const rEnd = rStart + (r.duration || 1);
+    
     if (hourInt >= rStart && hourInt < rEnd) {
       occupied += (r.laneCount || 1);
     }
   });
 
   const left = totalLanes - occupied;
-  
-  // Disponível apenas se houver pelo menos 1 pista vaga
   const available = left > 0; 
 
   return { 
@@ -99,6 +99,7 @@ export const generateDailySlots = (
   excludeReservationId?: string,
   isStaff: boolean = false
 ): TimeSlot[] => {
+  if (!dateStr) return [];
   const dayConfig = getDayConfiguration(dateStr, settings);
   const isBlocked = settings?.blockedDates?.includes(dateStr);
 

@@ -41,8 +41,9 @@ import {
   Plus
 } from 'lucide-react';
 
-const PaymentCountdown: React.FC<{ createdAt: string }> = ({ createdAt }) => {
+const PaymentCountdown: React.FC<{ createdAt: string, onExpire?: () => void }> = ({ createdAt, onExpire }) => {
     const [timeLeft, setTimeLeft] = useState<string>("");
+    const expiredRef = useRef(false);
 
     useEffect(() => {
         const updateTimer = () => {
@@ -53,6 +54,10 @@ const PaymentCountdown: React.FC<{ createdAt: string }> = ({ createdAt }) => {
 
             if (diff <= 0) {
                 setTimeLeft("EXPIRADO");
+                if (!expiredRef.current && onExpire) {
+                    expiredRef.current = true;
+                    onExpire();
+                }
                 return;
             }
 
@@ -64,12 +69,12 @@ const PaymentCountdown: React.FC<{ createdAt: string }> = ({ createdAt }) => {
         updateTimer();
         const interval = setInterval(updateTimer, 1000);
         return () => clearInterval(interval);
-    }, [createdAt]);
+    }, [createdAt, onExpire]);
 
     if (timeLeft === "EXPIRADO") {
         return (
             <div className="flex items-center gap-1 text-[10px] font-black text-red-500 uppercase bg-red-500/10 px-2 py-1 rounded-lg border border-red-500/20">
-                Tempo de reserva esgotado
+                Reserva Expirada
             </div>
         );
     }
@@ -104,7 +109,7 @@ const ClientDashboard: React.FC = () => {
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
-    const interval = setInterval(() => setNow(new Date()), 1000);
+    const interval = setInterval(() => setNow(new Date()), 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -114,7 +119,6 @@ const ClientDashboard: React.FC = () => {
       return sum / feedbacks.length;
   }, [feedbacks]);
 
-  // Função de carregamento centralizada com suporte a background update
   const loadData = useCallback(async (isBackground = false) => {
       const stored = localStorage.getItem('tonapista_client_auth');
       if (!stored) { navigate('/login'); return; }
@@ -150,7 +154,6 @@ const ClientDashboard: React.FC = () => {
       }
   }, [navigate]);
 
-  // Efeito inicial de carregamento e inscrição REALTIME
   useEffect(() => { 
     loadData();
     
@@ -159,50 +162,24 @@ const ClientDashboard: React.FC = () => {
         const clientData = JSON.parse(stored);
         const clientId = clientData.id;
 
-        console.log(`[Realtime] Iniciando monitoramento para cliente: ${clientId}`);
-
-        // Inscrição em múltiplos canais para garantir atualizações snappy
         const channel = supabase.channel(`dashboard-client-${clientId}`)
-            // 1. Escuta mudanças nas reservas DESTE cliente
-            .on('postgres_changes', { 
-                event: '*', 
-                schema: 'public', 
-                table: 'reservas', 
-                filter: `client_id=eq.${clientId}` 
-            }, () => {
-                console.log("[Realtime] Reserva atualizada");
-                loadData(true);
-            })
-            // 2. Escuta mudanças no registro do cliente (pontos, nome, etc)
-            .on('postgres_changes', { 
-                event: 'UPDATE', 
-                schema: 'public', 
-                table: 'clientes', 
-                filter: `client_id=eq.${clientId}` 
-            }, () => {
-                console.log("[Realtime] Dados do perfil/pontos atualizados");
-                loadData(true);
-            })
-            // 3. Escuta novas transações de fidelidade
-            .on('postgres_changes', { 
-                event: 'INSERT', 
-                schema: 'public', 
-                table: 'loyalty_transactions', 
-                filter: `client_id=eq.${clientId}` 
-            }, () => {
-                console.log("[Realtime] Nova transação de pontos detectada");
-                loadData(true);
-            })
-            .subscribe((status) => {
-                console.log(`[Realtime] Status da conexão: ${status}`);
-            });
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas', filter: `client_id=eq.${clientId}` }, () => loadData(true))
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clientes', filter: `client_id=eq.${clientId}` }, () => loadData(true))
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'loyalty_transactions', filter: `client_id=eq.${clientId}` }, () => loadData(true))
+            .subscribe();
 
-        return () => {
-            console.log("[Realtime] Removendo canal");
-            supabase.removeChannel(channel);
-        };
+        return () => { supabase.removeChannel(channel); };
     }
   }, [loadData]);
+
+  const handleAutoCancel = async (res: Reservation) => {
+      console.log(`[Client-AutoCancel] Reserva ${res.id} expirou.`);
+      await db.reservations.update({
+          ...res,
+          status: ReservationStatus.CANCELADA,
+          observations: (res.observations || '') + ' [Cancelamento Automático: Tempo esgotado na Área do Cliente]'
+      }, 'CLIENT_SYSTEM', 'Expirou aguardando pagamento');
+  };
 
   const handleLogout = async () => {
       localStorage.removeItem('tonapista_client_auth');
@@ -219,17 +196,13 @@ const ClientDashboard: React.FC = () => {
           localStorage.setItem('tonapista_client_auth', JSON.stringify(updatedClient));
           setClient(updatedClient);
           setIsEditing(false);
-          alert("Perfil atualizado com sucesso!");
       } catch (e) { alert("Erro ao atualizar perfil."); } finally { setIsSaving(false); }
   };
 
   const openFeedbackModal = (res: Reservation) => {
     const existing = feedbacks.find(f => f.reserva_id === res.id);
-    if (existing) {
-        setFeedbackForm({ rating: existing.nota, comment: existing.comentario || '' });
-    } else {
-        setFeedbackForm({ rating: 5, comment: '' });
-    }
+    if (existing) setFeedbackForm({ rating: existing.nota, comment: existing.comentario || '' });
+    else setFeedbackForm({ rating: 5, comment: '' });
     setFeedbackTarget(res);
   };
 
@@ -237,12 +210,7 @@ const ClientDashboard: React.FC = () => {
       if (!client || !feedbackTarget) return;
       setIsSaving(true);
       try {
-          await db.feedbacks.create({
-              reserva_id: feedbackTarget.id,
-              cliente_id: client.id,
-              nota: feedbackForm.rating,
-              comentario: feedbackForm.comment
-          });
+          await db.feedbacks.create({ reserva_id: feedbackTarget.id, cliente_id: client.id, nota: feedbackForm.rating, comentario: feedbackForm.comment });
           setFeedbackTarget(null);
           await loadData(true);
       } catch (e: any) { alert("Erro ao enviar avaliação."); }
@@ -313,17 +281,6 @@ const ClientDashboard: React.FC = () => {
       const sortByNewest = (a: Reservation, b: Reservation) => b.createdAt.localeCompare(a.createdAt);
       return { upcomingReservations: upcoming.sort(sortByNewest), pastReservations: past.sort(sortByNewest) };
   }, [history, now]);
-
-  const getCountdown = (res: Reservation) => {
-    const target = new Date(`${res.date}T${res.time}`);
-    const diff = target.getTime() - now.getTime();
-    if (diff <= 0) return "O jogo começou!";
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    if (days > 0) return `Faltam ${days}d ${hours}h`;
-    return `Faltam ${hours}h ${mins}m`;
-  };
 
   const tier = getClientTier();
   if (loading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="animate-spin text-neon-orange" size={48}/></div>;
@@ -427,7 +384,7 @@ const ClientDashboard: React.FC = () => {
                             <div className="flex flex-col gap-3">
                                 {res.status === ReservationStatus.PENDENTE && (
                                     <div className="space-y-3">
-                                        {res.createdAt && <PaymentCountdown createdAt={res.createdAt} />}
+                                        {res.createdAt && <PaymentCountdown createdAt={res.createdAt} onExpire={() => handleAutoCancel(res)} />}
                                         <button onClick={() => handlePayNow(res)} className="w-full bg-green-600 hover:bg-green-500 text-white font-black py-4 rounded-2xl uppercase text-[10px] tracking-[0.2em] shadow-xl shadow-green-900/10 flex items-center justify-center gap-2 transition active:scale-95"><CreditCard size={18}/> PAGAR RESERVA</button>
                                     </div>
                                 )}
@@ -437,7 +394,6 @@ const ClientDashboard: React.FC = () => {
                                     <button onClick={() => openWhatsAppAction(res, 'CONTATO')} className="w-12 bg-neon-blue/10 hover:bg-neon-blue text-neon-blue hover:text-white rounded-xl flex items-center justify-center transition border border-neon-blue/20"><MessageCircle size={20}/></button>
                                 </div>
                             </div>
-                            <div className="flex items-center justify-center gap-2 pt-2 text-[10px] font-bold text-slate-600 uppercase tracking-widest"><Zap size={10} className="text-neon-blue"/> {getCountdown(res)} para o jogo</div>
                         </div>
                     )) : (
                         <div className="bg-slate-900 p-8 rounded-[2.5rem] border border-dashed border-slate-800 text-center space-y-4"><h3 className="text-white font-bold uppercase text-sm">Nenhum agendamento ativo</h3><button onClick={() => navigate('/agendamento')} className="bg-neon-orange hover:bg-orange-600 text-white font-black text-[10px] px-8 py-3 rounded-xl uppercase tracking-[0.2em] shadow-xl transition-all">Reservar Agora</button></div>
