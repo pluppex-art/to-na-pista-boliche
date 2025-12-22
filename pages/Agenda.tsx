@@ -4,9 +4,9 @@ import { db } from '../services/mockBackend';
 import { supabase } from '../services/supabaseClient';
 import { Reservation, ReservationStatus, EventType, UserRole, PaymentStatus } from '../types';
 import { useApp } from '../contexts/AppContext'; 
-import { generateDailySlots, checkHourCapacity } from '../utils/availability'; 
+import { generateDailySlots, checkHourCapacity, getDayConfiguration } from '../utils/availability'; 
 import { 
-  ChevronLeft, ChevronRight, Loader2, Plus, X, Ban, AlertTriangle, LayoutGrid, Check, MessageCircle, CreditCard, Clock, UserCheck, DollarSign
+  ChevronLeft, ChevronRight, Loader2, Plus, X, Ban, AlertTriangle, LayoutGrid, Check, MessageCircle, CreditCard, Clock, UserCheck, DollarSign, CalendarOff, Moon
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -52,16 +52,27 @@ const Agenda: React.FC = () => {
   const canEdit = currentUser?.role === UserRole.ADMIN || currentUser?.perm_edit_reservation;
   const canCreateReservation = currentUser?.role === UserRole.ADMIN || currentUser?.perm_create_reservation;
 
+  // Verifica se o dia está bloqueado ou fechado por configuração
+  const dayStatus = useMemo(() => {
+    if (!settings) return { isClosed: false, reason: '' };
+    const isBlocked = settings.blockedDates?.includes(selectedDate);
+    if (isBlocked) return { isClosed: true, reason: 'BLOQUEIO EXCEPCIONAL' };
+    
+    const config = getDayConfiguration(selectedDate, settings);
+    if (!config || !config.isOpen) return { isClosed: true, reason: 'ESTABELECIMENTO FECHADO NESTE DIA' };
+    
+    return { isClosed: false, reason: '' };
+  }, [selectedDate, settings]);
+
   // Timer de sistema para alertas e auto-cancelamento
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 10000); 
     return () => clearInterval(timer);
   }, []);
 
-  // MOTOR DE AUTO-CANCELAMENTO: Monitora expirações em tempo real
+  // MOTOR DE AUTO-CANCELAMENTO
   useEffect(() => {
     const checkExpirations = async () => {
-        // CORREÇÃO: Filtra apenas pendentes que NÃO são pagamento local
         const expired = allReservationsForAlerts.filter(res => 
             res.status === ReservationStatus.PENDENTE && 
             !res.payOnSite && 
@@ -70,7 +81,6 @@ const Agenda: React.FC = () => {
         );
 
         if (expired.length > 0) {
-            console.log(`[Auto-Cancel] Processando ${expired.length} reservas expiradas.`);
             for (const res of expired) {
                 await db.reservations.update({
                     ...res,
@@ -135,8 +145,6 @@ const Agenda: React.FC = () => {
       allReservationsForAlerts.forEach(res => {
           if (!res || res.status === ReservationStatus.CANCELADA) return;
 
-          // REGRA 1: Pendente ONLINE com menos de 10 min (Abaixo de 30, acima de 20)
-          // Ignora se for pagamento local (payOnSite)
           if (res.status === ReservationStatus.PENDENTE && !res.payOnSite && res.createdAt) {
               const created = new Date(res.createdAt).getTime();
               const diffMinutes = (now.getTime() - created) / 60000;
@@ -150,7 +158,6 @@ const Agenda: React.FC = () => {
               }
           }
 
-          // REGRA 2: Atraso de Check-in (Só hoje)
           if (res.date === todayStr && res.status === ReservationStatus.CONFIRMADA) {
               const [h, m] = (res.time || "00:00").split(':').map(Number);
               const startTime = new Date(now);
@@ -161,7 +168,6 @@ const Agenda: React.FC = () => {
               }
           }
 
-          // REGRA 3: Comandas (Só hoje após 23h)
           if (res.date === todayStr && res.payOnSite && res.paymentStatus === PaymentStatus.PENDENTE && now.getHours() >= 23) {
               globalAlerts.push({ type: 'OPEN_TABS', message: `Comanda em aberto: ${res.clientName} (${res.comandaId || 'S/N'})`, res, color: 'border-red-500 bg-red-950/40 text-red-100 shadow-red-500/10' });
           }
@@ -273,6 +279,8 @@ const Agenda: React.FC = () => {
     return parts.reverse().join('/');
   };
 
+  const timeSlots = useMemo(() => generateDailySlots(selectedDate, settings, []), [selectedDate, settings]);
+
   return (
     <div className="flex flex-col h-full space-y-6 pb-20 md:pb-0">
       
@@ -285,7 +293,7 @@ const Agenda: React.FC = () => {
                           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => { setSelectedRes(alert.res); setIsEditMode(false); }}>
                               <AlertTriangle size={20} className="shrink-0 animate-pulse text-current" />
                               <div>
-                                  <p className="text-[9px] font-black uppercase tracking-[0.2em] leading-none mb-1 opacity-60">{alert.type.replace('_', ' ')}</p>
+                                  <p className="text-[9px] font-black uppercase tracking-[0.2em] mb-1 opacity-60">{alert.type.replace('_', ' ')}</p>
                                   <p className="text-sm font-bold group-hover:underline transition-all">{alert.message}</p>
                               </div>
                           </div>
@@ -293,7 +301,7 @@ const Agenda: React.FC = () => {
                           <div className="flex items-center gap-2 w-full sm:w-auto">
                               {alert.type === 'PENDING_URGENT' && (
                                   <>
-                                      <button onClick={() => openWhatsApp(clientPhones[alert.res.clientId] || '', `Olá ${alert.res.clientName}! Sua reserva do dia ${alert.res.date.split('-').reverse().join('/')} às ${alert.res.time} expira em instantes. Deseja confirmar o pagamento agora?`)} className="flex-1 sm:flex-none bg-green-600 hover:bg-green-500 text-white px-3 py-2 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition active:scale-95">
+                                      <button onClick={() => openWhatsApp(clientPhones[alert.res.clientId] || '', `Olá ${alert.res.clientName}! Sua reserva expira em instantes.`)} className="flex-1 sm:flex-none bg-green-600 hover:bg-green-500 text-white px-3 py-2 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition active:scale-95">
                                           <MessageCircle size={14}/> WhatsApp
                                       </button>
                                       <button onClick={() => handleQuickCheckout(alert.res)} className="flex-1 sm:flex-none bg-white text-orange-950 px-3 py-2 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition active:scale-95 shadow-lg">
@@ -303,14 +311,9 @@ const Agenda: React.FC = () => {
                               )}
                               
                               {alert.type === 'LATE_ACTION' && (
-                                  <>
-                                      <button onClick={() => handleGranularStatus(null, alert.res, `${alert.res.id}_${alert.res.time}_1`, 'CHECK_IN')} className="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition active:scale-95 shadow-lg">
-                                          <UserCheck size={14}/> Check-in
-                                      </button>
-                                      <button onClick={() => handleGranularStatus(null, alert.res, `${alert.res.id}_${alert.res.time}_1`, 'NS')} className="flex-1 sm:flex-none bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition active:scale-95">
-                                          <Ban size={14}/> No-Show
-                                      </button>
-                                  </>
+                                  <button onClick={() => handleGranularStatus(null, alert.res, `${alert.res.id}_${alert.res.time}_1`, 'CHECK_IN')} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition shadow-xl active:scale-95">
+                                      <UserCheck size={14}/> Fazer Check-in
+                                  </button>
                               )}
 
                               {alert.type === 'OPEN_TABS' && (
@@ -331,14 +334,12 @@ const Agenda: React.FC = () => {
             <div className="flex items-center gap-4 bg-slate-800 p-2 rounded-2xl border border-slate-700 shadow-xl w-full md:w-auto justify-between md:justify-start">
                 <button onClick={() => { 
                     const parts = selectedDate.split('-').map(Number); 
-                    if (parts.length < 3) return;
                     const nd = new Date(parts[0], parts[1]-1, parts[2]-1); 
                     setSelectedDate([nd.getFullYear(),String(nd.getMonth()+1).padStart(2,'0'),String(nd.getDate()).padStart(2,'0')].join('-')); 
                 }} className="p-2 hover:bg-slate-700 rounded-full text-slate-300 transition-colors"><ChevronLeft size={20} /></button>
                 <input type="date" className="bg-transparent text-white font-black text-center focus:outline-none uppercase text-xs tracking-widest cursor-pointer" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}/>
                 <button onClick={() => { 
                     const parts = selectedDate.split('-').map(Number); 
-                    if (parts.length < 3) return;
                     const nd = new Date(parts[0], parts[1]-1, parts[2]+1); 
                     setSelectedDate([nd.getFullYear(),String(nd.getMonth()+1).padStart(2,'0'),String(nd.getDate()).padStart(2,'0')].join('-')); 
                 }} className="p-2 hover:bg-slate-700 rounded-full text-slate-300 transition-colors"><ChevronRight size={20} /></button>
@@ -350,9 +351,24 @@ const Agenda: React.FC = () => {
       <MetricCards metrics={metrics} loading={loading} />
 
       <div className="flex-1 bg-slate-800 border border-slate-700 rounded-3xl overflow-hidden shadow-2xl flex flex-col min-h-[500px]">
-        {loading ? (<div className="flex-1 flex justify-center items-center"><Loader2 className="animate-spin text-neon-blue" size={48} /></div>) : (
+        {loading ? (
+            <div className="flex-1 flex justify-center items-center"><Loader2 className="animate-spin text-neon-blue" size={48} /></div>
+        ) : dayStatus.isClosed ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-6 animate-fade-in bg-slate-900/50">
+                <div className="w-32 h-32 bg-slate-800 rounded-[2.5rem] flex items-center justify-center text-slate-600 border-2 border-dashed border-slate-700 shadow-inner group">
+                    <CalendarOff size={64} className="group-hover:rotate-12 transition-transform duration-500" />
+                </div>
+                <div className="space-y-2">
+                    <h2 className="text-2xl md:text-4xl font-black text-white uppercase tracking-tighter">{dayStatus.reason}</h2>
+                    <p className="text-slate-500 font-bold uppercase tracking-widest text-xs max-w-md mx-auto">Não há horários de funcionamento configurados ou esta data foi bloqueada manualmente nas configurações.</p>
+                </div>
+                <div className="flex items-center gap-2 px-6 py-3 bg-slate-800 rounded-2xl border border-slate-700 text-slate-400 font-black text-[10px] uppercase tracking-[0.2em]">
+                    <Moon size={16} /> Loja em Repouso
+                </div>
+            </div>
+        ) : (
           <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 custom-scrollbar">
-             {generateDailySlots(selectedDate, settings, []).map(slot => {
+             {timeSlots.map(slot => {
                const timeParts = slot.time.split(':');
                const currentHourInt = parseInt(timeParts[0] || "0");
                const hourReservations = reservations.filter(r => {
@@ -372,7 +388,12 @@ const Agenda: React.FC = () => {
                     </div>
                     <div className="p-6">
                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 auto-rows-fr">
-                         {hourReservations.flatMap(res => {
+                         {hourReservations.length === 0 ? (
+                            <div className="col-span-full py-12 flex flex-col items-center justify-center text-slate-700 border-2 border-dashed border-slate-800/50 rounded-3xl">
+                                <Clock size={40} className="opacity-20 mb-2" />
+                                <span className="text-[10px] font-black uppercase tracking-[0.2em]">Sem reservas neste horário</span>
+                            </div>
+                         ) : hourReservations.flatMap(res => {
                            return Array.from({ length: res.laneCount || 1 }).map((_, idx) => {
                              const uid = `${res.id}_${currentHourInt}:00_${idx+1}`;
                              return (
