@@ -17,7 +17,6 @@ interface ReservationCardProps {
 export const ReservationCard: React.FC<ReservationCardProps> = ({ 
   res, uniqueId, isCI, isNS, laneIdx, canEdit, onOpen, onGranularStatus 
 }) => {
-  // Lógica de Cores baseada no STATUS para a borda lateral e badge
   const getStatusConfig = () => {
     if (isCI) return { color: 'green', border: 'border-l-green-600', badge: 'bg-green-600 text-white' };
     if (isNS) return { color: 'slate', border: 'border-l-slate-600', badge: 'bg-slate-700 text-slate-400' };
@@ -29,7 +28,6 @@ export const ReservationCard: React.FC<ReservationCardProps> = ({
   const statusConfig = getStatusConfig();
   const statusLabel = isCI ? 'CHECK-IN' : isNS ? 'NO-SHOW' : res.status.toUpperCase();
 
-  // Origem: criador (Equipe) ou site (Cliente)
   const isFromStaff = !!res.createdBy;
   const OriginIcon = isFromStaff ? User : AtSign;
 
@@ -38,7 +36,6 @@ export const ReservationCard: React.FC<ReservationCardProps> = ({
       onClick={onOpen} 
       className={`relative bg-[#1e293b]/40 rounded-[1.2rem] border border-slate-700/50 ${statusConfig.border} border-l-4 p-4 cursor-pointer hover:bg-[#1e293b]/60 transition-all shadow-xl group flex flex-col gap-2.5 overflow-hidden h-full min-h-[180px]`}
     >
-      {/* Topo: Status e Origem + Ações */}
       <div className="flex justify-between items-start">
         <div className="flex flex-wrap gap-1.5 items-center">
             <span className={`text-[9px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider shadow-sm transition-colors ${statusConfig.badge}`}>
@@ -76,36 +73,45 @@ export const ReservationCard: React.FC<ReservationCardProps> = ({
         </div>
       </div>
 
-      {/* Nome do Cliente */}
-      <h3 className={`text-base font-black text-white uppercase tracking-tight leading-tight break-words overflow-hidden ${isNS ? 'line-through opacity-40 italic' : ''}`}>
-        {res.clientName}
-      </h3>
+      <div className="flex flex-col gap-1">
+        <h3 className={`text-base font-black text-white uppercase tracking-tight leading-tight break-words overflow-hidden ${isNS ? 'line-through opacity-40 italic' : ''}`}>
+          {res.clientName}
+        </h3>
+        {res.birthdayName && (
+           <div className="flex items-center gap-1.5 text-pink-400">
+              <Cake size={12} />
+              <span className="text-[10px] font-black uppercase tracking-tighter truncate">Aniv: {res.birthdayName}</span>
+           </div>
+        )}
+      </div>
 
       <div className="h-px bg-slate-700/20 w-full"></div>
 
-      {/* Grid de Informações */}
       <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
         <div className="flex items-center gap-1.5 text-slate-400">
             <Users size={12} className="text-slate-500 shrink-0" />
-            <span className="text-[9px] font-bold uppercase tracking-widest leading-none">{res.peopleCount} Jogadores</span>
+            <span className="text-[9px] font-bold uppercase tracking-widest leading-none">{res.peopleCount || 0} Jogadores</span>
         </div>
         <div className="flex items-center gap-1.5 text-slate-400">
             <Clock size={12} className="text-slate-500 shrink-0" />
-            <span className="text-[9px] font-bold uppercase tracking-widest leading-none">{res.duration} Horas</span>
+            <span className="text-[9px] font-bold uppercase tracking-widest leading-none">{res.duration || 0} Horas</span>
         </div>
         <div className="flex items-center gap-1.5 text-slate-400">
             <Tag size={12} className="text-slate-500 shrink-0" />
             <span className="text-[9px] font-bold uppercase tracking-widest truncate leading-none">{res.eventType}</span>
         </div>
-        <div className="flex items-center gap-1.5 text-slate-400">
-            <Hash size={12} className="text-slate-500 shrink-0" />
-            <span className="text-[9px] font-bold uppercase tracking-widest leading-none">
-                {isCI && res.lanesAssigned?.[laneIdx] ? `Pista: ${res.lanesAssigned[laneIdx]}` : `${res.laneCount} Pista(s)`}
-            </span>
+        <div className="flex items-center gap-1.5 text-slate-400 h-3">
+            {isCI && (
+              <>
+                <Hash size={12} className="text-slate-500 shrink-0" />
+                <span className="text-[9px] font-bold uppercase tracking-widest leading-none">
+                    {res.lanesAssigned?.[laneIdx] ? `Pista: ${res.lanesAssigned[laneIdx]}` : `${res.laneCount || 0} Pista(s)`}
+                </span>
+              </>
+            )}
         </div>
       </div>
 
-      {/* Badges Inferiores (Mesa e Aniversário) + COMANDA */}
       <div className="flex flex-wrap gap-1.5 pt-1">
           {res.comandaId && (
               <div className="flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/20 px-2 py-1 rounded-lg">
@@ -117,14 +123,6 @@ export const ReservationCard: React.FC<ReservationCardProps> = ({
               <div className="flex items-center gap-1.5 bg-orange-500/10 border border-orange-500/20 px-2 py-1 rounded-lg">
                   <Utensils size={10} className="text-orange-500" />
                   <span className="text-[8px] font-black text-orange-500 uppercase">Mesa: {res.tableSeatCount}L</span>
-              </div>
-          )}
-          {res.birthdayName && (
-              <div className="flex items-center gap-1.5 bg-pink-500/10 border border-pink-500/20 px-2 py-1 rounded-lg">
-                  <Cake size={10} className="text-pink-400" />
-                  <span className="text-[8px] font-black text-pink-400 uppercase truncate max-w-[120px]">
-                    {res.birthdayName}
-                  </span>
               </div>
           )}
       </div>

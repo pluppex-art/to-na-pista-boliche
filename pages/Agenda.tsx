@@ -52,7 +52,6 @@ const Agenda: React.FC = () => {
   const canEdit = currentUser?.role === UserRole.ADMIN || currentUser?.perm_edit_reservation;
   const canCreateReservation = currentUser?.role === UserRole.ADMIN || currentUser?.perm_create_reservation;
 
-  // Verifica se o dia está bloqueado ou fechado por configuração
   const dayStatus = useMemo(() => {
     if (!settings) return { isClosed: false, reason: '' };
     const isBlocked = settings.blockedDates?.includes(selectedDate);
@@ -64,13 +63,11 @@ const Agenda: React.FC = () => {
     return { isClosed: false, reason: '' };
   }, [selectedDate, settings]);
 
-  // Timer de sistema para alertas e auto-cancelamento
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 10000); 
     return () => clearInterval(timer);
   }, []);
 
-  // MOTOR DE AUTO-CANCELAMENTO
   useEffect(() => {
     const checkExpirations = async () => {
         const expired = allReservationsForAlerts.filter(res => 
@@ -145,34 +142,55 @@ const Agenda: React.FC = () => {
       allReservationsForAlerts.forEach(res => {
           if (!res || res.status === ReservationStatus.CANCELADA) return;
 
-          if (res.status === ReservationStatus.PENDENTE && !res.payOnSite && res.createdAt) {
+          // 1. Reservas Pendentes (Site) prestes a expirar - Somente de Hoje para não poluir
+          if (res.date === todayStr && res.status === ReservationStatus.PENDENTE && !res.payOnSite && res.createdAt) {
               const created = new Date(res.createdAt).getTime();
               const diffMinutes = (now.getTime() - created) / 60000;
               if (diffMinutes >= 20 && diffMinutes < 30) {
                   globalAlerts.push({ 
                     type: 'PENDING_URGENT', 
-                    message: `Reserva de ${res.clientName} (${res.date.split('-').reverse().join('/')}) expira em ${Math.ceil(30 - diffMinutes)}min!`, 
+                    message: `Reserva de ${res.clientName} expira em ${Math.ceil(30 - diffMinutes)}min!`, 
                     res, 
                     color: 'border-orange-500 bg-orange-950/40 text-orange-100 shadow-orange-500/10' 
                   });
               }
           }
 
-          if (res.date === todayStr && res.status === ReservationStatus.CONFIRMADA) {
+          // 2. Atrasos de Check-in (Retroativo: Mostra até que seja feito o check-in ou cancelada)
+          if (res.status === ReservationStatus.CONFIRMADA) {
               const [h, m] = (res.time || "00:00").split(':').map(Number);
-              const startTime = new Date(now);
-              startTime.setHours(h, m, 0, 0);
+              const startTime = new Date(res.date + 'T' + (res.time.length === 5 ? res.time : '0' + res.time));
               const diffMinutes = (now.getTime() - startTime.getTime()) / 60000;
+              
               if (diffMinutes >= 20) {
-                  globalAlerts.push({ type: 'LATE_ACTION', message: `${res.clientName} está ${Math.ceil(diffMinutes)}min atrasado. Definir status?`, res, color: 'border-blue-500 bg-blue-950/40 text-blue-100 shadow-blue-500/10' });
+                  const dateLabel = res.date === todayStr ? 'Hoje' : res.date.split('-').reverse().join('/');
+                  globalAlerts.push({ 
+                    type: 'LATE_ACTION', 
+                    message: `[${dateLabel}] ${res.clientName} está ${Math.ceil(diffMinutes)}min atrasado.`, 
+                    res, 
+                    color: 'border-blue-500 bg-blue-950/40 text-blue-100 shadow-blue-500/10' 
+                  });
               }
           }
 
-          if (res.date === todayStr && res.payOnSite && res.paymentStatus === PaymentStatus.PENDENTE && now.getHours() >= 23) {
-              globalAlerts.push({ type: 'OPEN_TABS', message: `Comanda em aberto: ${res.clientName} (${res.comandaId || 'S/N'})`, res, color: 'border-red-500 bg-red-950/40 text-red-100 shadow-red-500/10' });
+          // 3. Comandas em Aberto (Retroativo: Mostra eventos locais pendentes de pagamento)
+          if (res.payOnSite && res.paymentStatus === PaymentStatus.PENDENTE) {
+              // Só avisa se o horário de início já passou
+              const startTime = new Date(res.date + 'T' + (res.time.length === 5 ? res.time : '0' + res.time));
+              if (now > startTime) {
+                const dateLabel = res.date === todayStr ? 'Hoje' : res.date.split('-').reverse().join('/');
+                globalAlerts.push({ 
+                    type: 'OPEN_TABS', 
+                    message: `Comanda em aberto [${dateLabel}]: ${res.clientName} (${res.comandaId || 'S/N'})`, 
+                    res, 
+                    color: 'border-red-500 bg-red-950/40 text-red-100 shadow-red-500/10' 
+                });
+              }
           }
       });
-      return globalAlerts;
+      
+      // Ordena por data (mais antigas primeiro para priorizar o que ficou pra trás)
+      return globalAlerts.sort((a,b) => a.res.date.localeCompare(b.res.date));
   }, [allReservationsForAlerts, now]);
 
   const handleGranularStatus = async (e: React.MouseEvent | null, res: Reservation, uniqueId: string, type: 'CHECK_IN' | 'NS') => {
@@ -284,10 +302,9 @@ const Agenda: React.FC = () => {
   return (
     <div className="flex flex-col h-full space-y-6 pb-20 md:pb-0">
       
-      {/* SEÇÃO DE ALERTAS DINÂMICOS (GLOBAIS) */}
       {alerts.length > 0 && (
-          <div className="space-y-2 sticky top-0 z-50 md:relative">
-              {alerts.slice(0, 5).map((alert, i) => (
+          <div className="space-y-2 sticky top-0 z-50 md:relative max-h-[300px] overflow-y-auto no-scrollbar">
+              {alerts.map((alert, i) => (
                   <div key={`${alert.res.id}-${i}`} className={`p-4 rounded-2xl border shadow-2xl animate-fade-in transition-all backdrop-blur-md ${alert.color}`}>
                       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => { setSelectedRes(alert.res); setIsEditMode(false); }}>
