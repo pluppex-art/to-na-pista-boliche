@@ -49,7 +49,6 @@ Deno.serve(async (req: Request) => {
     // Vamos garantir que seja um e-mail com formato válido de cliente.
     if (payerEmail.includes("admin") || payerEmail.includes("boliche")) {
        console.log("[AVISO] E-mail de pagador suspeito detectado, usando fallback seguro.");
-       // Não usamos o e-mail do boliche para pagar o próprio boliche.
     }
 
     const finalPrice = typeof res.total_value === 'string' 
@@ -58,6 +57,9 @@ Deno.serve(async (req: Request) => {
 
     const origin = req.headers.get('origin') || 'https://tonapistaboliche.com.br'
     
+    // Define data de expiração para exatamente 30 minutos a partir de agora
+    const expirationDate = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+
     const mpBody = {
       items: [{
         id: res.id,
@@ -74,6 +76,8 @@ Deno.serve(async (req: Request) => {
         email: payerEmail
       },
       external_reference: res.id,
+      expires: true,
+      expiration_date_to: expirationDate,
       back_urls: {
         success: `${origin}/#/minha-conta`,
         failure: `${origin}/#/agendamento`,
@@ -84,7 +88,7 @@ Deno.serve(async (req: Request) => {
       statement_descriptor: "TONAPISTA"
     }
 
-    console.log(`[MP_REQUEST] Enviando para MP com e-mail: ${payerEmail}`)
+    console.log(`[MP_REQUEST] Enviando para MP com expiração em: ${expirationDate}`)
 
     const mpResponse = await fetch('https://api.mercadopago.com/checkout/preferences', {
       method: 'POST',
@@ -99,11 +103,9 @@ Deno.serve(async (req: Request) => {
 
     if (!mpResponse.ok) {
       console.error("[MP_API_ERROR]", JSON.stringify(mpData))
-      
       if (mpData.status === 403 || mpData.code === "PA_UNAUTHORIZED_RESULT_FROM_POLICIES") {
-        throw new Error("O Mercado Pago recusou o pagamento (Erro 403). Isso geralmente ocorre se você estiver tentando pagar usando o mesmo e-mail da sua conta do Mercado Pago ou se as credenciais de produção não estiverem totalmente ativas.")
+        throw new Error("O Mercado Pago recusou o pagamento (Erro 403).")
       }
-      
       throw new Error(mpData.message || "Erro ao gerar link de pagamento no Mercado Pago.")
     }
 

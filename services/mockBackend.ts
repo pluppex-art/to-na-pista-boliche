@@ -303,6 +303,7 @@ export const db = {
         phone: phoneToUpdate, 
         email: client.email?.trim() || null,
         address: client.address || null,
+        // @fix Property 'funnel_stage' does not exist on type 'Client'. Did you mean 'funnelStage'?
         last_contact_at: client.lastContactAt, photo_url: client.photoUrl, funnel_stage: client.funnelStage
       }).eq('client_id', client.id);
       if (error) throw error;
@@ -424,6 +425,7 @@ export const db = {
         weekendPrice: data.weekend_price || INITIAL_SETTINGS.weekendPrice,
         onlinePaymentEnabled: data.online_payment_enabled ?? INITIAL_SETTINGS.onlinePaymentEnabled,
         mercadopagoPublicKey: data.mercadopago_public_key || INITIAL_SETTINGS.mercadopagoPublicKey,
+        mercadopagoAccessToken: data.mercadopago_access_token || '',
         businessHours: businessHours, blockedDates: data.blocked_dates || []
       };
     },
@@ -433,7 +435,9 @@ export const db = {
         whatsapp_link: s.whatsappLink, logo_url: s.logoUrl, active_lanes: s.activeLanes,
         weekday_price: s.weekdayPrice, 
         weekend_price: s.weekendPrice,
-        online_payment_enabled: s.onlinePaymentEnabled, mercadopago_public_key: s.mercadopagoPublicKey,
+        online_payment_enabled: s.onlinePaymentEnabled, 
+        mercadopago_public_key: s.mercadopagoPublicKey,
+        mercadopago_access_token: s.mercadopagoAccessToken,
         blocked_dates: s.blockedDates
       });
       if (error) throw error;
