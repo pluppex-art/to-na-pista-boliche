@@ -4,6 +4,9 @@ import { supabase } from './supabaseClient';
 import { INITIAL_SETTINGS } from '../constants';
 import { v4 as uuidv4 } from 'uuid';
 
+// Identificador único real extraído do seu banco de dados
+const SETTINGS_ID = 'e7a04692-b6ea-4827-afca-53886112938c';
+
 /**
  * Limpa e normaliza o telefone.
  */
@@ -225,7 +228,7 @@ export const db = {
       return (data || []).map((c: any) => ({
           id: c.client_id, name: c.name || 'Sem Nome', phone: c.phone || '', email: c.email, photoUrl: c.photo_url, address: c.address,
           tags: safeTags(c.tags), createdAt: c.created_at, lastContactAt: c.last_contact_at,
-          funnelStage: c.funnel_stage, loyaltyBalance: c.loyalty_balance || 0
+          funnelStage: c.funnel_stage, loyaltyBalance: data.loyalty_balance || 0
       }));
     },
     getById: async (id: string): Promise<Client | null> => {
@@ -257,10 +260,8 @@ export const db = {
           if (existingClient) return existingClient;
       }
 
-      // Se não houver telefone nem email, este método não deve ser chamado no novo fluxo de checkout
-      // para evitar violar restrições NOT NULL do banco de dados na tabela clientes.
       if (!phoneCleaned) {
-          throw new Error("Não é possível criar um registro de cliente persistente sem telefone.");
+          throw new Error("Não é possível criar um registro de cliente sem telefone.");
       }
 
       const clientId = client.id || uuidv4();
@@ -303,7 +304,6 @@ export const db = {
         phone: phoneToUpdate, 
         email: client.email?.trim() || null,
         address: client.address || null,
-        // @fix Property 'funnel_stage' does not exist on type 'Client'. Did you mean 'funnelStage'?
         last_contact_at: client.lastContactAt, photo_url: client.photoUrl, funnel_stage: client.funnelStage
       }).eq('client_id', client.id);
       if (error) throw error;
@@ -367,7 +367,7 @@ export const db = {
             noShowIds: r.no_show_ids || [],
             hasTableReservation: r.has_table_reservation, 
             birthdayName: r.birthday_name, 
-            tableSeatCount: r.table_seat_count,
+            tableSeatCount: r.tableSeatCount,
             payOnSite: r.pay_on_site, 
             comandaId: r.comanda_id, 
             createdBy: r.created_by, 
@@ -401,16 +401,22 @@ export const db = {
 
   settings: {
     get: async (): Promise<AppSettings> => {
-      const { data: configData, error: configError } = await supabase.from('configuracoes').select('*').limit(1).maybeSingle();
-      const { data: hoursData, error: hoursError } = await supabase.from('configuracao_horarios').select('*').order('day_of_week', { ascending: true });
+      const { data: configData, error: configError } = await supabase.from('configuracoes').select('*').eq('id', SETTINGS_ID).maybeSingle();
+      const { data: hoursData, error: hoursError } = await supabase.from('configuracao_horarios').select('*').eq('unidade_id', SETTINGS_ID).order('day_of_week', { ascending: true });
       
-      if (configError) console.error("Erro config:", configError);
-      if (hoursError) console.error("Erro horários:", hoursError);
+      if (configError) console.error("Erro ao carregar configurações:", configError.message);
+      if (hoursError) console.error("Erro ao carregar horários:", hoursError.message);
 
       let businessHours = [...INITIAL_SETTINGS.businessHours];
-      if (hoursData?.length) {
+      if (hoursData && hoursData.length > 0) {
          hoursData.forEach((row: any) => {
-             if (row.day_of_week >= 0 && row.day_of_week <= 6) businessHours[row.day_of_week] = { isOpen: row.is_open, start: row.start_hour, end: row.end_hour };
+             if (row.day_of_week >= 0 && row.day_of_week <= 6) {
+                 businessHours[row.day_of_week] = { 
+                     isOpen: row.is_open, 
+                     start: row.start_hour, 
+                     end: row.end_hour 
+                 };
+             }
          });
       }
       const data = configData || {};
@@ -418,11 +424,11 @@ export const db = {
         establishmentName: data.establishment_name || INITIAL_SETTINGS.establishmentName,
         address: data.address || INITIAL_SETTINGS.address,
         phone: data.phone || INITIAL_SETTINGS.phone,
-        whatsappLink: data.whatsapp_link || INITIAL_SETTINGS.whatsappLink,
-        logoUrl: data.logo_url || INITIAL_SETTINGS.logoUrl,
-        activeLanes: data.active_lanes || INITIAL_SETTINGS.activeLanes,
-        weekdayPrice: data.weekday_price || INITIAL_SETTINGS.weekdayPrice,
-        weekendPrice: data.weekend_price || INITIAL_SETTINGS.weekendPrice,
+        whatsappLink: data.whatsapp_link || INITIAL_SETTINGS.whatsappLink || '',
+        logoUrl: data.logo_url || INITIAL_SETTINGS.logoUrl || '',
+        activeLanes: data.active_lanes !== null && data.active_lanes !== undefined ? data.active_lanes : INITIAL_SETTINGS.activeLanes,
+        weekdayPrice: data.weekday_price !== null && data.weekday_price !== undefined ? data.weekday_price : INITIAL_SETTINGS.weekdayPrice,
+        weekendPrice: data.weekend_price !== null && data.weekend_price !== undefined ? data.weekend_price : INITIAL_SETTINGS.weekendPrice,
         onlinePaymentEnabled: data.online_payment_enabled ?? INITIAL_SETTINGS.onlinePaymentEnabled,
         mercadopagoPublicKey: data.mercadopago_public_key || INITIAL_SETTINGS.mercadopagoPublicKey,
         mercadopagoAccessToken: data.mercadopago_access_token || '',
@@ -430,25 +436,55 @@ export const db = {
       };
     },
     saveGeneral: async (s: AppSettings) => {
-      const { error } = await supabase.from('configuracoes').upsert({
-        id: 1, establishment_name: s.establishmentName, address: s.address, phone: s.phone,
-        whatsapp_link: s.whatsappLink, logo_url: s.logoUrl, active_lanes: s.activeLanes,
-        weekday_price: s.weekdayPrice, 
-        weekend_price: s.weekendPrice,
+      // Usamos update direto em vez de upsert para evitar erro de constraint se o ID não for PK explícita
+      const { error } = await supabase.from('configuracoes').update({
+        establishment_name: s.establishmentName, 
+        address: s.address, 
+        phone: s.phone,
+        whatsapp_link: s.whatsappLink, 
+        logo_url: s.logoUrl, 
+        active_lanes: isNaN(s.activeLanes) ? INITIAL_SETTINGS.activeLanes : s.activeLanes,
+        weekday_price: isNaN(s.weekdayPrice) ? INITIAL_SETTINGS.weekdayPrice : s.weekdayPrice, 
+        weekend_price: isNaN(s.weekendPrice) ? INITIAL_SETTINGS.weekendPrice : s.weekendPrice,
         online_payment_enabled: s.onlinePaymentEnabled, 
         mercadopago_public_key: s.mercadopagoPublicKey,
         mercadopago_access_token: s.mercadopagoAccessToken,
         blocked_dates: s.blockedDates
-      });
-      if (error) throw error;
+      }).eq('id', SETTINGS_ID);
+      
+      if (error) {
+          console.error("[DB ERROR] Falha ao salvar config geral:", error.message);
+          throw error;
+      }
       window.dispatchEvent(new Event('settings_updated'));
     },
     saveHours: async (s: AppSettings) => {
+      const { error: deleteError } = await supabase
+        .from('configuracao_horarios')
+        .delete()
+        .eq('unidade_id', SETTINGS_ID);
+
+      if (deleteError) {
+          console.error("[DB ERROR] Falha ao limpar horários antigos:", deleteError.message);
+          throw deleteError;
+      }
+
       const hoursPayload = s.businessHours.map((h, index) => ({
-          config_id: 1, day_of_week: index, is_open: h.isOpen, start_hour: h.start, end_hour: h.end
+          unidade_id: SETTINGS_ID, 
+          day_of_week: index, 
+          is_open: h.isOpen, 
+          start_hour: h.start, 
+          end_hour: h.end
       }));
-      const { error } = await supabase.from('configuracao_horarios').upsert(hoursPayload, { onConflict: 'config_id,day_of_week' });
-      if (error) throw error;
+
+      const { error: insertError } = await supabase
+        .from('configuracao_horarios')
+        .insert(hoursPayload);
+        
+      if (insertError) {
+          console.error("[DB ERROR] Falha ao inserir novos horários:", insertError.message);
+          throw insertError;
+      }
     }
   }
 };

@@ -13,11 +13,11 @@ const Settings: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
-  const [isSavingGeneral, setIsSavingGeneral] = useState(false);
-  const [isSavingUser, setIsSavingUser] = useState(false);
-  
-  const [saveSuccess, setSaveSuccess] = useState(false);
+  // Estados de carregamento por seção
+  const [loadingSection, setLoadingSection] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [saveError, setSaveError] = useState('');
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
@@ -29,7 +29,6 @@ const Settings: React.FC = () => {
   const [showSecrets, setShowSecrets] = useState(false);
   const [userPassword, setUserPassword] = useState('');
 
-  // Fixed the syntax error below: removed 'boolean =' which was causing the 'boolean refers to a type' error.
   const initialUserForm: Partial<User> = {
     id: '', name: '', email: '', role: UserRole.GESTOR,
     perm_view_agenda: true, perm_view_financial: false, perm_view_crm: false,
@@ -61,18 +60,34 @@ const Settings: React.FC = () => {
     fetchData();
   }, []);
 
-  const showSuccess = () => { setSaveSuccess(true); setTimeout(() => setSaveSuccess(false), 3000); };
-  const showError = (msg: string) => { setSaveError(msg); setTimeout(() => setSaveError(''), 4000); };
+  const triggerSuccess = (section: string) => { 
+    setSaveSuccess(section); 
+    setTimeout(() => setSaveSuccess(null), 3000); 
+  };
+  
+  const showError = (msg: string) => { 
+    setSaveError(msg); 
+    setTimeout(() => setSaveError(''), 5000); 
+  };
 
-  const handleSaveGeneral = async () => {
+  const handleSaveSection = async (section: 'IDENTIFICATION' | 'BUSINESS' | 'HOURS' | 'EXCEPTIONS' | 'PAYMENTS') => {
     if (!settings) return;
-    setIsSavingGeneral(true);
+    setLoadingSection(section);
+    setSaveError('');
+    
     try {
-      await db.settings.saveGeneral(settings);
-      await db.settings.saveHours(settings);
-      showSuccess();
-    } catch (error: any) { showError(error.message || "Erro ao salvar."); }
-    finally { setIsSavingGeneral(false); }
+      if (section === 'HOURS') {
+          await db.settings.saveHours(settings);
+      } else {
+          // Todas as outras seções salvam na tabela principal
+          await db.settings.saveGeneral(settings);
+      }
+      triggerSuccess(section);
+    } catch (error: any) { 
+      showError(error.message || "Falha ao salvar seção.");
+    } finally { 
+      setLoadingSection(null); 
+    }
   };
 
   const handleOpenNewUser = () => {
@@ -94,33 +109,22 @@ const Settings: React.FC = () => {
           alert("Nome e E-mail são obrigatórios.");
           return;
       }
-      if (!isEditingUser && !userPassword) {
-          alert("Defina uma senha inicial para o novo membro.");
-          return;
-      }
-
-      setIsSavingUser(true);
+      setLoadingSection('USER_MODAL');
       try {
           const { data: { session } } = await supabase.auth.getSession();
           const action = isEditingUser ? 'UPDATE' : 'CREATE';
-          
           const { data, error } = await supabase.functions.invoke('manage-staff', {
-              body: { 
-                  action, 
-                  userData: { ...userForm, password: userPassword } 
-              },
+              body: { action, userData: { ...userForm, password: userPassword } },
               headers: { Authorization: `Bearer ${session?.access_token}` }
           });
-
           if (error || data?.error) throw new Error(error?.message || data?.error);
-
           await fetchTeam();
           setShowUserModal(false);
-          showSuccess();
+          triggerSuccess('TEAM');
       } catch (e: any) {
-          alert("Erro ao gerenciar usuário: " + e.message);
+          alert("Erro: " + e.message);
       } finally {
-          setIsSavingUser(false);
+          setLoadingSection(null);
       }
   };
 
@@ -129,24 +133,20 @@ const Settings: React.FC = () => {
           alert("Você não pode excluir seu próprio usuário.");
           return;
       }
-      if (!window.confirm(`Tem certeza que deseja remover o acesso de ${user.name} permanentemente?`)) return;
-
-      setIsSavingUser(true);
+      if (!window.confirm(`Remover acesso de ${user.name}?`)) return;
+      setLoadingSection('TEAM');
       try {
           const { data: { session } } = await supabase.auth.getSession();
-          const { data, error } = await supabase.functions.invoke('manage-staff', {
+          await supabase.functions.invoke('manage-staff', {
               body: { action: 'DELETE', userData: { id: user.id } },
               headers: { Authorization: `Bearer ${session?.access_token}` }
           });
-
-          if (error || data?.error) throw new Error(error?.message || data?.error);
-
           await fetchTeam();
-          showSuccess();
+          triggerSuccess('TEAM');
       } catch (e: any) {
-          alert("Erro ao excluir: " + e.message);
+          alert("Erro: " + e.message);
       } finally {
-          setIsSavingUser(false);
+          setLoadingSection(null);
       }
   };
 
@@ -165,7 +165,8 @@ const Settings: React.FC = () => {
   const updateDayConfig = (index: number, field: keyof DayConfig, value: any) => {
       if(!settings) return;
       const newHours = [...settings.businessHours];
-      newHours[index] = { ...newHours[index], [field]: value };
+      const sanitizedValue = (field === 'start' || field === 'end') ? (isNaN(parseInt(value)) ? 0 : parseInt(value)) : value;
+      newHours[index] = { ...newHours[index], [field]: sanitizedValue };
       setSettings({ ...settings, businessHours: newHours });
   };
 
@@ -174,10 +175,11 @@ const Settings: React.FC = () => {
   return (
     <div className="max-w-4xl mx-auto space-y-4 md:space-y-6 pb-24 md:pb-8 px-2 md:px-0">
       
-      {saveSuccess && (
+      {saveError && (
         <div className="fixed top-4 right-4 z-[100] animate-notification">
-          <div className="bg-green-600 text-white px-4 md:px-6 py-2 md:py-3 rounded-xl md:rounded-2xl shadow-2xl flex items-center gap-2 text-[10px] md:text-sm font-bold uppercase tracking-widest border border-green-400">
-            <CheckCircle size={16} /> Salvo com sucesso
+          <div className="bg-red-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex flex-col gap-1 text-xs font-bold border border-red-400">
+            <div className="flex items-center gap-2 uppercase tracking-widest"><X size={16} /> Falha ao Salvar</div>
+            <p className="opacity-90 font-mono text-[10px]">{saveError}</p>
           </div>
         </div>
       )}
@@ -187,7 +189,6 @@ const Settings: React.FC = () => {
         <p className="text-slate-500 text-[8px] md:text-[10px] font-black uppercase tracking-[0.2em] mt-1">Gestão Estratégica do Sistema</p>
       </div>
 
-      {/* TABS NAVEGAÇÃO COMPACTA */}
       <div className="grid grid-cols-3 gap-1 bg-slate-900/50 p-1 rounded-2xl border border-slate-700 shadow-inner">
         {[
           { id: 'general', label: 'Geral', icon: Shield },
@@ -206,41 +207,52 @@ const Settings: React.FC = () => {
 
       <div className="bg-slate-800 rounded-[1.5rem] md:rounded-[2.5rem] p-4 md:p-10 border border-slate-700 shadow-2xl overflow-hidden min-h-[500px]">
         {activeTab === 'general' && (
-             <div className="animate-fade-in space-y-8 md:space-y-12">
+             <div className="animate-fade-in space-y-12 md:space-y-16">
                  
-                 {/* IDENTIFICAÇÃO COMPLETA */}
-                 <div className="flex flex-col md:flex-row items-center md:items-start gap-6 md:gap-12">
-                    <div className="flex flex-col items-center gap-2">
-                        <div onClick={() => fileInputRef.current?.click()} className="w-24 h-24 md:w-40 md:h-40 rounded-[2rem] bg-slate-900 border-2 border-dashed border-slate-700 hover:border-neon-orange cursor-pointer flex items-center justify-center overflow-hidden transition-all group shadow-inner">
-                            {settings.logoUrl ? <img src={settings.logoUrl} className="w-full h-full object-contain p-4"/> : <Upload size={32} className="text-slate-600 group-hover:text-neon-orange"/>}
-                        </div>
-                        <span className="text-[8px] md:text-[9px] text-slate-500 font-black uppercase tracking-widest">Logo da Empresa</span>
-                        <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={(e) => {
-                             const file = e.target.files?.[0];
-                             if (file) {
-                                 const reader = new FileReader();
-                                 reader.onloadend = () => setSettings({...settings, logoUrl: reader.result as string});
-                                 reader.readAsDataURL(file);
-                             }
-                        }}/>
+                 {/* SEÇÃO: IDENTIFICAÇÃO */}
+                 <div className="space-y-6">
+                    <div className="flex justify-between items-center border-l-4 border-neon-green pl-4">
+                        <h3 className="text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Identificação Pública</h3>
+                        <button 
+                            onClick={() => handleSaveSection('IDENTIFICATION')} 
+                            disabled={loadingSection === 'IDENTIFICATION'}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${saveSuccess === 'IDENTIFICATION' ? 'bg-green-600 text-white' : 'bg-neon-green hover:bg-green-600 text-black shadow-lg'}`}
+                        >
+                            {loadingSection === 'IDENTIFICATION' ? <Loader2 size={14} className="animate-spin"/> : saveSuccess === 'IDENTIFICATION' ? <CheckCircle size={14}/> : <Save size={14}/>}
+                            {saveSuccess === 'IDENTIFICATION' ? 'Salvo' : 'Salvar'}
+                        </button>
                     </div>
-                    
-                    <div className="flex-1 w-full space-y-4 md:space-y-6">
-                        <h3 className="text-[9px] md:text-xs font-black text-slate-400 flex items-center gap-2 uppercase tracking-[0.2em] border-l-4 border-neon-blue pl-4">Identificação Pública</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-                            <div className="bg-slate-900/50 p-3 md:p-4 rounded-xl md:rounded-2xl border border-slate-700 focus-within:border-neon-blue transition shadow-inner">
+
+                    <div className="flex flex-col md:flex-row items-center md:items-start gap-6 md:gap-12">
+                        <div className="flex flex-col items-center gap-2">
+                            <div onClick={() => fileInputRef.current?.click()} className="w-24 h-24 md:w-40 md:h-40 rounded-[2rem] bg-slate-900 border-2 border-dashed border-slate-700 hover:border-neon-orange cursor-pointer flex items-center justify-center overflow-hidden transition-all group shadow-inner">
+                                {settings.logoUrl ? <img src={settings.logoUrl} className="w-full h-full object-contain p-4"/> : <Upload size={32} className="text-slate-600 group-hover:text-neon-orange"/>}
+                            </div>
+                            <span className="text-[8px] md:text-[9px] text-slate-500 font-black uppercase tracking-widest">Logo da Empresa</span>
+                            <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                    const reader = new FileReader();
+                                    reader.onloadend = () => setSettings(prev => prev ? {...prev, logoUrl: reader.result as string} : null);
+                                    reader.readAsDataURL(file);
+                                }
+                            }}/>
+                        </div>
+                        
+                        <div className="flex-1 w-full grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700 focus-within:border-neon-blue transition shadow-inner">
                                 <label className="block text-[8px] md:text-[9px] text-slate-500 font-black uppercase mb-1">Nome Comercial</label>
                                 <input className="w-full bg-transparent text-white font-bold outline-none text-xs md:text-sm" value={settings.establishmentName} onChange={e => setSettings({...settings, establishmentName: e.target.value})} placeholder="Ex: Tô Na Pista Boliche"/>
                             </div>
-                            <div className="bg-slate-900/50 p-3 md:p-4 rounded-xl md:rounded-2xl border border-slate-700 focus-within:border-neon-blue transition shadow-inner">
+                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700 focus-within:border-neon-blue transition shadow-inner">
                                 <label className="block text-[8px] md:text-[9px] text-slate-500 font-black uppercase mb-1">Telefone Fixo / SAC</label>
                                 <input className="w-full bg-transparent text-white font-bold outline-none text-xs md:text-sm" value={settings.phone} onChange={e => setSettings({...settings, phone: e.target.value})} placeholder="(00) 0000-0000"/>
                             </div>
-                            <div className="bg-slate-900/50 p-3 md:p-4 rounded-xl md:rounded-2xl border border-slate-700 focus-within:border-neon-blue transition shadow-inner md:col-span-2">
+                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700 focus-within:border-neon-blue transition shadow-inner md:col-span-2">
                                 <label className="block text-[8px] md:text-[9px] text-slate-500 font-black uppercase mb-1">Endereço Operacional</label>
                                 <input className="w-full bg-transparent text-white font-bold outline-none text-xs md:text-sm" value={settings.address} onChange={e => setSettings({...settings, address: e.target.value})} placeholder="Rua, Número, Bairro - Cidade/UF"/>
                             </div>
-                            <div className="bg-slate-900/50 p-3 md:p-4 rounded-xl md:rounded-2xl border border-slate-700 focus-within:border-neon-blue transition shadow-inner md:col-span-2">
+                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700 focus-within:border-neon-blue transition shadow-inner md:col-span-2">
                                 <label className="block text-[8px] md:text-[9px] text-slate-500 font-black uppercase mb-1">Link Direto WhatsApp</label>
                                 <input className="w-full bg-transparent text-white font-bold outline-none text-[10px] md:text-xs font-mono" value={settings.whatsappLink} onChange={e => setSettings({...settings, whatsappLink: e.target.value})} placeholder="https://wa.me/55..."/>
                             </div>
@@ -248,39 +260,76 @@ const Settings: React.FC = () => {
                     </div>
                  </div>
 
-                 {/* COMERCIAL & PISTAS */}
-                 <div className="space-y-4 md:space-y-6">
-                    <h3 className="text-[9px] md:text-xs font-black text-slate-400 flex items-center gap-2 uppercase tracking-[0.2em] border-l-4 border-neon-green pl-4">Parâmetros de Negócio</h3>
+                 {/* SEÇÃO: PARÂMETROS DE NEGÓCIO */}
+                 <div className="space-y-6">
+                    <div className="flex justify-between items-center border-l-4 border-neon-green pl-4">
+                        <h3 className="text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Parâmetros de Negócio</h3>
+                        <button 
+                            onClick={() => handleSaveSection('BUSINESS')} 
+                            disabled={loadingSection === 'BUSINESS'}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${saveSuccess === 'BUSINESS' ? 'bg-green-600 text-white' : 'bg-neon-green hover:bg-green-600 text-black shadow-lg'}`}
+                        >
+                            {loadingSection === 'BUSINESS' ? <Loader2 size={14} className="animate-spin"/> : saveSuccess === 'BUSINESS' ? <CheckCircle size={14}/> : <Save size={14}/>}
+                            {saveSuccess === 'BUSINESS' ? 'Salvo' : 'Salvar'}
+                        </button>
+                    </div>
+
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
                         <div className="bg-slate-900/80 p-4 md:p-6 rounded-xl md:rounded-2xl border border-slate-700 shadow-inner">
                             <label className="block text-[8px] md:text-[9px] text-slate-500 font-black uppercase mb-2">Pistas Ativas</label>
-                            <input type="number" className="w-full bg-transparent text-white text-lg md:text-2xl font-black outline-none" value={settings.activeLanes} onChange={e => setSettings({...settings, activeLanes: parseInt(e.target.value)})} />
+                            <input 
+                                type="number" 
+                                className="w-full bg-transparent text-white text-lg md:text-2xl font-black outline-none" 
+                                value={isNaN(settings.activeLanes) ? '' : settings.activeLanes} 
+                                onChange={e => setSettings({...settings, activeLanes: parseInt(e.target.value)})} 
+                            />
                         </div>
                         <div className="bg-slate-900/80 p-4 md:p-6 rounded-xl md:rounded-2xl border border-slate-700 shadow-inner">
                             <label className="block text-[8px] md:text-[9px] text-slate-500 font-black uppercase mb-2">Preço Semana (H)</label>
                             <div className="flex items-center gap-2 text-white font-black text-lg md:text-2xl">
                                 <span className="text-neon-green text-[10px] md:text-xs">R$</span>
-                                <input type="number" className="w-full bg-transparent outline-none" value={settings.weekdayPrice} onChange={e => setSettings({...settings, weekdayPrice: parseFloat(e.target.value)})} />
+                                <input 
+                                    type="number" 
+                                    className="w-full bg-transparent outline-none" 
+                                    value={isNaN(settings.weekdayPrice) ? '' : settings.weekdayPrice} 
+                                    onChange={e => setSettings({...settings, weekdayPrice: parseFloat(e.target.value)})} 
+                                />
                             </div>
                         </div>
                         <div className="bg-slate-900/80 p-4 md:p-6 rounded-xl md:rounded-2xl border border-slate-700 shadow-inner">
                             <label className="block text-[8px] md:text-[9px] text-slate-500 font-black uppercase mb-2">Preço Weekend (H)</label>
                             <div className="flex items-center gap-2 text-white font-black text-lg md:text-2xl">
                                 <span className="text-neon-green text-[10px] md:text-xs">R$</span>
-                                <input type="number" className="w-full bg-transparent outline-none" value={settings.weekendPrice} onChange={e => setSettings({...settings, weekendPrice: parseFloat(e.target.value)})} />
+                                <input 
+                                    type="number" 
+                                    className="w-full bg-transparent outline-none" 
+                                    value={isNaN(settings.weekendPrice) ? '' : settings.weekendPrice} 
+                                    onChange={e => setSettings({...settings, weekendPrice: parseFloat(e.target.value)})} 
+                                />
                             </div>
                         </div>
                     </div>
                  </div>
 
-                 {/* HORÁRIOS DE FUNCIONAMENTO */}
-                 <div className="space-y-4 md:space-y-6">
-                    <h3 className="text-[9px] md:text-xs font-black text-slate-400 flex items-center gap-2 uppercase tracking-[0.2em] border-l-4 border-neon-blue pl-4">Calendário Semanal</h3>
+                 {/* SEÇÃO: CALENDÁRIO SEMANAL */}
+                 <div className="space-y-6">
+                    <div className="flex justify-between items-center border-l-4 border-neon-green pl-4">
+                        <h3 className="text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Calendário Semanal</h3>
+                        <button 
+                            onClick={() => handleSaveSection('HOURS')} 
+                            disabled={loadingSection === 'HOURS'}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${saveSuccess === 'HOURS' ? 'bg-green-600 text-white' : 'bg-neon-green hover:bg-green-600 text-black shadow-lg'}`}
+                        >
+                            {loadingSection === 'HOURS' ? <Loader2 size={14} className="animate-spin"/> : saveSuccess === 'HOURS' ? <CheckCircle size={14}/> : <Save size={14}/>}
+                            {saveSuccess === 'HOURS' ? 'Horários Salvos' : 'Salvar'}
+                        </button>
+                    </div>
+
                     <div className="space-y-2 md:space-y-3">
                         {settings.businessHours.map((day, idx) => (
                             <div key={idx} className={`p-3 md:p-5 rounded-xl md:rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 md:gap-4 transition-all ${day.isOpen ? 'bg-slate-900/60 border-slate-700 shadow-lg' : 'bg-slate-950/20 border-slate-800 opacity-60'}`}>
                                 <div className="flex items-center gap-3 md:gap-4">
-                                    <label className="relative inline-flex items-center cursor-pointer scale-90 md:scale-100">
+                                    <label className="relative inline-flex items-center cursor-pointer">
                                         <input type="checkbox" checked={day.isOpen} onChange={e => updateDayConfig(idx, 'isOpen', e.target.checked)} className="sr-only peer" />
                                         <div className="w-10 h-5 md:w-11 md:h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 md:after:h-5 md:after:w-5 after:transition-all peer-checked:bg-neon-blue"></div>
                                     </label>
@@ -290,11 +339,11 @@ const Settings: React.FC = () => {
                                     <div className="flex items-center gap-2 md:gap-3 w-full sm:w-auto">
                                         <div className="flex-1 sm:flex-none">
                                             <label className="block text-[7px] md:text-[8px] text-slate-500 font-black uppercase mb-1">Abertura</label>
-                                            <input type="number" min="0" max="23" className="w-full sm:w-16 md:w-24 bg-slate-800 border border-slate-700 rounded-lg p-1.5 md:p-2.5 text-white font-black text-center text-xs md:text-base shadow-inner focus:border-neon-blue outline-none" value={day.start} onChange={e => updateDayConfig(idx, 'start', parseInt(e.target.value))} />
+                                            <input type="number" min="0" max="23" className="w-full sm:w-16 md:w-24 bg-slate-800 border border-slate-700 rounded-lg p-1.5 md:p-2.5 text-white font-black text-center text-xs md:text-base shadow-inner focus:border-neon-blue outline-none" value={day.start} onChange={e => updateDayConfig(idx, 'start', e.target.value)} />
                                         </div>
                                         <div className="flex-1 sm:flex-none">
                                             <label className="block text-[7px] md:text-[8px] text-slate-500 font-black uppercase mb-1">Fechamento</label>
-                                            <input type="number" min="0" max="23" className="w-full sm:w-16 md:w-24 bg-slate-800 border border-slate-700 rounded-lg p-1.5 md:p-2.5 text-white font-black text-center text-xs md:text-base shadow-inner focus:border-neon-blue outline-none" value={day.end} onChange={e => updateDayConfig(idx, 'end', parseInt(e.target.value))} />
+                                            <input type="number" min="0" max="23" className="w-full sm:w-16 md:w-24 bg-slate-800 border border-slate-700 rounded-lg p-1.5 md:p-2.5 text-white font-black text-center text-xs md:text-base shadow-inner focus:border-neon-blue outline-none" value={day.end} onChange={e => updateDayConfig(idx, 'end', e.target.value)} />
                                         </div>
                                         <span className="text-[8px] md:text-[10px] text-slate-500 font-bold uppercase mt-3 md:mt-4">H</span>
                                     </div>
@@ -305,16 +354,27 @@ const Settings: React.FC = () => {
                     </div>
                  </div>
 
-                 {/* FECHAMENTOS EXCEPCIONAIS */}
-                 <div className="space-y-4 md:space-y-6">
-                    <h3 className="text-[9px] md:text-xs font-black text-slate-400 flex items-center gap-2 uppercase tracking-[0.2em] border-l-4 border-red-500 pl-4">Exceções de Agenda</h3>
+                 {/* SEÇÃO: EXCEÇÕES DE AGENDA */}
+                 <div className="space-y-6">
+                    <div className="flex justify-between items-center border-l-4 border-red-500 pl-4">
+                        <h3 className="text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Exceções de Agenda</h3>
+                        <button 
+                            onClick={() => handleSaveSection('EXCEPTIONS')} 
+                            disabled={loadingSection === 'EXCEPTIONS'}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${saveSuccess === 'EXCEPTIONS' ? 'bg-green-600 text-white' : 'bg-red-600 hover:bg-red-500 text-white shadow-lg'}`}
+                        >
+                            {loadingSection === 'EXCEPTIONS' ? <Loader2 size={14} className="animate-spin"/> : saveSuccess === 'EXCEPTIONS' ? <CheckCircle size={14}/> : <Save size={14}/>}
+                            {saveSuccess === 'EXCEPTIONS' ? 'Bloqueios Salvos' : 'Salvar Bloqueios'}
+                        </button>
+                    </div>
+
                     <div className="bg-slate-900 p-4 md:p-8 rounded-2xl md:rounded-3xl border border-slate-700 space-y-6 md:space-y-8 shadow-2xl">
                         <div className="flex flex-col sm:flex-row gap-3">
                             <div className="flex-1 relative">
                                 <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={18}/>
                                 <input type="date" className="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 pl-12 text-white font-black outline-none focus:border-red-500 transition text-xs md:text-sm shadow-inner" value={newBlockedDate} onChange={e => setNewBlockedDate(e.target.value)} />
                             </div>
-                            <button onClick={handleAddBlockedDate} className="bg-red-600 hover:bg-red-500 text-white px-8 py-4 rounded-2xl font-black uppercase text-[10px] md:text-xs tracking-[0.15em] shadow-xl shadow-red-900/20 transition active:scale-95 flex items-center justify-center gap-2"><Plus size={16}/> Bloquear Data</button>
+                            <button onClick={handleAddBlockedDate} className="bg-slate-700 hover:bg-slate-600 text-white px-8 py-4 rounded-2xl font-black uppercase text-[10px] md:text-xs tracking-[0.15em] transition active:scale-95 flex items-center justify-center gap-2"><Plus size={16}/> Adicionar à Lista</button>
                         </div>
                         
                         <div className="flex flex-wrap gap-2 pt-2">
@@ -334,11 +394,6 @@ const Settings: React.FC = () => {
                         </div>
                     </div>
                  </div>
-
-                 <button onClick={handleSaveGeneral} disabled={isSavingGeneral} className="w-full py-5 md:py-6 bg-neon-orange hover:bg-orange-600 text-white rounded-2xl md:rounded-3xl font-black uppercase text-[10px] md:text-xs tracking-[0.3em] shadow-2xl shadow-orange-900/40 transition-all active:scale-95 flex items-center justify-center gap-4 sticky bottom-4 z-10 border-t border-orange-400/20">
-                    {isSavingGeneral ? <Loader2 className="animate-spin" size={20}/> : <Save size={20}/>}
-                    Salvar
-                 </button>
              </div>
         )}
 
@@ -382,7 +437,9 @@ const Settings: React.FC = () => {
                                 </div>
                             )}
                          </div>
-                         <button onClick={handleSaveGeneral} className="w-full py-5 md:py-6 bg-neon-green hover:bg-green-600 text-black rounded-2xl md:rounded-3xl font-black text-[10px] md:text-xs uppercase tracking-[0.4em] shadow-xl shadow-green-900/30 transition-all active:scale-95 border-t border-white/20">Sincronizar Mercado Pago</button>
+                         <button onClick={() => handleSaveSection('PAYMENTS')} className="w-full py-5 md:py-6 bg-neon-green hover:bg-green-600 text-black rounded-2xl md:rounded-3xl font-black text-[10px] md:text-xs uppercase tracking-[0.4em] shadow-xl shadow-green-900/30 transition-all active:scale-95 border-t border-white/20">
+                            {loadingSection === 'PAYMENTS' ? <Loader2 className="animate-spin mx-auto"/> : 'Sincronizar Mercado Pago'}
+                         </button>
                      </div>
                  )}
              </div>
@@ -422,7 +479,6 @@ const Settings: React.FC = () => {
         )}
       </div>
 
-      {/* MODAL GESTÃO DE USUÁRIO - MOBILE COMPACT */}
       {showUserModal && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4">
               <div className="bg-slate-800 border border-slate-600 w-full max-w-2xl rounded-[2rem] md:rounded-[3rem] shadow-2xl animate-scale-in flex flex-col max-h-[95vh] overflow-hidden">
@@ -476,8 +532,8 @@ const Settings: React.FC = () => {
 
                   <div className="p-6 md:p-10 bg-slate-900 border-t border-slate-700 flex flex-col sm:flex-row gap-3 md:gap-6">
                       <button onClick={() => setShowUserModal(false)} className="order-2 sm:order-1 flex-1 py-4 md:py-6 bg-slate-800 text-slate-400 rounded-xl md:rounded-[1.5rem] font-black uppercase text-[10px] md:text-xs tracking-[0.2em] hover:bg-slate-700 transition">Cancelar</button>
-                      <button onClick={handleSaveUser} disabled={isSavingUser} className="order-1 sm:order-2 flex-[2] py-4 md:py-6 bg-neon-blue hover:bg-blue-600 text-white rounded-xl md:rounded-[1.5rem] font-black uppercase text-[10px] md:text-xs tracking-[0.3em] shadow-xl shadow-blue-900/20 transition-all active:scale-95 flex items-center justify-center gap-3">
-                          {isSavingUser ? <Loader2 className="animate-spin" size={20}/> : <Save size={20}/>}
+                      <button onClick={handleSaveUser} disabled={loadingSection === 'USER_MODAL'} className="order-1 sm:order-2 flex-[2] py-4 md:py-6 bg-neon-blue hover:bg-blue-600 text-white rounded-xl md:rounded-[1.5rem] font-black uppercase text-[10px] md:text-xs tracking-[0.3em] shadow-xl shadow-blue-900/20 transition-all active:scale-95 flex items-center justify-center gap-3">
+                          {loadingSection === 'USER_MODAL' ? <Loader2 className="animate-spin" size={20}/> : <Save size={20}/>}
                           Salvar
                       </button>
                   </div>
