@@ -392,18 +392,31 @@ const PublicBooking: React.FC = () => {
             
             let existingClient = null;
             if (filters.length > 0) {
-                const { data } = await supabase
+                const { data, error: selectError } = await supabase
                     .from('clientes')
-                    .select('client_id, name, email')
+                    .select('*')
                     .or(filters.join(','))
                     .maybeSingle();
+                
+                if (selectError) throw selectError;
                 existingClient = data;
             }
 
             if (existingClient) {
                 if (staffUser) {
+                    // SE É EQUIPE: Atualiza os dados do cliente existente com o que foi digitado agora
+                    // Isso evita erros de duplicidade e mantém o CRM atualizado
+                    await db.clients.update({
+                        id: existingClient.client_id,
+                        name: formData.name,
+                        phone: phoneClean,
+                        email: emailClean,
+                        lastContactAt: new Date().toISOString(),
+                        tags: existingClient.tags || [],
+                        createdAt: existingClient.created_at
+                    }, staffUser.id);
+
                     setClientId(existingClient.client_id);
-                    setFormData(prev => ({ ...prev, name: existingClient.name }));
                     setCurrentStep(c => c + 1);
                     setIsSaving(false);
                     return;
@@ -432,9 +445,7 @@ const PublicBooking: React.FC = () => {
             if (forceAccount && !clientUser) {
                 const { client, error } = await db.clients.register(newClientData, formData.password);
                 if (error) {
-                    alert(typeof error === 'string' ? error : 'Erro ao criar conta.');
-                    setIsSaving(false);
-                    return;
+                    throw new Error(typeof error === 'string' ? error : 'Erro ao criar conta.');
                 }
                 if (client) {
                     localStorage.setItem('tonapista_client_auth', JSON.stringify(client));
@@ -453,9 +464,9 @@ const PublicBooking: React.FC = () => {
                     setCurrentStep(c => c + 1);
                 }
             }
-        } catch (error) {
-            console.error(error);
-            alert("Erro ao processar dados. Verifique sua conexão.");
+        } catch (error: any) {
+            console.error("DEBUG ERROR STEP 2:", error);
+            alert(`Falha ao salvar identificação: ${error.message || "Erro desconhecido. Verifique sua conexão."}`);
         } finally {
             setIsSaving(false);
         }
