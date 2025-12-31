@@ -384,8 +384,9 @@ const PublicBooking: React.FC = () => {
         setIsSaving(true);
         try {
             const phoneClean = formData.whatsapp.replace(/\D/g, '');
-            const emailClean = formData.email.trim();
+            const emailClean = formData.email.trim().toLowerCase();
 
+            // 1. BUSCA POR CLIENTE EXISTENTE (OR PHONE OU EMAIL)
             let filters = [];
             if (phoneClean) filters.push(`phone.eq.${phoneClean}`);
             if (emailClean) filters.push(`email.eq.${emailClean}`);
@@ -396,32 +397,35 @@ const PublicBooking: React.FC = () => {
                     .from('clientes')
                     .select('*')
                     .or(filters.join(','))
-                    .maybeSingle();
+                    .limit(1);
                 
                 if (selectError) throw selectError;
-                existingClient = data;
+                if (data && data.length > 0) existingClient = data[0];
             }
 
             if (existingClient) {
+                // Se o cliente existe, o sistema DEVE usar o ID dele
                 if (staffUser) {
-                    // SE É EQUIPE: Atualiza os dados do cliente existente com o que foi digitado agora
-                    // Isso evita erros de duplicidade e mantém o CRM atualizado
+                    // Se é equipe agendando, atualiza os dados para garantir que o CRM tenha a info mais recente
                     await db.clients.update({
                         id: existingClient.client_id,
-                        name: formData.name,
-                        phone: phoneClean,
-                        email: emailClean,
+                        name: formData.name || existingClient.name,
+                        phone: phoneClean || existingClient.phone,
+                        email: emailClean || existingClient.email,
                         lastContactAt: new Date().toISOString(),
                         tags: existingClient.tags || [],
-                        createdAt: existingClient.created_at
+                        createdAt: existingClient.created_at,
+                        funnelStage: existingClient.funnel_stage || FunnelStage.NOVO
                     }, staffUser.id);
 
                     setClientId(existingClient.client_id);
+                    setFormData(prev => ({ ...prev, name: formData.name || existingClient.name }));
                     setCurrentStep(c => c + 1);
                     setIsSaving(false);
                     return;
                 } else {
-                    alert("Identificamos que você já possui cadastro! Por favor, acesse sua conta para continuar.");
+                    // Se é o cliente no site, e ele já existe, pedimos login por segurança (para não agendar no nome de outro)
+                    alert("Identificamos que você já possui cadastro conosco! Por favor, acesse sua conta para continuar.");
                     setAuthMode('LOGIN');
                     if (existingClient.email) setLoginEmail(existingClient.email);
                     setIsSaving(false);
@@ -429,24 +433,25 @@ const PublicBooking: React.FC = () => {
                 }
             }
 
+            // 2. SE NÃO EXISTE, CRIA NOVO
+            const newClientId = uuidv4();
             const newClientData = {
-                id: uuidv4(),
+                id: newClientId,
                 name: formData.name,
-                phone: formData.whatsapp,
-                email: formData.email,
+                phone: phoneClean,
+                email: emailClean || null,
                 tags: ['Lead'], 
                 createdAt: new Date().toISOString(),
                 lastContactAt: new Date().toISOString(),
                 funnelStage: FunnelStage.NOVO
             };
 
-            const forceAccount = !staffUser;
+            const isPublicUser = !staffUser && !clientUser;
 
-            if (forceAccount && !clientUser) {
+            if (isPublicUser) {
+                // Cadastro com senha (pelo site)
                 const { client, error } = await db.clients.register(newClientData, formData.password);
-                if (error) {
-                    throw new Error(typeof error === 'string' ? error : 'Erro ao criar conta.');
-                }
+                if (error) throw new Error(typeof error === 'string' ? error : 'Erro ao criar conta.');
                 if (client) {
                     localStorage.setItem('tonapista_client_auth', JSON.stringify(client));
                     setClientUser(client);
@@ -454,19 +459,14 @@ const PublicBooking: React.FC = () => {
                     setCurrentStep(c => c + 1);
                 }
             } else {
-                const hasContact = phoneClean.length > 0 || emailClean.length > 0;
-                if (staffUser && !hasContact) {
-                    setClientId(''); 
-                    setCurrentStep(c => c + 1);
-                } else {
-                    const client = await db.clients.create(newClientData, staffUser?.id); 
-                    setClientId(client.id);
-                    setCurrentStep(c => c + 1);
-                }
+                // Cadastro rápido (pela equipe ou se já logado mas informando dados de terceiro)
+                const client = await db.clients.create(newClientData, staffUser?.id); 
+                setClientId(client.id);
+                setCurrentStep(c => c + 1);
             }
         } catch (error: any) {
-            console.error("DEBUG ERROR STEP 2:", error);
-            alert(`Falha ao salvar identificação: ${error.message || "Erro desconhecido. Verifique sua conexão."}`);
+            console.error("ERRO IDENTIFICAÇÃO:", error);
+            alert(`Falha ao processar identificação: ${error.message || "Erro desconhecido de banco de dados."}`);
         } finally {
             setIsSaving(false);
         }
