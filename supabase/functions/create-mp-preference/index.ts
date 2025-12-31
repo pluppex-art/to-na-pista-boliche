@@ -18,7 +18,7 @@ Deno.serve(async (req: Request) => {
     
     const supabaseAdmin = createClient(supabaseUrl, supabaseKey)
 
-    // 1. Busca as credenciais de produção diretamente da sua tabela 'configuracoes'
+    // 1. Busca as credenciais de produção
     const { data: config, error: configError } = await supabaseAdmin
       .from('configuracoes')
       .select('mercadopago_access_token')
@@ -26,13 +26,12 @@ Deno.serve(async (req: Request) => {
       .maybeSingle()
 
     if (configError || !config?.mercadopago_access_token) {
-      console.error("[ERRO CONFIG]", configError)
-      throw new Error("Credenciais do Mercado Pago não encontradas na tabela 'configuracoes'.")
+      throw new Error("Credenciais do Mercado Pago não configuradas.")
     }
 
     const mpAccessToken = config.mercadopago_access_token.trim()
 
-    // 2. Busca os dados da reserva e do cliente
+    // 2. Busca os dados da reserva
     const { data: res, error: resError } = await supabaseAdmin
       .from('reservas')
       .select('*, clientes(email, name)')
@@ -41,15 +40,9 @@ Deno.serve(async (req: Request) => {
 
     if (resError || !res) throw new Error("Reserva não encontrada.")
 
-    // 3. Define o e-mail do pagador (MUITO IMPORTANTE para evitar 403)
-    let payerEmail = res.clientes?.email || "cliente@tonapistaboliche.com.br"
+    // 3. Define o e-mail do pagador
+    let payerEmail = res.clientes?.email || "atendimento@tonapistaboliche.com.br"
     const payerName = res.clientes?.name || res.client_name || "Cliente"
-
-    // Se o e-mail for o mesmo do vendedor (comum em testes), o MP bloqueia. 
-    // Vamos garantir que seja um e-mail com formato válido de cliente.
-    if (payerEmail.includes("admin") || payerEmail.includes("boliche")) {
-       console.log("[AVISO] E-mail de pagador suspeito detectado, usando fallback seguro.");
-    }
 
     const finalPrice = typeof res.total_value === 'string' 
       ? parseFloat(res.total_value.replace(',', '.')) 
@@ -57,8 +50,17 @@ Deno.serve(async (req: Request) => {
 
     const origin = req.headers.get('origin') || 'https://tonapistaboliche.com.br'
     
-    // Define data de expiração para exatamente 30 minutos a partir de agora
-    const expirationDate = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    // --- LÓGICA DE EXPIRAÇÃO DE 30 MINUTOS ---
+    // Calculamos 30 minutos a partir do momento da criação da reserva, não do clique no botão.
+    // Isso garante que se ele esperar 20 min para clicar no botão, ele só terá 10 min de link ativo.
+    const createdAt = new Date(res.created_at).getTime();
+    const expirationTime = new Date(createdAt + 30 * 60 * 1000);
+    const expirationDateStr = expirationTime.toISOString();
+    
+    // Se por algum motivo ele clicar após os 30 min, a função já deve barrar aqui
+    if (new Date() > expirationTime) {
+       throw new Error("O prazo de 30 minutos para iniciar o pagamento desta reserva expirou.");
+    }
 
     const mpBody = {
       items: [{
@@ -68,7 +70,7 @@ Deno.serve(async (req: Request) => {
         currency_id: 'BRL',
         unit_price: finalPrice,
         category_id: 'entertainment',
-        description: `Pista para ${res.people_count} pessoas`
+        description: `Agendamento para ${res.date} às ${res.time}`
       }],
       payer: {
         name: payerName.split(' ')[0] || "Cliente",
@@ -76,8 +78,9 @@ Deno.serve(async (req: Request) => {
         email: payerEmail
       },
       external_reference: res.id,
+      // Configuração de Expiração Real no Mercado Pago
       expires: true,
-      expiration_date_to: expirationDate,
+      expiration_date_to: expirationDateStr, 
       back_urls: {
         success: `${origin}/#/minha-conta`,
         failure: `${origin}/#/agendamento`,
@@ -88,7 +91,7 @@ Deno.serve(async (req: Request) => {
       statement_descriptor: "TONAPISTA"
     }
 
-    console.log(`[MP_REQUEST] Enviando para MP com expiração em: ${expirationDate}`)
+    console.log(`[MP_PAYMENT_LOCK] Link expira em: ${expirationDateStr}`);
 
     const mpResponse = await fetch('https://api.mercadopago.com/checkout/preferences', {
       method: 'POST',
@@ -102,11 +105,8 @@ Deno.serve(async (req: Request) => {
     const mpData = await mpResponse.json()
 
     if (!mpResponse.ok) {
-      console.error("[MP_API_ERROR]", JSON.stringify(mpData))
-      if (mpData.status === 403 || mpData.code === "PA_UNAUTHORIZED_RESULT_FROM_POLICIES") {
-        throw new Error("O Mercado Pago recusou o pagamento (Erro 403).")
-      }
-      throw new Error(mpData.message || "Erro ao gerar link de pagamento no Mercado Pago.")
+      console.error("[MP_API_ERROR]", mpData);
+      throw new Error(mpData.message || "Erro ao gerar preferência no Mercado Pago.");
     }
 
     return new Response(JSON.stringify({ url: mpData.init_point }), {
@@ -115,7 +115,7 @@ Deno.serve(async (req: Request) => {
     })
 
   } catch (error: any) {
-    console.error("[FATAL]", error.message)
+    console.error("[CHECKOUT_ERROR]", error.message)
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 400,
