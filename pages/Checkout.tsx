@@ -64,7 +64,6 @@ const Checkout: React.FC = () => {
         const normalizedPhone = cleanPhone(reservationData.whatsapp);
         const emailClean = reservationData.email?.trim() || null;
 
-        // 1. Resolver Cliente
         if (reservationData.clientId) {
             client = await db.clients.getById(reservationData.clientId);
         }
@@ -73,8 +72,6 @@ const Checkout: React.FC = () => {
             client = await db.clients.getByPhone(normalizedPhone);
         }
         
-        // 2. Criar novo cliente APENAS se houver dados mínimos de contato (Tel ou Email)
-        // Isso evita "clientes fantasmas" sem informação e erros de NOT NULL no banco.
         if (!client && (normalizedPhone || emailClean)) {
           try {
               client = await db.clients.create({
@@ -88,8 +85,7 @@ const Checkout: React.FC = () => {
                   funnelStage: FunnelStage.NOVO
               }, currentUser?.id); 
           } catch (createErr) {
-              console.warn("Não foi possível persistir cliente no CRM, continuando apenas com a reserva:", createErr);
-              // Mantemos client como null para seguir com a reserva "avulsa"
+              console.warn("Não foi possível persistir cliente no CRM:", createErr);
           }
         }
 
@@ -97,23 +93,26 @@ const Checkout: React.FC = () => {
             localStorage.setItem('tonapista_client_auth', JSON.stringify(client));
         }
 
-        // 3. Definir Estados Finais da Reserva
         let finalStatus = ReservationStatus.PENDENTE;
         let paymentStatus = PaymentStatus.PENDENTE;
+        let finalMethod = 'PENDENTE';
         let isPayOnSite = false;
 
         if (mode === 'STAFF_CONFIRM') { 
             finalStatus = ReservationStatus.CONFIRMADA; 
-            paymentStatus = PaymentStatus.PAGO; 
+            paymentStatus = PaymentStatus.PAGO;
+            finalMethod = staffMethod; 
         } else if (mode === 'STAFF_LATER') { 
-            isPayOnSite = true; 
+            isPayOnSite = true;
+            finalMethod = 'COMANDA';
+        } else if (mode === 'CLIENT_ONLINE') {
+            finalMethod = 'ONLINE';
         }
 
         const existingIds = reservationData.reservationIds || [];
         const currentTrackedIds: string[] = [];
         let firstReservationId = '';
 
-        // 4. Atualizar ou Criar Reservas vinculadas ao Cliente (ou null se for avulso)
         if (existingIds.length > 0) {
             const allRes = await db.reservations.getAll();
             for (const id of existingIds) {
@@ -121,9 +120,10 @@ const Checkout: React.FC = () => {
                  if (existingRes) {
                      await db.reservations.update({ 
                          ...existingRes, 
-                         clientId: client?.id || null, // Se não tem cliente, vincula a nulo (Reserva Avulsa)
+                         clientId: client?.id || null,
                          status: finalStatus, 
                          paymentStatus: paymentStatus, 
+                         paymentMethod: finalMethod,
                          payOnSite: isPayOnSite, 
                          comandaId: comandaInput 
                      }, currentUser?.id);
@@ -135,7 +135,7 @@ const Checkout: React.FC = () => {
             const resId = uuidv4();
             const newRes: Reservation = {
                 id: resId, 
-                clientId: client?.id || '', // Pode ser vazio/nulo para reservas de balcão
+                clientId: client?.id || '', 
                 clientName: reservationData.name || 'Cliente Avulso', 
                 date: reservationData.date, 
                 time: reservationData.time,
@@ -145,7 +145,8 @@ const Checkout: React.FC = () => {
                 totalValue: reservationData.totalValue, 
                 eventType: reservationData.type as EventType, 
                 status: finalStatus,
-                paymentStatus: paymentStatus, 
+                paymentStatus: paymentStatus,
+                paymentMethod: finalMethod,
                 createdAt: new Date().toISOString(), 
                 payOnSite: isPayOnSite, 
                 comandaId: comandaInput
@@ -157,7 +158,6 @@ const Checkout: React.FC = () => {
         
         setTrackedReservationIds(currentTrackedIds);
 
-        // 5. Fluxo de Saída
         if (mode === 'CLIENT_ONLINE' && settings?.onlinePaymentEnabled) {
              const checkoutUrl = await Integrations.createMercadoPagoPreference({ id: firstReservationId }, settings);
              if (checkoutUrl) { 

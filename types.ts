@@ -119,6 +119,7 @@ export interface Reservation {
   observations?: string;
   status: ReservationStatus;
   paymentStatus: PaymentStatus;
+  paymentMethod?: string;
   createdAt: string;
   lanes?: number[]; 
   guests?: Guest[];
@@ -131,7 +132,7 @@ export interface Reservation {
   comandaId?: string;
   createdBy?: string;
   lanesAssigned?: number[];
-  rating?: number; // Adicionado para controle local
+  rating?: number;
 }
 
 export interface FunnelCard {

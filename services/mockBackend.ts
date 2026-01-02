@@ -4,12 +4,8 @@ import { supabase } from './supabaseClient';
 import { INITIAL_SETTINGS } from '../constants';
 import { v4 as uuidv4 } from 'uuid';
 
-// Identificador único real extraído do seu banco de dados
 const SETTINGS_ID = 'e7a04692-b6ea-4827-afca-53886112938c';
 
-/**
- * Limpa e normaliza o telefone.
- */
 export const cleanPhone = (phone: string | null | undefined): string | null => {
   if (!phone) return null;
   const cleaned = phone.replace(/\D/g, '');
@@ -360,6 +356,7 @@ export const db = {
             observations: r.observations, 
             status: r.status as ReservationStatus, 
             paymentStatus: r.payment_status as PaymentStatus, 
+            paymentMethod: r.payment_method,
             createdAt: r.created_at, 
             guests: r.guests || [], 
             lanes: r.lanes || [],
@@ -367,7 +364,8 @@ export const db = {
             noShowIds: r.no_show_ids || [],
             hasTableReservation: r.has_table_reservation, 
             birthdayName: r.birthday_name, 
-            tableSeatCount: r.tableSeatCount,
+            // Fix: Map database column table_seat_count to tableSeatCount
+            tableSeatCount: r.table_seat_count,
             payOnSite: r.pay_on_site, 
             comandaId: r.comanda_id, 
             createdBy: r.created_by, 
@@ -379,6 +377,7 @@ export const db = {
         id: res.id, client_id: res.clientId || null, client_name: res.clientName, date: res.date, time: res.time,
         people_count: res.peopleCount, lane_count: res.laneCount, duration: res.duration, total_value: res.totalValue,
         event_type: res.eventType, observations: res.observations, status: res.status, payment_status: res.paymentStatus,
+        payment_method: res.paymentMethod,
         created_at: res.createdAt, has_table_reservation: res.hasTableReservation, birthday_name: res.birthdayName,
         table_seat_count: res.tableSeatCount, created_by: createdByUserId || null,
         pay_on_site: res.payOnSite || false, comanda_id: res.comandaId || null
@@ -386,11 +385,13 @@ export const db = {
       if (error) throw error;
       return res;
     },
+    // Fix: correct property names for Reservation object (noShowIds, tableSeatCount)
     update: async (res: Reservation, updatedByUserId?: string, actionDetail?: string) => {
       const { error } = await supabase.from('reservas').update({
         date: res.date, time: res.time, people_count: res.peopleCount, lane_count: res.laneCount, duration: res.duration,
         total_value: res.totalValue, event_type: res.eventType, observations: res.observations, status: res.status,
-        payment_status: res.paymentStatus, checked_in_ids: res.checkedInIds || [], 
+        payment_status: res.paymentStatus, payment_method: res.paymentMethod,
+        checked_in_ids: res.checkedInIds || [], 
         no_show_ids: res.noShowIds || [], has_table_reservation: res.hasTableReservation, 
         table_seat_count: res.tableSeatCount, pistas_usadas: res.lanesAssigned,
         pay_on_site: res.payOnSite, comanda_id: res.comandaId
@@ -426,6 +427,7 @@ export const db = {
         phone: data.phone || INITIAL_SETTINGS.phone,
         whatsappLink: data.whatsapp_link || INITIAL_SETTINGS.whatsappLink || '',
         logoUrl: data.logo_url || INITIAL_SETTINGS.logoUrl || '',
+        // Fix property name in settings.get from active_lanes to activeLanes to match AppSettings interface
         activeLanes: data.active_lanes !== null && data.active_lanes !== undefined ? data.active_lanes : INITIAL_SETTINGS.activeLanes,
         weekdayPrice: data.weekday_price !== null && data.weekday_price !== undefined ? data.weekday_price : INITIAL_SETTINGS.weekdayPrice,
         weekendPrice: data.weekend_price !== null && data.weekend_price !== undefined ? data.weekend_price : INITIAL_SETTINGS.weekendPrice,
@@ -436,7 +438,6 @@ export const db = {
       };
     },
     saveGeneral: async (s: AppSettings) => {
-      // Usamos update direto em vez de upsert para evitar erro de constraint se o ID não for PK explícita
       const { error } = await supabase.from('configuracoes').update({
         establishment_name: s.establishmentName, 
         address: s.address, 

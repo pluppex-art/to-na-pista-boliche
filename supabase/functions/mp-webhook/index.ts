@@ -38,19 +38,18 @@ Deno.serve(async (req: Request) => {
 
     // Se for uma notificação de teste do Mercado Pago (IDs genéricos)
     if (!resourceId || resourceId === "123456" || resourceId === "123456789") {
-        console.log(`[WEBHOOK] Notificação de teste recebida (ID: ${resourceId}). Ignorando com sucesso.`);
+        console.log(`[WEBHOOK] Notificação de teste recebida (ID: ${resourceId}). Ignorando.`);
         return new Response("Test OK", { status: 200 });
     }
 
-    // Só processamos se o tópico for 'payment'
+    // Só processamos se o tópico for relacionado a pagamento
     const finalTopic = topic || body?.type || body?.topic;
     if (finalTopic && finalTopic !== 'payment' && finalTopic !== 'payment.created' && finalTopic !== 'payment.updated') {
-        console.log(`[WEBHOOK] Tópico irrelevante (${finalTopic}). Ignorando.`);
         return new Response("Topic ignored", { status: 200 });
     }
 
     // 3. Consultar o status REAL no Mercado Pago
-    console.log(`[WEBHOOK] Consultando pagamento ${resourceId} no MP...`);
+    console.log(`[WEBHOOK] Consultando pagamento ${resourceId}...`);
     
     const mpResponse = await fetch(`https://api.mercadopago.com/v1/payments/${resourceId}`, {
       headers: { 
@@ -60,37 +59,46 @@ Deno.serve(async (req: Request) => {
     });
 
     if (!mpResponse.ok) {
-        const errData = await mpResponse.json();
-        // Se for 404, o MP enviou um ID que ele mesmo não reconhece (comum em testes de dashboard)
-        if (mpResponse.status === 404) {
-            console.log(`[WEBHOOK] Pagamento ${resourceId} não encontrado no MP (Pode ser um teste). Finalizando.`);
-        } else {
-            console.error(`[WEBHOOK] Erro na API do MP:`, JSON.stringify(errData));
-        }
+        if (mpResponse.status === 404) console.log(`[WEBHOOK] Pagamento ${resourceId} não encontrado (teste?).`);
         return new Response("Done", { status: 200 });
     }
 
     const payment = await mpResponse.json();
     const status = payment.status; 
     const reservationId = payment.external_reference;
+    
+    // --- LÓGICA DE IDENTIFICAÇÃO DO MEIO ---
+    const mpPaymentType = payment.payment_type_id; // credit_card, debit_card, bank_transfer, ticket
+    let finalMethod = 'ONLINE';
 
-    console.log(`[WEBHOOK] Resultado MP -> ID: ${resourceId} | Status: ${status} | Ref: ${reservationId}`);
+    if (mpPaymentType === 'bank_transfer') finalMethod = 'PIX';
+    else if (mpPaymentType === 'credit_card') finalMethod = 'CREDITO';
+    else if (mpPaymentType === 'debit_card') finalMethod = 'DEBITO';
+
+    console.log(`[WEBHOOK] Resultado MP -> ID: ${resourceId} | Status: ${status} | Meio: ${finalMethod} | Ref: ${reservationId}`);
 
     // 4. Se aprovado, atualiza a reserva
     if (reservationId && status === 'approved') {
         // Verifica se a reserva já não está paga para evitar processamento duplicado
-        const { data: currentRes } = await supabaseAdmin.from('reservas').select('payment_status').eq('id', reservationId).maybeSingle();
+        const { data: currentRes } = await supabaseAdmin
+            .from('reservas')
+            .select('payment_status')
+            .eq('id', reservationId)
+            .maybeSingle();
         
         if (currentRes && currentRes.payment_status === 'Pago') {
-            console.log(`[WEBHOOK] Reserva ${reservationId} já consta como Paga. Nada a fazer.`);
+            console.log(`[WEBHOOK] Reserva ${reservationId} já está paga. Ignorando.`);
         } else {
-            console.log(`[WEBHOOK] Pagamento Aprovado! Confirmando reserva ${reservationId}`);
             await supabaseAdmin
                 .from('reservas')
-                .update({ status: 'Confirmada', payment_status: 'Pago' })
+                .update({ 
+                    status: 'Confirmada', 
+                    payment_status: 'Pago',
+                    payment_method: finalMethod // SALVA O MEIO ESPECÍFICO AQUI
+                })
                 .eq('id', reservationId);
             
-            console.log("[WEBHOOK] Reserva atualizada com sucesso.");
+            console.log("[WEBHOOK] Reserva confirmada com sucesso.");
         }
     }
 
