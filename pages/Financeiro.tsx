@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { db } from '../services/mockBackend';
 import { Reservation, ReservationStatus, AuditLog, User, PaymentStatus, EventType } from '../types';
-import { Loader2, DollarSign, TrendingUp, Users, Calendar, AlertCircle, Shield, History, Calculator, Percent, CalendarRange, ListChecks, ChevronDown, Clock, PieChart as PieIcon, Tag, X, FileText, Ban, CreditCard, Filter } from 'lucide-react';
+import { Loader2, DollarSign, TrendingUp, Users, Calendar, AlertCircle, Shield, History, Calculator, Percent, CalendarRange, ListChecks, ChevronDown, Clock, PieChart as PieIcon, Tag, X, FileText, Ban, CreditCard, Filter, Monitor, UserCheck } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts';
 import { supabase } from '../services/supabaseClient';
 
@@ -16,13 +16,12 @@ const DATE_PRESETS = [
     { id: 'YEAR', label: 'ANO' }
 ];
 
-// Mapeamento de cores por tipo de evento
 const EVENT_TYPE_COLORS: Record<string, string> = {
-    [EventType.JOGO_NORMAL]: '#3b82f6', // Azul Neon
-    [EventType.ANIVERSARIO]: '#f97316', // Laranja
-    [EventType.EMPRESA]: '#a855f7',    // Roxo
-    [EventType.FAMILIA]: '#22c55e',    // Verde
-    [EventType.OUTRO]: '#64748b'       // Cinza
+    [EventType.JOGO_NORMAL]: '#3b82f6', 
+    [EventType.ANIVERSARIO]: '#f97316', 
+    [EventType.EMPRESA]: '#a855f7',    
+    [EventType.FAMILIA]: '#22c55e',    
+    [EventType.OUTRO]: '#64748b'       
 };
 
 const Financeiro: React.FC = () => {
@@ -70,7 +69,8 @@ const Financeiro: React.FC = () => {
         const all = await db.reservations.getByDateRange(dateRange.start, dateRange.end);
         setRawReservations(all);
         setReservations(all.filter(r => r.status !== ReservationStatus.CANCELADA));
-        setAllUsers(await db.users.getAll());
+        const users = await db.users.getAll();
+        setAllUsers(users);
         await refreshAuditLogs();
     } finally {
         if (!isBackground) setLoading(false);
@@ -88,7 +88,6 @@ const Financeiro: React.FC = () => {
       setAuditLogs(logs);
   };
 
-  // REALTIME ATIVADO
   useEffect(() => {
     refreshData();
     const channel = supabase.channel('financeiro-realtime-sync')
@@ -181,6 +180,23 @@ const Financeiro: React.FC = () => {
   });
   const revenueByMethodData = Array.from(revenueByMethodMap.entries()).map(([name, value]) => ({ name, value }));
 
+  const revenueBySourceData = useMemo(() => {
+    const sourceMap = new Map<string, number>();
+    
+    realizedReservations.forEach(r => {
+        let sourceName = "SITE (Venda Direta)";
+        if (r.createdBy) {
+            const user = allUsers.find(u => u.id === r.createdBy);
+            sourceName = user ? user.name.toUpperCase() : "EQUIPE (Geral)";
+        }
+        sourceMap.set(sourceName, (sourceMap.get(sourceName) || 0) + r.totalValue);
+    });
+
+    return Array.from(sourceMap.entries())
+        .map(([name, value]) => ({ name, value }))
+        .sort((a, b) => b.value - a.value);
+  }, [realizedReservations, allUsers]);
+
   const hoursMap = new Array(24).fill(0);
   realizedReservations.forEach(r => {
       const startH = parseInt(r.time.split(':')[0]);
@@ -255,6 +271,45 @@ const Financeiro: React.FC = () => {
                     <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg"><h3 className="text-lg font-black text-white mb-4 flex items-center gap-2 uppercase tracking-tighter"><PieIcon size={20} className="text-neon-orange"/> Receita por Meio de Pagamento</h3><div className="h-80 w-full"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={revenueByMethodData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value" stroke="none">{revenueByMethodData.map((e, i) => (<Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]}/>))}</Pie><Tooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontWeight: 'bold'}} itemStyle={{color: '#fff'}} labelStyle={{color: '#fff'}} formatter={(v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/><Legend verticalAlign="bottom" height={36} wrapperStyle={{fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase'}}/></PieChart></ResponsiveContainer></div></div>
                     
                     <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg"><h3 className="text-lg font-black text-white mb-4 flex items-center gap-2 uppercase tracking-tighter"><Tag size={20} className="text-neon-blue"/> Receita por Tipo de Reserva</h3><div className="h-80 w-full"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={revenueByTypeData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value" stroke="none">{revenueByTypeData.map((e, i) => (<Cell key={`cell-type-${i}`} fill={EVENT_TYPE_COLORS[e.name] || COLORS[i % COLORS.length]}/>))}</Pie><Tooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontWeight: 'bold'}} itemStyle={{color: '#fff'}} labelStyle={{color: '#fff'}} formatter={(v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/><Legend verticalAlign="bottom" height={36} wrapperStyle={{fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase'}}/></PieChart></ResponsiveContainer></div></div>
+
+                    {/* GRÁFICO: ORIGEM / CANAL DE VENDA - AJUSTADO PARA MOBILE */}
+                    <div className="lg:col-span-2 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
+                        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6">
+                            <h3 className="text-lg font-black text-white flex items-center gap-2 uppercase tracking-tighter"><Monitor size={20} className="text-neon-blue"/> Faturamento por Origem</h3>
+                            <div className="flex flex-wrap items-center gap-4 text-[9px] font-black uppercase tracking-widest border-t md:border-t-0 border-slate-700 pt-2 md:pt-0">
+                                <div className="flex items-center gap-1.5 text-blue-400"><div className="w-2 h-2 rounded-full bg-blue-500"></div> Venda Direta (Site)</div>
+                                <div className="flex items-center gap-1.5 text-purple-400"><div className="w-2 h-2 rounded-full bg-purple-500"></div> Membros Equipe</div>
+                            </div>
+                        </div>
+                        <div className="h-72 w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart layout="vertical" data={revenueBySourceData} margin={{ left: -10, right: 30, top: 10, bottom: 10 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={false} />
+                                    <XAxis type="number" stroke="#94a3b8" fontSize={10} tickFormatter={(v) => `R$ ${v/1000}k`} />
+                                    <YAxis 
+                                        dataKey="name" 
+                                        type="category" 
+                                        stroke="#fff" 
+                                        fontSize={9} 
+                                        width={100} 
+                                        tick={{fontWeight: 'black'}} 
+                                        tickFormatter={(val) => val.length > 15 ? val.substring(0, 12) + '...' : val}
+                                    />
+                                    <Tooltip 
+                                        contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px'}} 
+                                        itemStyle={{color: '#fff', fontSize: '12px'}} 
+                                        labelStyle={{color: '#3b82f6', fontWeight: 'black', marginBottom: '4px'}}
+                                        formatter={(v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} 
+                                    />
+                                    <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                                        {revenueBySourceData.map((entry, index) => (
+                                            <Cell key={`cell-source-${index}`} fill={entry.name.includes('SITE') ? '#3b82f6' : '#a855f7'} />
+                                        ))}
+                                    </Bar>
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
 
                     <div className="lg:col-span-2 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg"><h3 className="text-lg font-black text-white mb-6 flex items-center gap-2 uppercase tracking-tighter"><Clock size={20} className="text-neon-orange"/> Movimentação por Hora (Ocupação Pistas)</h3><div className="h-64 w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={peakHoursChartData}><CartesianGrid strokeDasharray="3 3" stroke="#334155"/><XAxis dataKey="hour" stroke="#94a3b8" fontSize={12} tick={{fontWeight: 'bold'}}/><YAxis stroke="#94a3b8" fontSize={12} tick={{fontWeight: 'bold'}}/><Tooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontWeight: 'bold'}} itemStyle={{color: '#fff'}} labelStyle={{color: '#fff'}} cursor={{fill: '#334155', opacity: 0.4}}/><Bar dataKey="count" name="Pistas Ocupadas" fill="#f97316" radius={[4, 4, 0, 0]}/></BarChart></ResponsiveContainer></div></div>
                 </div>
