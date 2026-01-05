@@ -181,44 +181,52 @@ const PublicBooking: React.FC = () => {
       if (errors[field]) setErrors(prev => ({ ...prev, [field]: false }));
   };
 
+  // MANIPULAÇÃO DE PESSOAS: Aumenta pistas se necessário
   const handlePeopleChange = (val: string) => {
       setPeopleInput(val); 
       if (val === '') return;
       let num = parseInt(val);
-      const maxAllowed = settings.activeLanes * 6;
+      const maxLanes = settings?.activeLanes || 6;
+      const absoluteMaxPeople = maxLanes * 6;
       
       if (!isNaN(num)) {
-          if (num > maxAllowed) num = maxAllowed;
-          const suggestedLanes = Math.ceil(num / 6);
+          if (num > absoluteMaxPeople) num = absoluteMaxPeople;
+          const requiredLanes = Math.ceil(num / 6);
+          
           setFormData(prev => {
               let newSeatCount = prev.tableSeatCount;
               let maxSeats = 25;
               if (num > 25) maxSeats = num;
               if (maxSeats > 36) maxSeats = 36;
               if (prev.tableSeatCount > maxSeats) newSeatCount = maxSeats;
-              return { ...prev, people: num, lanes: suggestedLanes, tableSeatCount: newSeatCount };
+
+              return { 
+                ...prev, 
+                people: num, 
+                lanes: requiredLanes, // Sincroniza pistas para cima
+                tableSeatCount: newSeatCount 
+              };
           });
-          setLanesInput(suggestedLanes.toString());
+          setLanesInput(requiredLanes.toString());
           setPeopleInput(num.toString());
       }
   };
 
   const handlePeopleBlur = () => {
       let num = parseInt(peopleInput);
-      const maxAllowed = settings.activeLanes * 6;
+      const maxLanes = settings?.activeLanes || 6;
+      const absoluteMaxPeople = maxLanes * 6;
+      
       if (isNaN(num) || num < 1) num = 1;
-      if (num > maxAllowed) { num = maxAllowed; alert(`Capacidade máxima do boliche é de ${maxAllowed} pessoas.`); }
+      if (num > absoluteMaxPeople) { 
+          num = absoluteMaxPeople; 
+          alert(`Capacidade máxima do boliche é de ${absoluteMaxPeople} pessoas.`); 
+      }
+      
+      const requiredLanes = Math.ceil(num / 6);
       setPeopleInput(num.toString());
-      const suggestedLanes = Math.ceil(num / 6);
-      setFormData(prev => {
-          let newSeatCount = prev.tableSeatCount;
-          let maxSeats = 25;
-          if (num > 25) maxSeats = num;
-          if (maxSeats > 36) maxSeats = 36;
-          if (prev.tableSeatCount > maxSeats) newSeatCount = maxSeats;
-          return { ...prev, people: num, lanes: suggestedLanes, tableSeatCount: newSeatCount };
-      });
-      setLanesInput(suggestedLanes.toString());
+      setLanesInput(requiredLanes.toString());
+      setFormData(prev => ({ ...prev, people: num, lanes: requiredLanes }));
   };
 
   const handleSeatChange = (val: string) => {
@@ -230,25 +238,56 @@ const PublicBooking: React.FC = () => {
 
   const handleSeatBlur = () => { };
 
+  // MANIPULAÇÃO DE PISTAS: Diminui pessoas se necessário
   const handleLanesChange = (val: string) => {
       setLanesInput(val);
       if (val === '') return;
-      let num = parseInt(val);
-      if (!isNaN(num)) { 
-          if (num > settings.activeLanes) num = settings.activeLanes;
-          setFormData(prev => ({ ...prev, lanes: num })); 
-          setLanesInput(num.toString());
-          setSelectedTimes([]); 
+      let numLanes = parseInt(val);
+      const maxLanes = settings?.activeLanes || 6;
+
+      if (!isNaN(numLanes)) { 
+          if (numLanes > maxLanes) numLanes = maxLanes;
+          if (numLanes < 1) numLanes = 1;
+
+          const maxPeopleForTheseLanes = numLanes * 6;
+
+          setFormData(prev => {
+              // Se as pessoas atuais excedem a nova capacidade de pistas, reduz pessoas
+              const adjustedPeople = prev.people > maxPeopleForTheseLanes ? maxPeopleForTheseLanes : prev.people;
+              
+              if (adjustedPeople !== prev.people) {
+                  setPeopleInput(adjustedPeople.toString());
+              }
+
+              return { 
+                ...prev, 
+                lanes: numLanes,
+                people: adjustedPeople // Sincroniza pessoas para baixo
+              };
+          });
+          
+          setLanesInput(numLanes.toString());
+          setSelectedTimes([]); // Limpa horários pois a ocupação mudou
       }
   };
 
   const handleLanesBlur = () => {
-      let num = parseInt(lanesInput);
-      if (isNaN(num) || num < 1) num = 1;
-      if (settings && num > settings.activeLanes) num = settings.activeLanes;
-      setLanesInput(num.toString());
-      setFormData(prev => ({ ...prev, lanes: num }));
-      setSelectedTimes([]);
+      let numLanes = parseInt(lanesInput);
+      const maxLanes = settings?.activeLanes || 6;
+      
+      if (isNaN(numLanes) || numLanes < 1) numLanes = 1;
+      if (numLanes > maxLanes) numLanes = maxLanes;
+      
+      const maxPeopleForTheseLanes = numLanes * 6;
+      
+      setLanesInput(numLanes.toString());
+      setFormData(prev => {
+          const adjustedPeople = prev.people > maxPeopleForTheseLanes ? maxPeopleForTheseLanes : prev.people;
+          if (adjustedPeople !== prev.people) {
+              setPeopleInput(adjustedPeople.toString());
+          }
+          return { ...prev, lanes: numLanes, people: adjustedPeople };
+      });
   };
 
   const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -738,14 +777,14 @@ const PublicBooking: React.FC = () => {
                             </div>
                             <label className="relative inline-flex items-center cursor-pointer">
                                 <input type="checkbox" className="sr-only peer" checked={isManualMode} onChange={(e) => setIsManualMode(e.target.checked)}/>
-                                <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-neon-blue"></div>
+                                <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 md:after:h-5 md:after:w-5 after:transition-all peer-checked:bg-neon-blue"></div>
                             </label>
                         </div>
                     )}
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Pessoas</label><input type="number" min="1" max={settings.activeLanes * 6} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white" value={peopleInput} onChange={e => handlePeopleChange(e.target.value)} onBlur={handlePeopleBlur} /></div>
-                        <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Pistas</label><input type="number" min="1" max={settings.activeLanes} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white" value={lanesInput} onChange={e => handleLanesChange(e.target.value)} onBlur={handleLanesBlur} /></div>
+                        <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Pessoas</label><input type="number" min="1" max={(settings?.activeLanes || 6) * 6} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white" value={peopleInput} onChange={e => handlePeopleChange(e.target.value)} onBlur={handlePeopleBlur} /></div>
+                        <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Pistas</label><input type="number" min="1" max={settings?.activeLanes || 6} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white" value={lanesInput} onChange={e => handleLanesChange(e.target.value)} onBlur={handleLanesBlur} /></div>
                         <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Tipo de Evento</label><select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white" value={formData.type} onChange={e => handleInputChange('type', e.target.value)}>{EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
                     </div>
 
