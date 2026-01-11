@@ -106,7 +106,7 @@ const Agenda: React.FC = () => {
 
   useEffect(() => { 
     loadData();
-    const channel = supabase.channel(`agenda-sync-v26`)
+    const channel = supabase.channel(`agenda-sync-v29`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => loadData(true))
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -118,14 +118,12 @@ const Agenda: React.FC = () => {
       const todayDate = new Date(todayStr + 'T00:00:00');
 
       allReservationsForAlerts.forEach(res => {
-          // Ignora canceladas ou já pagas
           if (!res || res.status === ReservationStatus.CANCELADA || res.paymentStatus === PaymentStatus.PAGO) return;
 
           // 1. RESERVAS DO SITE AGUARDANDO PAGAMENTO (30 MINUTOS)
           if (res.status === ReservationStatus.PENDENTE && !res.payOnSite && res.createdAt) {
               const created = new Date(res.createdAt).getTime();
               const diffMinutes = (now.getTime() - created) / 60000;
-              
               if (diffMinutes >= 0 && diffMinutes < 30) {
                   const isUrgent = diffMinutes >= 20;
                   globalAlerts.push({ 
@@ -133,36 +131,32 @@ const Agenda: React.FC = () => {
                     message: `SITE: Pagamento de ${res.clientName} expira em ${Math.ceil(30 - diffMinutes)}min`, 
                     res, 
                     icon: <CreditCard size={20} className="animate-pulse"/>,
-                    color: isUrgent 
-                        ? 'border-red-500 bg-red-950/60 text-red-100 shadow-red-500/20' 
-                        : 'border-orange-500 bg-orange-950/40 text-orange-100 shadow-orange-500/10' 
+                    color: isUrgent ? 'border-red-500 bg-red-950/60 text-red-100 shadow-red-500/20' : 'border-orange-500 bg-orange-950/40 text-orange-100 shadow-orange-500/10' 
                   });
               }
               return; 
           }
 
-          // 2. COMANDAS E PAGAMENTOS NO LOCAL
+          // 2. COMANDAS E DÉBITOS
           const resDate = new Date(res.date + 'T00:00:00');
-          
           if (resDate < todayDate) {
-              // PENDÊNCIA PASSADA (Vermelho Crítico)
+              // PENDÊNCIA PASSADA
               const diffTime = Math.abs(todayDate.getTime() - resDate.getTime());
               const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
               globalAlerts.push({
                   type: 'PENDENCIA_PASSADA',
-                  message: `DÉBITO (${diffDays}d atrás): ${res.clientName} - ${res.date.split('-').reverse().join('/')}`,
+                  message: `PENDÊNCIA PASSADA (${diffDays}d atrás): ${res.clientName} - ${res.date.split('-').reverse().join('/')}`,
                   res,
                   icon: <AlertTriangle size={20} />,
                   color: 'border-red-600 bg-red-900/60 text-white shadow-xl animate-pulse'
               });
           } else if (res.date === todayStr) {
-              // RESERVA DE HOJE (COMANDA DE HOJE)
+              // COMANDA DE HOJE
               const startTime = new Date(res.date + 'T' + (res.time.length === 5 ? res.time : '0' + res.time));
               const endTime = new Date(startTime.getTime() + (res.duration * 60 * 60 * 1000));
 
               if (res.status === ReservationStatus.CHECK_IN) {
                   if (now >= endTime) {
-                      // PARTIDA ENCERRADA
                       globalAlerts.push({
                           type: 'PARTIDA_ENCERRADA',
                           message: `FINALIZADO: ${res.clientName} encerrou às ${res.time} + ${res.duration}h. DAR BAIXA!`,
@@ -171,7 +165,6 @@ const Agenda: React.FC = () => {
                           color: 'border-blue-500 bg-blue-900/40 text-white shadow-lg'
                       });
                   } else {
-                      // COMANDA EM CURSO (EM JOGO)
                       globalAlerts.push({
                           type: 'COMANDA_HOJE',
                           message: `EM JOGO: ${res.clientName} (Pista ${res.lanesAssigned?.join(',') || 'S/N'}) - Pagamento pendente`,
@@ -181,33 +174,20 @@ const Agenda: React.FC = () => {
                       });
                   }
               } else {
-                  // AGUARDANDO INÍCIO (Caso Lara Lua Parreira)
                   globalAlerts.push({ 
-                    type: 'AGUARDANDO_INICIO', 
+                    type: 'COMANDA_HOJE', 
                     message: `COMANDA HOJE: ${res.clientName} às ${res.time} - Pagamento no Local pendente.`, 
                     res, 
                     icon: <Timer size={20} className="text-yellow-500" />,
                     color: 'border-yellow-600/40 bg-yellow-950/20 text-yellow-100' 
                   });
-
-                  // ALERTA DE ATRASO
-                  const diffStartMinutes = (now.getTime() - startTime.getTime()) / 60000;
-                  if (diffStartMinutes >= 20 && res.status === ReservationStatus.CONFIRMADA) {
-                      globalAlerts.push({ 
-                        type: 'ATRASO_CHECKIN', 
-                        message: `ATRASO CHECK-IN: ${res.clientName} está ${Math.ceil(diffStartMinutes)}min atrasado.`, 
-                        res, 
-                        icon: <UserCheck size={20} />,
-                        color: 'border-purple-500 bg-purple-950/40 text-purple-100' 
-                      });
-                  }
               }
           }
       });
       
-      // Ordenação: Pendência Passada > Partida Encerrada > Site Urgente > Atraso > Aguardando > Comanda Hoje
+      // Ordenação: Pendência Passada > Partida Encerrada > Site Urgente > Comanda Hoje
       return globalAlerts.sort((a,b) => {
-          const order = { 'PENDENCIA_PASSADA': 0, 'PARTIDA_ENCERRADA': 1, 'SITE_URGENTE': 2, 'ATRASO_CHECKIN': 3, 'AGUARDANDO_INICIO': 4, 'COMANDA_HOJE': 5 };
+          const order = { 'PENDENCIA_PASSADA': 0, 'PARTIDA_ENCERRADA': 1, 'SITE_URGENTE': 2, 'COMANDA_HOJE': 3 };
           return order[a.type] - order[b.type];
       });
   }, [allReservationsForAlerts, now]);
@@ -258,12 +238,6 @@ const Agenda: React.FC = () => {
             reservationIds: [res.id]
         } 
     });
-  };
-
-  const handleNewReservationForClient = () => {
-    if (!selectedRes) return;
-    const clientData = { id: selectedRes.clientId, name: selectedRes.clientName, phone: clientPhones[selectedRes.clientId] || '' };
-    navigate('/agendamento', { state: { prefilledClient: clientData } });
   };
 
   const saveLaneSelection = async () => {
@@ -344,12 +318,6 @@ const Agenda: React.FC = () => {
                               {(alert.type !== 'ATRASO_CHECKIN') && (
                                   <button onClick={() => handleQuickCheckout(alert.res)} className="flex-1 sm:flex-none bg-white text-slate-900 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2 transition active:scale-95 shadow-xl border border-white/20">
                                       <DollarSign size={16}/> Receber / Baixa
-                                  </button>
-                              )}
-                              
-                              {alert.type === 'ATRASO_CHECKIN' && (
-                                  <button onClick={() => handleGranularStatus(null, alert.res, `${alert.res.id}_${alert.res.time}_1`, 'CHECK_IN')} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition shadow-xl active:scale-95">
-                                      <UserCheck size={14}/> Fazer Check-in
                                   </button>
                               )}
                           </div>
@@ -459,7 +427,7 @@ const Agenda: React.FC = () => {
           canCreate={canCreateReservation}
           onClose={() => setSelectedRes(null)}
           onEdit={() => setIsEditMode(true)}
-          onNewBooking={handleNewReservationForClient}
+          onNewBooking={() => navigate('/agendamento', { state: { prefilledClient: { id: selectedRes.clientId, name: selectedRes.clientName, phone: clientPhones[selectedRes.clientId] || '' } } })}
           onStatusChange={handleStatusChange}
           onCancel={() => setIsCancelling(true)}
         />

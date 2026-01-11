@@ -16,7 +16,9 @@ export enum ReservationStatus {
 export enum PaymentStatus {
   PENDENTE = 'Pendente',
   PAGO = 'Pago',
-  REEMBOLSADO = 'Reembolsado'
+  REEMBOLSADO = 'Reembolsado',
+  // Fix: Added PENDENTE_ESTORNO to the enum to match values used in the system for failed automatic refunds
+  PENDENTE_ESTORNO = 'Pendente Estorno'
 }
 
 export enum FunnelStage {
