@@ -6,7 +6,7 @@ import { Reservation, ReservationStatus, EventType, UserRole, PaymentStatus } fr
 import { useApp } from '../contexts/AppContext'; 
 import { generateDailySlots, checkHourCapacity, getDayConfiguration } from '../utils/availability'; 
 import { 
-  ChevronLeft, ChevronRight, Loader2, Plus, X, Ban, AlertTriangle, LayoutGrid, Check, MessageCircle, CreditCard, Clock, UserCheck, DollarSign, CalendarOff, Moon
+  ChevronLeft, ChevronRight, Loader2, Plus, X, Ban, AlertTriangle, LayoutGrid, Check, MessageCircle, CreditCard, Clock, UserCheck, DollarSign, CalendarOff, Moon, AlertCircle, PlayCircle, Timer
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -17,10 +17,11 @@ import { InfoModal } from '../components/Agenda/InfoModal';
 import { EditModal } from '../components/Agenda/EditModal';
 
 interface GlobalAlert {
-    type: 'PENDING_URGENT' | 'LATE_ACTION' | 'OPEN_TABS';
+    type: 'SITE_URGENTE' | 'ATRASO_CHECKIN' | 'AGUARDANDO_INICIO' | 'PENDENCIA_PASSADA' | 'PARTIDA_ENCERRADA' | 'COMANDA_HOJE';
     message: string;
     res: Reservation;
     color: string;
+    icon: React.ReactNode;
 }
 
 const Agenda: React.FC = () => {
@@ -68,31 +69,6 @@ const Agenda: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    const checkExpirations = async () => {
-        const expired = allReservationsForAlerts.filter(res => 
-            res.status === ReservationStatus.PENDENTE && 
-            !res.payOnSite && 
-            res.createdAt && 
-            (now.getTime() - new Date(res.createdAt).getTime()) / 60000 >= 30
-        );
-
-        if (expired.length > 0) {
-            for (const res of expired) {
-                await db.reservations.update({
-                    ...res,
-                    status: ReservationStatus.CANCELADA,
-                    observations: (res.observations || '') + ' [Cancelamento Automático: Expiração de 30min]'
-                }, 'SYSTEM', 'Reserva expirou sem pagamento');
-            }
-        }
-    };
-    
-    if (allReservationsForAlerts.length > 0) {
-        checkExpirations();
-    }
-  }, [allReservationsForAlerts, now]);
-
   const loadData = async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
@@ -101,14 +77,15 @@ const Agenda: React.FC = () => {
           db.clients.getAll()
       ]);
 
-      setAllReservationsForAlerts(allReservations);
+      const validReservations = (allReservations || []).filter(r => r && r.id);
+      setAllReservationsForAlerts(validReservations);
 
       const phoneMap: Record<string, string> = {};
-      allClients.forEach(c => { phoneMap[c.id] = c.phone; });
+      (allClients || []).forEach(c => { if(c && c.id) phoneMap[c.id] = c.phone; });
       setClientPhones(phoneMap);
 
-      const dayReservations = allReservations
-        .filter(r => r && r.date === selectedDate && r.status !== ReservationStatus.CANCELADA)
+      const dayReservations = validReservations
+        .filter(r => r.date === selectedDate && r.status !== ReservationStatus.CANCELADA)
         .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
       setReservations(dayReservations);
@@ -129,7 +106,7 @@ const Agenda: React.FC = () => {
 
   useEffect(() => { 
     loadData();
-    const channel = supabase.channel(`agenda-sync-global`)
+    const channel = supabase.channel(`agenda-sync-v26`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => loadData(true))
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -138,59 +115,101 @@ const Agenda: React.FC = () => {
   const alerts = useMemo(() => {
       const globalAlerts: GlobalAlert[] = [];
       const todayStr = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
+      const todayDate = new Date(todayStr + 'T00:00:00');
 
       allReservationsForAlerts.forEach(res => {
-          if (!res || res.status === ReservationStatus.CANCELADA) return;
+          // Ignora canceladas ou já pagas
+          if (!res || res.status === ReservationStatus.CANCELADA || res.paymentStatus === PaymentStatus.PAGO) return;
 
-          // 1. Reservas Pendentes (Site) prestes a expirar - Somente de Hoje para não poluir
-          if (res.date === todayStr && res.status === ReservationStatus.PENDENTE && !res.payOnSite && res.createdAt) {
+          // 1. RESERVAS DO SITE AGUARDANDO PAGAMENTO (30 MINUTOS)
+          if (res.status === ReservationStatus.PENDENTE && !res.payOnSite && res.createdAt) {
               const created = new Date(res.createdAt).getTime();
               const diffMinutes = (now.getTime() - created) / 60000;
-              if (diffMinutes >= 20 && diffMinutes < 30) {
-                  globalAlerts.push({ 
-                    type: 'PENDING_URGENT', 
-                    message: `Reserva de ${res.clientName} expira em ${Math.ceil(30 - diffMinutes)}min!`, 
-                    res, 
-                    color: 'border-orange-500 bg-orange-950/40 text-orange-100 shadow-orange-500/10' 
-                  });
-              }
-          }
-
-          // 2. Atrasos de Check-in (Retroativo: Mostra até que seja feito o check-in ou cancelada)
-          if (res.status === ReservationStatus.CONFIRMADA) {
-              const [h, m] = (res.time || "00:00").split(':').map(Number);
-              const startTime = new Date(res.date + 'T' + (res.time.length === 5 ? res.time : '0' + res.time));
-              const diffMinutes = (now.getTime() - startTime.getTime()) / 60000;
               
-              if (diffMinutes >= 20) {
-                  const dateLabel = res.date === todayStr ? 'Hoje' : res.date.split('-').reverse().join('/');
+              if (diffMinutes >= 0 && diffMinutes < 30) {
+                  const isUrgent = diffMinutes >= 20;
                   globalAlerts.push({ 
-                    type: 'LATE_ACTION', 
-                    message: `[${dateLabel}] ${res.clientName} está ${Math.ceil(diffMinutes)}min atrasado.`, 
+                    type: 'SITE_URGENTE', 
+                    message: `SITE: Pagamento de ${res.clientName} expira em ${Math.ceil(30 - diffMinutes)}min`, 
                     res, 
-                    color: 'border-blue-500 bg-blue-950/40 text-blue-100 shadow-blue-500/10' 
+                    icon: <CreditCard size={20} className="animate-pulse"/>,
+                    color: isUrgent 
+                        ? 'border-red-500 bg-red-950/60 text-red-100 shadow-red-500/20' 
+                        : 'border-orange-500 bg-orange-950/40 text-orange-100 shadow-orange-500/10' 
                   });
               }
+              return; 
           }
 
-          // 3. Comandas em Aberto (Retroativo: Mostra eventos locais pendentes de pagamento)
-          if (res.payOnSite && res.paymentStatus === PaymentStatus.PENDENTE) {
-              // Só avisa se o horário de início já passou
+          // 2. COMANDAS E PAGAMENTOS NO LOCAL
+          const resDate = new Date(res.date + 'T00:00:00');
+          
+          if (resDate < todayDate) {
+              // PENDÊNCIA PASSADA (Vermelho Crítico)
+              const diffTime = Math.abs(todayDate.getTime() - resDate.getTime());
+              const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+              globalAlerts.push({
+                  type: 'PENDENCIA_PASSADA',
+                  message: `DÉBITO (${diffDays}d atrás): ${res.clientName} - ${res.date.split('-').reverse().join('/')}`,
+                  res,
+                  icon: <AlertTriangle size={20} />,
+                  color: 'border-red-600 bg-red-900/60 text-white shadow-xl animate-pulse'
+              });
+          } else if (res.date === todayStr) {
+              // RESERVA DE HOJE (COMANDA DE HOJE)
               const startTime = new Date(res.date + 'T' + (res.time.length === 5 ? res.time : '0' + res.time));
-              if (now > startTime) {
-                const dateLabel = res.date === todayStr ? 'Hoje' : res.date.split('-').reverse().join('/');
-                globalAlerts.push({ 
-                    type: 'OPEN_TABS', 
-                    message: `Comanda em aberto [${dateLabel}]: ${res.clientName} (${res.comandaId || 'S/N'})`, 
+              const endTime = new Date(startTime.getTime() + (res.duration * 60 * 60 * 1000));
+
+              if (res.status === ReservationStatus.CHECK_IN) {
+                  if (now >= endTime) {
+                      // PARTIDA ENCERRADA
+                      globalAlerts.push({
+                          type: 'PARTIDA_ENCERRADA',
+                          message: `FINALIZADO: ${res.clientName} encerrou às ${res.time} + ${res.duration}h. DAR BAIXA!`,
+                          res,
+                          icon: <DollarSign size={20} />,
+                          color: 'border-blue-500 bg-blue-900/40 text-white shadow-lg'
+                      });
+                  } else {
+                      // COMANDA EM CURSO (EM JOGO)
+                      globalAlerts.push({
+                          type: 'COMANDA_HOJE',
+                          message: `EM JOGO: ${res.clientName} (Pista ${res.lanesAssigned?.join(',') || 'S/N'}) - Pagamento pendente`,
+                          res,
+                          icon: <PlayCircle size={20} className="text-green-400" />,
+                          color: 'border-green-600/30 bg-slate-900/80 text-slate-200'
+                      });
+                  }
+              } else {
+                  // AGUARDANDO INÍCIO (Caso Lara Lua Parreira)
+                  globalAlerts.push({ 
+                    type: 'AGUARDANDO_INICIO', 
+                    message: `COMANDA HOJE: ${res.clientName} às ${res.time} - Pagamento no Local pendente.`, 
                     res, 
-                    color: 'border-red-500 bg-red-950/40 text-red-100 shadow-red-500/10' 
-                });
+                    icon: <Timer size={20} className="text-yellow-500" />,
+                    color: 'border-yellow-600/40 bg-yellow-950/20 text-yellow-100' 
+                  });
+
+                  // ALERTA DE ATRASO
+                  const diffStartMinutes = (now.getTime() - startTime.getTime()) / 60000;
+                  if (diffStartMinutes >= 20 && res.status === ReservationStatus.CONFIRMADA) {
+                      globalAlerts.push({ 
+                        type: 'ATRASO_CHECKIN', 
+                        message: `ATRASO CHECK-IN: ${res.clientName} está ${Math.ceil(diffStartMinutes)}min atrasado.`, 
+                        res, 
+                        icon: <UserCheck size={20} />,
+                        color: 'border-purple-500 bg-purple-950/40 text-purple-100' 
+                      });
+                  }
               }
           }
       });
       
-      // Ordena por data (mais antigas primeiro para priorizar o que ficou pra trás)
-      return globalAlerts.sort((a,b) => a.res.date.localeCompare(b.res.date));
+      // Ordenação: Pendência Passada > Partida Encerrada > Site Urgente > Atraso > Aguardando > Comanda Hoje
+      return globalAlerts.sort((a,b) => {
+          const order = { 'PENDENCIA_PASSADA': 0, 'PARTIDA_ENCERRADA': 1, 'SITE_URGENTE': 2, 'ATRASO_CHECKIN': 3, 'AGUARDANDO_INICIO': 4, 'COMANDA_HOJE': 5 };
+          return order[a.type] - order[b.type];
+      });
   }, [allReservationsForAlerts, now]);
 
   const handleGranularStatus = async (e: React.MouseEvent | null, res: Reservation, uniqueId: string, type: 'CHECK_IN' | 'NS') => {
@@ -226,15 +245,19 @@ const Agenda: React.FC = () => {
   const handleQuickCheckout = (res: Reservation) => {
     navigate('/checkout', { 
         state: { 
-            clientId: res.clientId, name: res.clientName, whatsapp: clientPhones[res.clientId] || '',
-            date: res.date, time: res.time, people: res.peopleCount, lanes: res.laneCount,
-            duration: res.duration, type: res.eventType, totalValue: res.totalValue, reservationIds: [res.id]
+            clientId: res.clientId, 
+            name: res.clientName, 
+            whatsapp: clientPhones[res.clientId] || '',
+            date: res.date, 
+            time: res.time, 
+            people: res.peopleCount, 
+            lanes: res.laneCount,
+            duration: res.duration, 
+            type: res.eventType, 
+            totalValue: res.totalValue, 
+            reservationIds: [res.id]
         } 
     });
-  };
-
-  const openWhatsApp = (phone: string, message: string) => {
-    window.open(`https://wa.me/55${phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
   const handleNewReservationForClient = () => {
@@ -303,39 +326,30 @@ const Agenda: React.FC = () => {
     <div className="flex flex-col h-full space-y-6 pb-20 md:pb-0">
       
       {alerts.length > 0 && (
-          <div className="space-y-2 sticky top-0 z-50 md:relative max-h-[300px] overflow-y-auto no-scrollbar">
+          <div className="space-y-2 sticky top-0 z-50 md:relative max-h-[400px] overflow-y-auto no-scrollbar pb-4">
               {alerts.map((alert, i) => (
                   <div key={`${alert.res.id}-${i}`} className={`p-4 rounded-2xl border shadow-2xl animate-fade-in transition-all backdrop-blur-md ${alert.color}`}>
                       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                          <div className="flex items-center gap-3 cursor-pointer group" onClick={() => { setSelectedRes(alert.res); setIsEditMode(false); }}>
-                              <AlertTriangle size={20} className="shrink-0 animate-pulse text-current" />
-                              <div>
-                                  <p className="text-[9px] font-black uppercase tracking-[0.2em] mb-1 opacity-60">{alert.type.replace('_', ' ')}</p>
-                                  <p className="text-sm font-bold group-hover:underline transition-all">{alert.message}</p>
+                          <div className="flex items-center gap-3 cursor-pointer group flex-1 min-w-0" onClick={() => { setSelectedRes(alert.res); setIsEditMode(false); }}>
+                              <div className="shrink-0">{alert.icon}</div>
+                              <div className="min-w-0 flex-1">
+                                  <p className="text-[9px] font-black uppercase tracking-[0.2em] mb-1 opacity-60">
+                                      {alert.type.replace('_', ' ')}
+                                  </p>
+                                  <p className="text-sm font-bold group-hover:underline transition-all truncate">{alert.message}</p>
                               </div>
                           </div>
                           
                           <div className="flex items-center gap-2 w-full sm:w-auto">
-                              {alert.type === 'PENDING_URGENT' && (
-                                  <>
-                                      <button onClick={() => openWhatsApp(clientPhones[alert.res.clientId] || '', `Olá ${alert.res.clientName}! Sua reserva expira em instantes.`)} className="flex-1 sm:flex-none bg-green-600 hover:bg-green-500 text-white px-3 py-2 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition active:scale-95">
-                                          <MessageCircle size={14}/> WhatsApp
-                                      </button>
-                                      <button onClick={() => handleQuickCheckout(alert.res)} className="flex-1 sm:flex-none bg-white text-orange-950 px-3 py-2 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition active:scale-95 shadow-lg">
-                                          <CreditCard size={14}/> Checkout
-                                      </button>
-                                  </>
-                              )}
-                              
-                              {alert.type === 'LATE_ACTION' && (
-                                  <button onClick={() => handleGranularStatus(null, alert.res, `${alert.res.id}_${alert.res.time}_1`, 'CHECK_IN')} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition shadow-xl active:scale-95">
-                                      <UserCheck size={14}/> Fazer Check-in
+                              {(alert.type !== 'ATRASO_CHECKIN') && (
+                                  <button onClick={() => handleQuickCheckout(alert.res)} className="flex-1 sm:flex-none bg-white text-slate-900 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2 transition active:scale-95 shadow-xl border border-white/20">
+                                      <DollarSign size={16}/> Receber / Baixa
                                   </button>
                               )}
-
-                              {alert.type === 'OPEN_TABS' && (
-                                  <button onClick={() => handleQuickCheckout(alert.res)} className="w-full sm:w-auto bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition shadow-xl active:scale-95">
-                                      <DollarSign size={14}/> Receber Comanda
+                              
+                              {alert.type === 'ATRASO_CHECKIN' && (
+                                  <button onClick={() => handleGranularStatus(null, alert.res, `${alert.res.id}_${alert.res.time}_1`, 'CHECK_IN')} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition shadow-xl active:scale-95">
+                                      <UserCheck size={14}/> Fazer Check-in
                                   </button>
                               )}
                           </div>
