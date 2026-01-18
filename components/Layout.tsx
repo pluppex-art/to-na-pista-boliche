@@ -35,13 +35,13 @@ const Layout = ({ children }: LayoutProps) => {
   const navItems = [
     { 
         path: '/agenda', 
-        label: 'Dashboard', 
+        label: 'Agenda', 
         icon: CalendarDays, 
         check: (u: User) => u.role === UserRole.ADMIN || u.perm_view_agenda 
     },
     { 
         path: '/financeiro', 
-        label: 'Financeiro', 
+        label: 'Dashboard', 
         icon: PieChart, 
         check: (u: User) => u.role === UserRole.ADMIN || u.perm_view_financial 
     },
@@ -53,7 +53,7 @@ const Layout = ({ children }: LayoutProps) => {
     },
     { 
         path: '/configuracoes', 
-        label: 'Config', 
+        label: 'Configuracoes', 
         icon: Settings, 
         check: (u: User) => u.role === UserRole.ADMIN 
     },

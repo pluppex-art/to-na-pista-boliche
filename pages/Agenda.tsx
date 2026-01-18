@@ -328,7 +328,7 @@ const Agenda: React.FC = () => {
       )}
 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-6">
-        <div><h1 className="text-3xl font-black text-white tracking-tight uppercase leading-none">Dashboard</h1><p className="text-slate-500 text-[10px] font-black uppercase tracking-widest mt-1">Painel Operacional • {formatDateDisplay(selectedDate)}</p></div>
+        <div><h1 className="text-3xl font-black text-white tracking-tight uppercase leading-none">Agendamento</h1><p className="text-slate-500 text-[10px] font-black uppercase tracking-widest mt-1">Painel Operacional • {formatDateDisplay(selectedDate)}</p></div>
         <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
             <div className="flex items-center gap-4 bg-slate-800 p-2 rounded-2xl border border-slate-700 shadow-xl w-full md:w-auto justify-between md:justify-start">
                 <button onClick={() => { 
