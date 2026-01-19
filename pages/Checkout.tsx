@@ -42,6 +42,19 @@ const Checkout: React.FC = () => {
     }
   }, [reservationData, navigate]);
 
+  // Rastreamento de Compra (Purchase) no Meta Pixel
+  useEffect(() => {
+    if (isSuccess && window.fbq && reservationData) {
+      window.fbq('track', 'Purchase', {
+        value: reservationData.totalValue || 0,
+        currency: 'BRL',
+        content_name: 'Reserva de Boliche',
+        content_ids: trackedReservationIds,
+        content_type: 'product'
+      });
+    }
+  }, [isSuccess]);
+
   useEffect(() => {
       if (trackedReservationIds.length === 0) return;
       

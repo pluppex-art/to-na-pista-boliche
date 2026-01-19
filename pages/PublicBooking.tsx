@@ -74,6 +74,34 @@ const PublicBooking: React.FC = () => {
 
   const [viewDate, setViewDate] = useState(new Date());
 
+  // Rastreamento de Funil no Meta Pixel
+  useEffect(() => {
+    if (window.fbq) {
+      switch (currentStep) {
+        case 0: // Data
+          window.fbq('track', 'ViewContent', { content_name: 'Seleção de Data', content_category: 'Booking' });
+          break;
+        case 1: // Configuração
+          window.fbq('track', 'CustomizeProduct', { content_name: 'Configuração da Reserva' });
+          break;
+        case 2: // Identificação
+          window.fbq('track', 'Lead', { content_name: 'Início de Identificação' });
+          break;
+        case 3: // Resumo
+          window.fbq('track', 'InitiateCheckout', { 
+            value: (selectedTimes.length * formData.lanes * getPricePerHour()), 
+            currency: 'BRL',
+            num_items: formData.lanes,
+            content_type: 'product'
+          });
+          break;
+        case 4: // Pagamento
+          window.fbq('track', 'AddPaymentInfo', { content_name: 'Pronto para Pagamento' });
+          break;
+      }
+    }
+  }, [currentStep]);
+
   useEffect(() => {
       const storedClient = localStorage.getItem('tonapista_client_auth');
       if (storedClient) {

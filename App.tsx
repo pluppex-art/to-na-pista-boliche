@@ -1,6 +1,6 @@
 
 import React, { useEffect } from 'react';
-import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AppProvider, useApp } from './contexts/AppContext'; 
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -13,6 +13,26 @@ import Financeiro from './pages/Financeiro';
 import ClientDashboard from './pages/ClientDashboard';
 import ResetPassword from './pages/ResetPassword';
 import { UserRole, User } from './types';
+
+// Declaração global para evitar erros de TS com o Pixel
+declare global {
+  interface Window {
+    fbq: any;
+  }
+}
+
+// Componente para rastrear mudanças de rota no Meta Pixel
+const PixelTracker: React.FC = () => {
+  const location = useLocation();
+
+  useEffect(() => {
+    if (window.fbq) {
+      window.fbq('track', 'PageView');
+    }
+  }, [location]);
+
+  return null;
+};
 
 // Protected Route Wrapper
 interface ProtectedRouteProps {
@@ -57,6 +77,7 @@ const AppContent: React.FC = () => {
 
     return (
         <Router>
+            <PixelTracker />
             <Routes>
                 {/* Public Routes */}
                 <Route path="/login" element={<Login />} />

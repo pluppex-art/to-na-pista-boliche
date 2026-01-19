@@ -49,6 +49,13 @@ const ClientDashboard: React.FC = () => {
   const [feedbackNota, setFeedbackNota] = useState(5);
   const [feedbackComment, setFeedbackComment] = useState('');
 
+  // Rastreamento no Meta Pixel para Área do Cliente
+  useEffect(() => {
+    if (window.fbq && clientUser) {
+      window.fbq('trackCustom', 'MemberAreaView', { client_name: clientUser.name });
+    }
+  }, [clientUser]);
+
   const fetchData = async () => {
     setIsLoading(true);
     const stored = localStorage.getItem('tonapista_client_auth');
