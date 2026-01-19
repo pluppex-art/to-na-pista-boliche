@@ -14,7 +14,6 @@ import ClientDashboard from './pages/ClientDashboard';
 import ResetPassword from './pages/ResetPassword';
 import { UserRole, User } from './types';
 
-// Declaração global para o TS reconhecer o fbq do Facebook
 declare global {
   interface Window {
     fbq: any;
@@ -22,21 +21,19 @@ declare global {
 }
 
 /**
- * PixelTracker customizado para SPA.
- * Ele verifica se o script foi bloqueado antes de tentar disparar,
- * evitando erros no console do usuário.
+ * PixelTracker - Monitor de Navegação SPA
+ * Este componente avisa o Facebook toda vez que o usuário muda de tela no App.
  */
 const PixelTracker: React.FC = () => {
   const location = useLocation();
 
   useEffect(() => {
-    try {
-      if (typeof window !== 'undefined' && window.fbq) {
-        window.fbq('track', 'PageView');
-        console.log(`[Meta Pixel] PageView auto-rastreado: ${location.pathname}`);
-      }
-    } catch (e) {
-      console.warn("[Meta Pixel] Falha ao disparar PageView. Pode haver um AdBlocker ativo.");
+    // Garante que o fbq existe e dispara PageView
+    if (window.fbq) {
+      window.fbq('track', 'PageView');
+      console.log(`%c[Meta Pixel] Evento PageView em: ${location.pathname}`, 'color: #1877F2; font-weight: bold;');
+    } else {
+      console.warn("[Meta Pixel] Script não detectado. Verifique AdBlockers.");
     }
   }, [location]);
 

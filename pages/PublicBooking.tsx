@@ -67,7 +67,7 @@ const PublicBooking: React.FC = () => {
     secondEmail: ''
   });
 
-  // 2. Cálculos de Preço (Devem vir antes do useEffect do Pixel)
+  // 2. Cálculos de Preço (Deve vir ANTES do useEffect do Pixel)
   const pricePerHour = useMemo(() => {
     if (!selectedDate || !settings) return INITIAL_SETTINGS.weekdayPrice;
     const [y, m, d] = selectedDate.split('-').map(Number);
@@ -112,11 +112,10 @@ const PublicBooking: React.FC = () => {
           });
           break;
       }
+      console.log(`%c[Meta Pixel] Funil Passo: ${currentStep}`, 'color: #00A3FF; font-weight: bold;');
     }
   }, [currentStep, totalValue, formData.lanes]);
 
-  // ... (Restante do código permanece idêntico)
-  
   useEffect(() => {
       const storedClient = localStorage.getItem('tonapista_client_auth');
       if (storedClient) {
@@ -875,8 +874,11 @@ const PublicBooking: React.FC = () => {
                     {authMode === 'LOGIN' && !staffUser && !clientUser ? (
                         !isForgotPassMode ? (
                             <form onSubmit={handleInlineLogin} className="space-y-5 max-w-md mx-auto">
-                                <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">E-mail Cadastrado</label><input type="email" required className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white focus:border-neon-orange outline-none" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} /></div>
-                                <div>
+                                <div className="space-y-1">
+                                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">E-mail Cadastrado</label>
+                                    <input type="email" required className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white focus:border-neon-orange outline-none" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} />
+                                </div>
+                                <div className="space-y-1">
                                     <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Senha</label>
                                     <input type="password" required className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white focus:border-neon-orange outline-none" value={loginPass} onChange={e => setLoginPass(e.target.value)} />
                                     <button type="button" onClick={() => setIsForgotPassMode(true)} className="text-[10px] text-neon-blue hover:underline mt-2 font-bold uppercase">Esqueci minha senha</button>
@@ -891,7 +893,10 @@ const PublicBooking: React.FC = () => {
                                 ) : (
                                     <>
                                         <p className="text-xs text-slate-400">Informe seu e-mail cadastrado para receber as instruções de redefinição.</p>
-                                        <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">E-mail</label><input type="email" required className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white focus:border-neon-blue outline-none" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} /></div>
+                                        <div className="space-y-1">
+                                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">E-mail</label>
+                                            <input type="email" required className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white focus:border-neon-blue outline-none" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} />
+                                        </div>
                                         <div className="flex gap-3">
                                             <button type="button" onClick={() => setIsForgotPassMode(false)} className="flex-1 bg-slate-700 text-white font-bold py-3 rounded-xl uppercase text-xs">Voltar</button>
                                             <button type="submit" disabled={isLoggingIn} className="flex-[2] bg-neon-blue text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 uppercase text-xs shadow-lg">{isLoggingIn ? <Loader2 className="animate-spin"/> : 'Enviar Link'}</button>
@@ -902,10 +907,10 @@ const PublicBooking: React.FC = () => {
                         )
                     ) : (
                         <div className="space-y-4">
-                            <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Nome Completo *</label><input type="text" className={`w-full bg-slate-800 border rounded-xl p-3 text-white outline-none focus:border-neon-blue ${errors.name ? 'border-red-500' : 'border-slate-700'}`} value={formData.name} onChange={e => handleInputChange('name', e.target.value)} /></div>
+                            <div className="space-y-1"><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Nome Completo *</label><input type="text" className={`w-full bg-slate-800 border rounded-xl p-3 text-white outline-none focus:border-neon-blue ${errors.name ? 'border-red-500' : 'border-slate-700'}`} value={formData.name} onChange={e => handleInputChange('name', e.target.value)} /></div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">WhatsApp *</label><input type="tel" className={`w-full bg-slate-800 border rounded-xl p-3 text-white outline-none focus:border-neon-blue ${errors.whatsapp ? 'border-red-500' : 'border-slate-700'}`} value={formData.whatsapp} onChange={e => handlePhoneChange(e, 'whatsapp')} /></div>
-                                <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">E-mail *</label><input type="email" className={`w-full bg-slate-800 border rounded-xl p-3 text-white outline-none focus:border-neon-blue ${errors.email ? 'border-red-500' : 'border-slate-700'}`} value={formData.email} onChange={e => handleInputChange('email', e.target.value)} /></div>
+                                <div className="space-y-1"><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">WhatsApp *</label><input type="tel" className={`w-full bg-slate-800 border rounded-xl p-3 text-white outline-none focus:border-neon-blue ${errors.whatsapp ? 'border-red-500' : 'border-slate-700'}`} value={formData.whatsapp} onChange={e => handlePhoneChange(e, 'whatsapp')} /></div>
+                                <div className="space-y-1"><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">E-mail *</label><input type="email" className={`w-full bg-slate-800 border rounded-xl p-3 text-white outline-none focus:border-neon-blue ${errors.email ? 'border-red-500' : 'border-slate-700'}`} value={formData.email} onChange={e => handleInputChange('email', e.target.value)} /></div>
                             </div>
                             
                             {!clientUser && !staffUser && (
