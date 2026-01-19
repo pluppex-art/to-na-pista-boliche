@@ -2,11 +2,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
   <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/logo.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    
-    <!-- Meta Pixel Code -->
+    <!-- Meta Pixel Code - Carregamento Prioritário -->
     <script>
     !function(f,b,e,v,n,t,s)
     {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
@@ -18,12 +14,16 @@
     'https://connect.facebook.net/en_US/fbevents.js');
     fbq('init', '816383270429525');
     fbq('track', 'PageView');
+    console.log("[Meta Pixel] Script Base Inicializado com sucesso.");
     </script>
     <noscript><img height="1" width="1" style="display:none"
     src="https://www.facebook.com/tr?id=816383270429525&ev=PageView&noscript=1"
     /></noscript>
     <!-- End Meta Pixel Code -->
 
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Tô Na Pista</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -40,9 +40,7 @@
                 surface: '#1e293b'
               }
             },
-            fontFamily: {
-              sans: ['Inter', 'sans-serif'],
-            }
+            fontFamily: { sans: ['Inter', 'sans-serif'] }
           }
         }
       }

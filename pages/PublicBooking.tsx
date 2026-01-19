@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { db } from '../services/mockBackend';
 import { supabase } from '../services/supabaseClient';
@@ -18,40 +18,35 @@ const PublicBooking: React.FC = () => {
   const location = useLocation(); 
   const { settings, user: staffUser, loading: appLoading } = useApp();
   
+  // 1. Estados base
   const [clientUser, setClientUser] = useState<any>(() => {
       const stored = localStorage.getItem('tonapista_client_auth');
       return stored ? JSON.parse(stored) : null;
   });
-  
   const [authMode, setAuthMode] = useState<'REGISTER' | 'LOGIN'>('LOGIN');
   const [isForgotPassMode, setIsForgotPassMode] = useState(false);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPass, setLoginPass] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [resetSent, setResetSent] = useState(false);
-  
   const [currentStep, setCurrentStep] = useState(0);
   const [imgError, setImgError] = useState(false);
-  
   const [existingReservations, setExistingReservations] = useState<any[]>([]);
   const [isDataLoading, setIsDataLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [createdReservationIds, setCreatedReservationIds] = useState<string[]>([]);
   const [clientId, setClientId] = useState<string>(clientUser?.id || '');
-
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedTimes, setSelectedTimes] = useState<string[]>([]);
-  
   const [isManualMode, setIsManualMode] = useState(false);
   const [manualStartTime, setManualStartTime] = useState('18:00');
   const [manualEndTime, setManualEndTime] = useState('19:00');
   const [manualPrice, setManualPrice] = useState<string>('');
-
   const [peopleInput, setPeopleInput] = useState<string>('6');
   const [lanesInput, setLanesInput] = useState<string>('1');
   const [seatInput, setSeatInput] = useState<string>('');
+  const [viewDate, setViewDate] = useState(new Date());
 
   const [formData, setFormData] = useState({
     people: 6, 
@@ -72,52 +67,56 @@ const PublicBooking: React.FC = () => {
     secondEmail: ''
   });
 
-  const [viewDate, setViewDate] = useState(new Date());
+  // 2. Cálculos de Preço (Devem vir antes do useEffect do Pixel)
+  const pricePerHour = useMemo(() => {
+    if (!selectedDate || !settings) return INITIAL_SETTINGS.weekdayPrice;
+    const [y, m, d] = selectedDate.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
+    const day = date.getDay();
+    // 0=Dom, 5=Sex, 6=Sab
+    return (day === 0 || day === 5 || day === 6) ? settings.weekendPrice : settings.weekdayPrice;
+  }, [selectedDate, settings]);
 
-  // Fixed: Moved price calculations before the useEffect that uses them
-  const getPricePerHour = () => {
-      if (!selectedDate || !settings) return INITIAL_SETTINGS.weekdayPrice;
-      const [y, m, d] = selectedDate.split('-').map(Number);
-      const date = new Date(y, m - 1, d);
-      const day = date.getDay();
-      if (day === 0 || day === 5 || day === 6) {
-          return settings.weekendPrice;
-      }
-      return settings.weekdayPrice;
-  };
+  const totalValue = useMemo(() => {
+    if (isManualMode && manualPrice) return parseFloat(manualPrice);
+    return pricePerHour * formData.lanes * selectedTimes.length;
+  }, [isManualMode, manualPrice, pricePerHour, formData.lanes, selectedTimes.length]);
 
-  const currentPrice = getPricePerHour();
-  const totalDuration = selectedTimes.length;
-  const totalValue = isManualMode && manualPrice ? parseFloat(manualPrice) : (currentPrice * formData.lanes * (totalDuration || 0));
-
-  // MONITORAMENTO DO FUNIL PARA O META PIXEL
+  // 3. MONITORAMENTO DO FUNIL PARA O META PIXEL (Agora as variáveis acima existem!)
   useEffect(() => {
     if (window.fbq) {
+      const pixelValue = totalValue || 0;
       switch (currentStep) {
-        case 0: // Data
-          window.fbq('track', 'ViewContent', { content_name: 'Verificando Datas', content_category: 'Reserva' });
+        case 0: 
+          window.fbq('track', 'ViewContent', { content_name: 'Seleção de Data', content_category: 'Reserva' });
           break;
-        case 1: // Config
-          window.fbq('track', 'CustomizeProduct', { content_name: 'Configurando Reserva' });
+        case 1: 
+          window.fbq('track', 'CustomizeProduct', { content_name: 'Configurando Pistas e Pessoas' });
           break;
-        case 2: // ID
-          window.fbq('track', 'Contact', { content_name: 'Início do Cadastro' });
+        case 2: 
+          window.fbq('track', 'Lead', { content_name: 'Início de Identificação' });
           break;
-        case 3: // Resumo
+        case 3: 
           window.fbq('track', 'InitiateCheckout', { 
-            value: totalValue, 
+            value: pixelValue, 
             currency: 'BRL',
             content_name: 'Resumo da Reserva',
             num_items: formData.lanes
           });
           break;
-        case 4: // Pagamento
-          window.fbq('track', 'AddPaymentInfo', { content_name: 'Tela Final de Pagamento' });
+        case 4: 
+          window.fbq('track', 'AddPaymentInfo', { 
+            content_name: 'Pronto para Pagamento',
+            value: pixelValue,
+            currency: 'BRL'
+          });
           break;
       }
     }
   }, [currentStep, totalValue, formData.lanes]);
 
+  // ... (Restante do código permanece idêntico)
+  
   useEffect(() => {
       const storedClient = localStorage.getItem('tonapista_client_auth');
       if (storedClient) {

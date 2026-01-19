@@ -21,14 +21,22 @@ declare global {
   }
 }
 
-// Componente que observa a mudança de URL e dispara o PageView
+/**
+ * PixelTracker customizado para SPA.
+ * Ele verifica se o script foi bloqueado antes de tentar disparar,
+ * evitando erros no console do usuário.
+ */
 const PixelTracker: React.FC = () => {
   const location = useLocation();
 
   useEffect(() => {
-    if (window.fbq) {
-      window.fbq('track', 'PageView');
-      console.log(`[Meta Pixel] PageView disparado para: ${location.pathname}`);
+    try {
+      if (typeof window !== 'undefined' && window.fbq) {
+        window.fbq('track', 'PageView');
+        console.log(`[Meta Pixel] PageView auto-rastreado: ${location.pathname}`);
+      }
+    } catch (e) {
+      console.warn("[Meta Pixel] Falha ao disparar PageView. Pode haver um AdBlocker ativo.");
     }
   }, [location]);
 
