@@ -74,33 +74,49 @@ const PublicBooking: React.FC = () => {
 
   const [viewDate, setViewDate] = useState(new Date());
 
-  // Rastreamento de Funil no Meta Pixel
+  // Fixed: Moved price calculations before the useEffect that uses them
+  const getPricePerHour = () => {
+      if (!selectedDate || !settings) return INITIAL_SETTINGS.weekdayPrice;
+      const [y, m, d] = selectedDate.split('-').map(Number);
+      const date = new Date(y, m - 1, d);
+      const day = date.getDay();
+      if (day === 0 || day === 5 || day === 6) {
+          return settings.weekendPrice;
+      }
+      return settings.weekdayPrice;
+  };
+
+  const currentPrice = getPricePerHour();
+  const totalDuration = selectedTimes.length;
+  const totalValue = isManualMode && manualPrice ? parseFloat(manualPrice) : (currentPrice * formData.lanes * (totalDuration || 0));
+
+  // MONITORAMENTO DO FUNIL PARA O META PIXEL
   useEffect(() => {
     if (window.fbq) {
       switch (currentStep) {
         case 0: // Data
-          window.fbq('track', 'ViewContent', { content_name: 'Seleção de Data', content_category: 'Booking' });
+          window.fbq('track', 'ViewContent', { content_name: 'Verificando Datas', content_category: 'Reserva' });
           break;
-        case 1: // Configuração
-          window.fbq('track', 'CustomizeProduct', { content_name: 'Configuração da Reserva' });
+        case 1: // Config
+          window.fbq('track', 'CustomizeProduct', { content_name: 'Configurando Reserva' });
           break;
-        case 2: // Identificação
-          window.fbq('track', 'Lead', { content_name: 'Início de Identificação' });
+        case 2: // ID
+          window.fbq('track', 'Contact', { content_name: 'Início do Cadastro' });
           break;
         case 3: // Resumo
           window.fbq('track', 'InitiateCheckout', { 
-            value: (selectedTimes.length * formData.lanes * getPricePerHour()), 
+            value: totalValue, 
             currency: 'BRL',
-            num_items: formData.lanes,
-            content_type: 'product'
+            content_name: 'Resumo da Reserva',
+            num_items: formData.lanes
           });
           break;
         case 4: // Pagamento
-          window.fbq('track', 'AddPaymentInfo', { content_name: 'Pronto para Pagamento' });
+          window.fbq('track', 'AddPaymentInfo', { content_name: 'Tela Final de Pagamento' });
           break;
       }
     }
-  }, [currentStep]);
+  }, [currentStep, totalValue, formData.lanes]);
 
   useEffect(() => {
       const storedClient = localStorage.getItem('tonapista_client_auth');
@@ -138,21 +154,6 @@ const PublicBooking: React.FC = () => {
           setSeatInput(formData.tableSeatCount === 0 ? '' : formData.tableSeatCount.toString());
       }
   }, [formData.tableSeatCount]);
-
-  const getPricePerHour = () => {
-      if (!selectedDate || !settings) return INITIAL_SETTINGS.weekdayPrice;
-      const [y, m, d] = selectedDate.split('-').map(Number);
-      const date = new Date(y, m - 1, d);
-      const day = date.getDay();
-      if (day === 0 || day === 5 || day === 6) {
-          return settings.weekendPrice;
-      }
-      return settings.weekdayPrice;
-  };
-
-  const currentPrice = getPricePerHour();
-  const totalDuration = selectedTimes.length;
-  const totalValue = isManualMode && manualPrice ? parseFloat(manualPrice) : (currentPrice * formData.lanes * (totalDuration || 0));
 
   useEffect(() => {
     let isMounted = true;
@@ -209,7 +210,6 @@ const PublicBooking: React.FC = () => {
       if (errors[field]) setErrors(prev => ({ ...prev, [field]: false }));
   };
 
-  // MANIPULAÇÃO DE PESSOAS: Aumenta pistas se necessário
   const handlePeopleChange = (val: string) => {
       setPeopleInput(val); 
       if (val === '') return;
@@ -231,7 +231,7 @@ const PublicBooking: React.FC = () => {
               return { 
                 ...prev, 
                 people: num, 
-                lanes: requiredLanes, // Sincroniza pistas para cima
+                lanes: requiredLanes, 
                 tableSeatCount: newSeatCount 
               };
           });
@@ -266,7 +266,6 @@ const PublicBooking: React.FC = () => {
 
   const handleSeatBlur = () => { };
 
-  // MANIPULAÇÃO DE PISTAS: Diminui pessoas se necessário
   const handleLanesChange = (val: string) => {
       setLanesInput(val);
       if (val === '') return;
@@ -280,7 +279,6 @@ const PublicBooking: React.FC = () => {
           const maxPeopleForTheseLanes = numLanes * 6;
 
           setFormData(prev => {
-              // Se as pessoas atuais excedem a nova capacidade de pistas, reduz pessoas
               const adjustedPeople = prev.people > maxPeopleForTheseLanes ? maxPeopleForTheseLanes : prev.people;
               
               if (adjustedPeople !== prev.people) {
@@ -290,12 +288,12 @@ const PublicBooking: React.FC = () => {
               return { 
                 ...prev, 
                 lanes: numLanes,
-                people: adjustedPeople // Sincroniza pessoas para baixo
+                people: adjustedPeople 
               };
           });
           
           setLanesInput(numLanes.toString());
-          setSelectedTimes([]); // Limpa horários pois a ocupação mudou
+          setSelectedTimes([]); 
       }
   };
 
@@ -453,7 +451,6 @@ const PublicBooking: React.FC = () => {
             const phoneClean = formData.whatsapp.replace(/\D/g, '');
             const emailClean = formData.email.trim().toLowerCase();
 
-            // 1. BUSCA POR CLIENTE EXISTENTE (OR PHONE OU EMAIL)
             let filters = [];
             if (phoneClean) filters.push(`phone.eq.${phoneClean}`);
             if (emailClean) filters.push(`email.eq.${emailClean}`);
@@ -471,9 +468,7 @@ const PublicBooking: React.FC = () => {
             }
 
             if (existingClient) {
-                // Se o cliente existe, o sistema DEVE usar o ID dele
                 if (staffUser) {
-                    // Se é equipe agendando, atualiza os dados para garantir que o CRM tenha a info mais recente
                     await db.clients.update({
                         id: existingClient.client_id,
                         name: formData.name || existingClient.name,
@@ -491,7 +486,6 @@ const PublicBooking: React.FC = () => {
                     setIsSaving(false);
                     return;
                 } else {
-                    // Se é o cliente no site, e ele já existe, pedimos login por segurança (para não agendar no nome de outro)
                     alert("Identificamos que você já possui cadastro conosco! Por favor, acesse sua conta para continuar.");
                     setAuthMode('LOGIN');
                     if (existingClient.email) setLoginEmail(existingClient.email);
@@ -500,7 +494,6 @@ const PublicBooking: React.FC = () => {
                 }
             }
 
-            // 2. SE NÃO EXISTE, CRIA NOVO
             const newClientId = uuidv4();
             const newClientData = {
                 id: newClientId,
@@ -516,7 +509,6 @@ const PublicBooking: React.FC = () => {
             const isPublicUser = !staffUser && !clientUser;
 
             if (isPublicUser) {
-                // Cadastro com senha (pelo site)
                 const { client, error } = await db.clients.register(newClientData, formData.password);
                 if (error) throw new Error(typeof error === 'string' ? error : 'Erro ao criar conta.');
                 if (client) {
@@ -526,7 +518,6 @@ const PublicBooking: React.FC = () => {
                     setCurrentStep(c => c + 1);
                 }
             } else {
-                // Cadastro rápido (pela equipe ou se já logado mas informando dados de terceiro)
                 const client = await db.clients.create(newClientData, staffUser?.id); 
                 setClientId(client.id);
                 setCurrentStep(c => c + 1);

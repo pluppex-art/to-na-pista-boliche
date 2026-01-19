@@ -14,27 +14,27 @@ import ClientDashboard from './pages/ClientDashboard';
 import ResetPassword from './pages/ResetPassword';
 import { UserRole, User } from './types';
 
-// Declaração global para evitar erros de TS com o Pixel
+// Declaração global para o TS reconhecer o fbq do Facebook
 declare global {
   interface Window {
     fbq: any;
   }
 }
 
-// Componente para rastrear mudanças de rota no Meta Pixel
+// Componente que observa a mudança de URL e dispara o PageView
 const PixelTracker: React.FC = () => {
   const location = useLocation();
 
   useEffect(() => {
     if (window.fbq) {
       window.fbq('track', 'PageView');
+      console.log(`[Meta Pixel] PageView disparado para: ${location.pathname}`);
     }
   }, [location]);
 
   return null;
 };
 
-// Protected Route Wrapper
 interface ProtectedRouteProps {
   children: React.ReactNode;
   allowedRoles?: UserRole[];
@@ -79,17 +79,13 @@ const AppContent: React.FC = () => {
         <Router>
             <PixelTracker />
             <Routes>
-                {/* Public Routes */}
                 <Route path="/login" element={<Login />} />
                 <Route path="/agendamento" element={<PublicBooking />} />
                 <Route path="/checkout" element={<Checkout />} />
                 <Route path="/redefinir-senha" element={<ResetPassword />} />
                 <Route path="/" element={<Navigate to="/agendamento" />} />
-
-                {/* Client Routes */}
                 <Route path="/minha-conta" element={<ClientDashboard />} />
-
-                {/* Protected Staff Routes */}
+                
                 <Route path="/agenda" element={
                     <ProtectedRoute requiredPermission="perm_view_agenda">
                         <Layout><Agenda /></Layout>
@@ -113,11 +109,6 @@ const AppContent: React.FC = () => {
                         <Layout><Settings /></Layout>
                     </ProtectedRoute>
                 } />
-                
-                {/* Redirecionamentos de rotas removidas */}
-                <Route path="/dashboard" element={<Navigate to="/agenda" />} />
-                <Route path="/crm" element={<Navigate to="/clientes" />} />
-                <Route path="/funil" element={<Navigate to="/clientes" />} />
             </Routes>
         </Router>
     );

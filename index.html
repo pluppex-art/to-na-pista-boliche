@@ -6,23 +6,6 @@
     <link rel="icon" type="image/png" href="/logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     
-    <!-- Configurações PWA -->
-    <link rel="manifest" href="/manifest.json?v=6" />
-    <meta name="theme-color" content="#f97316" />
-    
-    <!-- Correção do erro deprecated da Apple -->
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Tô Na Pista" />
-    <link rel="apple-touch-icon" href="/logo.png" />
-
-    <!-- Open Graph / WhatsApp Preview -->
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="Tô Na Pista" />
-    <meta property="og:description" content="Agende sua pista de boliche online de forma rápida e fácil." />
-    <meta property="og:image" content="/logo.png" />
-    
     <!-- Meta Pixel Code -->
     <script>
     !function(f,b,e,v,n,t,s)
@@ -59,35 +42,14 @@
             },
             fontFamily: {
               sans: ['Inter', 'sans-serif'],
-            },
-            animation: {
-              'fade-in': 'fadeIn 0.5s ease-out',
-              'scale-in': 'scaleIn 0.3s ease-out',
-            },
-            keyframes: {
-              fadeIn: {
-                '0%': { opacity: '0' },
-                '100%': { opacity: '1' },
-              },
-              scaleIn: {
-                '0%': { transform: 'scale(0.95)', opacity: '0' },
-                '100%': { transform: 'scale(1)', opacity: '1' },
-              }
             }
           }
         }
       }
     </script>
-    <!-- Adicionado pesos 500, 800 e 900 -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <style>
       body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; }
-      ::-webkit-scrollbar { width: 8px; height: 8px; }
-      ::-webkit-scrollbar-track { background: #1e293b; }
-      ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
-      ::-webkit-scrollbar-thumb:hover { background: #64748b; }
-      
-      /* Previne zoom no iOS ao clicar em inputs */
       input, select, textarea { font-size: 16px !important; }
     </style>
   <script type="importmap">
