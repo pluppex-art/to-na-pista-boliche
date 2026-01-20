@@ -7,13 +7,13 @@ export const Experiences: React.FC = () => {
     {
       title: 'Aniversários e Festas',
       icon: <Cake className="text-pink-500" size={32} />,
-      desc: 'O aniversário mais animado de Palmas! Garantimos o suporte para seu bolo e um parabéns inesquecível na pista. Diversão garantida para todas as idades com pacotes que unem boliche e gastronomia.',
+      desc: 'O aniversário mais animado de Palmas! Garantimos o suporte para seu bolo e um parabéns inesquecível no boliche. Diversão garantida para todas as idades.',
       tag: 'O Favorito'
     },
     {
       title: 'Eventos de Empresa',
       icon: <Briefcase className="text-blue-500" size={32} />,
-      desc: 'Fortaleça sua equipe com um Happy Hour fora de série. Nosso ambiente climatizado é ideal para networking, dinâmicas de grupo e celebrações corporativas com infraestrutura completa e buffet gourmet.',
+      desc: 'Fortaleça sua equipe com um Happy Hour fora de série. Nosso ambiente climatizado é ideal para networking, dinâmicas de grupo e celebrações corporativas com infraestrutura completa.',
       tag: 'Corporativo'
     },
     {
@@ -35,7 +35,7 @@ export const Experiences: React.FC = () => {
             <span className="text-neon-blue">Comemorações em Palmas</span>
           </h2>
           <div className="text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px] md:text-sm max-w-2xl mx-auto leading-relaxed">
-            Pistas modernas, ambiente 100% climatizado e a melhor pizzaria artesanal da capital.
+            Pistas modernas, ambiente 100% climatizado e a melhor pizza artesanal da capital.
           </div>
           <div className="h-1.5 w-24 bg-neon-blue mx-auto rounded-full mt-6 shadow-[0_0_15px_rgba(59,130,246,0.5)]"></div>
         </div>
@@ -79,8 +79,7 @@ export const Experiences: React.FC = () => {
               <strong className="text-white font-black">
                 Além das pistas, você pode solicitar a reserva de mesas e cadeiras. 
                 Garantimos até <br /> 
-                <span className="text-neon-orange font-black">25 cadeiras por reserva padrão</span> 
-                para o conforto do seu grupo.
+                <span className="text-neon-orange font-black">25 cadeiras por reserva padrão</span> para o conforto do seu grupo.
               </strong>
             </div>
 

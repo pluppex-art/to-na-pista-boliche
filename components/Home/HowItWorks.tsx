@@ -15,7 +15,7 @@ export const HowItWorks: React.FC = () => {
     {
       icon: <Clock className="text-neon-blue" size={28} />,
       title: 'Reserva por Hora',
-      desc: 'Cada reserva tem duração de 1 hora. Você pode contratar pacotes de 2 ou 3 horas consecutivas conforme a disponibilidade.'
+      desc: 'Cada reserva tem duração de 1 hora. Você pode contratar pacotes de 2 ou mais horas consecutivas conforme a disponibilidade.'
     },
     {
       icon: <Users className="text-neon-green" size={28} />,
@@ -30,12 +30,12 @@ export const HowItWorks: React.FC = () => {
     {
       icon: <Zap className="text-yellow-500" size={28} />,
       title: 'Prazo de Pagamento',
-      desc: 'O sistema trava sua pista por 30 minutos. Após esse período sem confirmação, o horário é liberado automaticamente para outros clientes.'
+      desc: 'O sistema mantém sua reserva por 30 minutos. Após esse período sem confirmação de pagamento, o horário é liberado automaticamente para outros clientes.'
     },
     {
       icon: <Gamepad2 className="text-pink-500" size={28} />,
-      title: 'Equipamentos Inclusos',
-      desc: 'Todos os equipamentos necessários estão disponíveis no local para sua diversão.'
+      title: 'Outras diversões Disponíveis',
+      desc: 'Sinuca, brinquedoteca, rocket, basquete, montanha-russa virtual 3D e outros brinquedos eletrônicos.'
     }
   ];
 

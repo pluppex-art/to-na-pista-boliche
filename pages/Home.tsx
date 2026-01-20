@@ -14,7 +14,7 @@ import { Experiences } from '../components/Home/Experiences';
 import { Menu } from '../components/Home/Menu';
 
 // Importação de componentes que permanecem internos ou pequenos
-import { MapPin, Phone, ArrowRight, MessageCircle, Users } from 'lucide-react';
+import { MapPin, Phone, ArrowRight, MessageCircle, Instagram } from 'lucide-react';
 
 const Home: React.FC = () => {
   const navigate = useNavigate();
@@ -93,9 +93,9 @@ const Home: React.FC = () => {
                 <div className="lg:w-1/2 space-y-8 order-2 lg:order-1 w-full">
                     <div className="h-[300px] md:h-[500px] w-full bg-slate-900 rounded-[2.5rem] border border-slate-800 shadow-2xl overflow-hidden group">
                         <iframe 
-                            src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3827.0988019623265!2d-48.3364403!3d-10.180486!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x933027b1659103e3%3A0xc4801efc2d61d50c!2sT%C3%B4%20Na%20Pista%20Boliche!5e1!3m2!1spt-BR!2sbr!4v1715000000000!5m2!1spt-BR!2sbr" 
+                            src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3827.0863071339893!2d-48.33703392393394!3d-10.180637708573215!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x9324cb7beaea9879%3A0x58096cb62b9c45ec!2zVMO0IE5hIFBpc3RhIEJvbGljaGU!5e1!3m2!1spt-BR!2sbr!4v1737344583210!5m2!1spt-BR!2sbr" 
                             width="100%" height="100%" style={{ border: 0 }} allowFullScreen loading="lazy" title="Localização"
-                            className="grayscale group-hover:grayscale-0 transition-all duration-1000"
+                            className="w-full h-full"
                         ></iframe>
                     </div>
                 </div>
@@ -120,7 +120,7 @@ const Home: React.FC = () => {
                             </div>
                         </div>
                     </div>
-                    <a href="https://tr.ee/CM84FdCpRm" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-4 bg-white text-black px-10 py-5 rounded-2xl font-black uppercase text-xs tracking-[0.3em] hover:bg-neon-orange hover:text-white transition-all shadow-xl">
+                    <a href="https://www.google.com/maps?q=T%C3%B4+Na+Pista+Boliche+-+Av+Juscelino+Kubitschek+103+Norte+-+Segundo+estacionamento+-+Centro,+Palmas+-+TO,+77001-014" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-4 bg-white text-black px-10 py-5 rounded-2xl font-black uppercase text-xs tracking-[0.3em] hover:bg-neon-orange hover:text-white transition-all shadow-xl">
                         ABRIR NO GOOGLE MAPS <ArrowRight size={18}/>
                     </a>
                 </div>
@@ -136,7 +136,7 @@ const Home: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-12">
                 <div className="md:col-span-2 space-y-6 text-center md:text-left">
                     <h4 className="text-2xl md:text-4xl font-black text-neon-orange uppercase tracking-tighter leading-none">TÔ NA PISTA</h4>
-                    <p className="text-slate-600 font-medium max-w-sm mx-auto md:mx-0 text-xs md:text-sm leading-relaxed">A maior referência em entretenimento e gastronomia boliche de Palmas-TO. Ambiente modernizado, familiar e 100% climatizado.</p>
+                    <p className="text-slate-600 font-medium max-w-sm mx-auto md:mx-0 text-xs md:text-sm leading-relaxed">A maior referência em entretenimento e gastronomia no melhor boliche do Tocantins. Ambiente modernizado, familiar e 100% climatizado.</p>
                 </div>
                 <div className="space-y-4 text-center md:text-left">
                     <h5 className="text-white font-black uppercase text-[8px] md:text-[10px] tracking-[0.4em]">Explorar</h5>
@@ -149,13 +149,13 @@ const Home: React.FC = () => {
                 <div className="space-y-4 text-center md:text-left">
                     <h5 className="text-white font-black uppercase text-[8px] md:text-[10px] tracking-[0.4em]">Siga-nos</h5>
                     <div className="flex justify-center md:justify-start gap-4">
-                        <a href="https://instagram.com/tonapistaboliche63" target="_blank" className="p-3.5 bg-slate-800 rounded-xl text-slate-500 hover:text-neon-orange transition-all"><Users size={20}/></a>
+                        <a href="https://instagram.com/tonapistaboliche63" target="_blank" className="p-3.5 bg-slate-800 rounded-xl text-slate-500 hover:text-neon-orange transition-all"><Instagram size={20}/></a>
                         <a href="https://wa.me/5563991178242" target="_blank" className="p-3.5 bg-slate-800 rounded-xl text-slate-500 hover:text-green-500 transition-all"><MessageCircle size={20}/></a>
                     </div>
                 </div>
             </div>
             <div className="pt-8 border-t border-slate-800/50 flex flex-col md:flex-row justify-between items-center gap-4 text-[8px] md:text-[10px] font-black text-slate-700 uppercase tracking-[0.3em] text-center">
-                <p>© 2025 TÔ NA PISTA BOLICHE & PIZZARIA - PALMAS-TO</p>
+                <p>© 2026 TÔ NA PISTA BOLICHE - PALMAS-TO</p>
                 <p>O melhor lazer do Tocantins.</p>
             </div>
         </div>

@@ -12,7 +12,7 @@ export const FAQ: React.FC = () => {
     { q: 'Vocês abrem na segunda-feira?', a: 'Não. Segundas-feiras estamos fechados para manutenção das pistas e equipamentos.' },
     { q: 'Quantas pessoas podem jogar por pista?', a: 'Cada pista comporta no máximo 6 pessoas.' },
     { q: 'Preciso reservar com muita antecedência?', a: 'Recomendamos reservar com antecedência, especialmente para sexta a domingo quando a demanda é maior.' },
-    { q: 'Qual o horário de funcionamento?', a: 'Funcionamos de terça a domingo. Segundas-feiras estamos fechados para manutenção.' },
+    { q: 'Qual o horário de funcionamento?', a: 'Funcionamos de terça a quinta, das 18h às 00h, e de sexta a domingo, das 17h às 00h. Às segundas-feiras, estamos fechados para manutenção.' },
     { q: 'Posso dividir o valor com meus amigos?', a: 'Sim! O valor pode ser dividido entre todos os participantes.' },
     { q: 'Qual a diferença de preço entre os dias?', a: 'Terça a quinta o valor é R$ 99,90 por hora. Sexta a domingo o valor é R$ 140,00 por hora.' }
   ];

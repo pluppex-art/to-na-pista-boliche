@@ -32,7 +32,7 @@ export const Hero: React.FC<HeroProps> = ({ onReserve }) => {
         <div className="text-center lg:text-left space-y-6 md:space-y-8 animate-fade-in w-full">
           <div className="inline-flex items-center gap-2 bg-neon-orange/10 border border-neon-orange/20 px-4 py-2 rounded-full mb-2 mx-auto lg:mx-0 backdrop-blur-sm shadow-inner">
             <Zap size={14} className="text-neon-orange animate-pulse" />
-            <span className="text-[8px] md:text-xs font-black text-neon-orange uppercase tracking-[0.3em]">O Strike mais gelado de Palmas</span>
+            <span className="text-[8px] md:text-xs font-black text-neon-orange uppercase tracking-[0.3em]">A noite perfeita começa aqui</span>
           </div>
           
           <div className="space-y-4">
@@ -42,7 +42,7 @@ export const Hero: React.FC<HeroProps> = ({ onReserve }) => {
             </h1>
             
             <p className="text-xs md:text-xl text-slate-300 max-w-md md:max-w-xl mx-auto lg:mx-0 font-medium leading-relaxed">
-              Reserve sua pista agora e garanta momentos inesquecíveis, ambiente <strong>100% climatizado</strong> e a melhor pizzaria da capital.
+              Reserve sua pista agora e garanta momentos inesquecíveis, ambiente <strong>100% climatizado</strong> e a melhor pizza da capital.
             </p>
           </div>
           
@@ -70,7 +70,7 @@ export const Hero: React.FC<HeroProps> = ({ onReserve }) => {
             <div className="h-4 w-px bg-slate-800 hidden sm:block"></div>
             <div className="flex items-center gap-1.5">
               <Star size={14} className="text-yellow-500" fill="currentColor" />
-              <span className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-widest">4.8 no Google</span>
+              <span className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-widest">4.8</span>
             </div>
           </div>
         </div>

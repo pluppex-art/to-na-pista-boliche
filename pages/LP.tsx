@@ -81,9 +81,9 @@ const LP: React.FC = () => {
             <div className="flex flex-col lg:flex-row gap-10 md:gap-20 items-center">
                 <div className="lg:w-1/2 w-full h-[300px] md:h-[500px] bg-slate-900 rounded-[2.5rem] border border-slate-800 shadow-2xl overflow-hidden order-2 lg:order-1">
                     <iframe 
-                        src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3827.0988019623265!2d-48.3364403!3d-10.180486!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x933027b1659103e3%3A0xc4801efc2d61d50c!2sT%C3%B4%20Na%20Pista%20Boliche!5e1!3m2!1spt-BR!2sbr!4v1715000000000!5m2!1spt-BR!2sbr" 
+                        src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3827.0863071339893!2d-48.33703392393394!3d-10.180637708573215!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x9324cb7beaea9879%3A0x58096cb62b9c45ec!2zVMO0IE5hIFBpc3RhIEJvbGljaGU!5e1!3m2!1spt-BR!2sbr!4v1737344583210!5m2!1spt-BR!2sbr" 
                         width="100%" height="100%" style={{ border: 0 }} allowFullScreen loading="lazy" title="Mapa"
-                        className="grayscale hover:grayscale-0 transition-all duration-1000"
+                        className="w-full h-full"
                     ></iframe>
                 </div>
                 <div className="lg:w-1/2 space-y-8 text-center md:text-left order-1 lg:order-2">

@@ -27,7 +27,7 @@ export const Navbar: React.FC<NavbarProps> = ({ scrolled, settings, clientUser, 
           <button onClick={() => onScrollTo('hero')} className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 hover:text-white transition">Início</button>
           <button onClick={() => onScrollTo('experiencias')} className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 hover:text-white transition">Experiência</button>
           <button onClick={() => onScrollTo('precos')} className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 hover:text-white transition">Valores</button>
-          <button onClick={() => onScrollTo('cardapio')} className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 hover:text-white transition">Menu</button>
+          <button onClick={() => onScrollTo('cardapio')} className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 hover:text-white transition">Cardápio</button>
         </div>
 
         <div className="flex items-center gap-2 md:gap-4">
