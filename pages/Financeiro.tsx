@@ -2,9 +2,10 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { db } from '../services/mockBackend';
 import { Reservation, ReservationStatus, AuditLog, User, PaymentStatus, EventType } from '../types';
-import { Loader2, DollarSign, TrendingUp, Users, Calendar, AlertCircle, Shield, History, Calculator, Percent, CalendarRange, ListChecks, ChevronDown, Clock, PieChart as PieIcon, Tag, X, FileText, Ban, CreditCard, Filter, Monitor, UserCheck } from 'lucide-react';
+import { Loader2, DollarSign, TrendingUp, Users, Calendar, AlertCircle, Shield, History, Calculator, Percent, CalendarRange, ListChecks, ChevronDown, Clock, PieChart as PieIcon, Tag, X, FileText, Ban, CreditCard, Filter, Monitor, Gauge } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts';
 import { supabase } from '../services/supabaseClient';
+import { useApp } from '../contexts/AppContext';
 
 const DATE_PRESETS = [
     { id: 'TODAY', label: 'HOJE' },
@@ -24,7 +25,10 @@ const EVENT_TYPE_COLORS: Record<string, string> = {
     [EventType.OUTRO]: '#64748b'       
 };
 
+const DAYS_NAME = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
 const Financeiro: React.FC = () => {
+  const { settings } = useApp();
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'LOGS'>('OVERVIEW');
   const [loading, setLoading] = useState(true);
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -131,9 +135,53 @@ const Financeiro: React.FC = () => {
       });
   }, [reservations, paymentMethodFilter]);
 
-  const pendingReservations = reservations.filter(r => r.status === ReservationStatus.PENDENTE || (r.status !== ReservationStatus.CANCELADA && r.paymentStatus !== PaymentStatus.PAGO));
+  const occupancyStats = useMemo(() => {
+      if (!dateRange.start || !dateRange.end || !settings) return { totalCapacity: 0, occupiedTotal: 0, percentage: 0, byDay: [] };
+
+      let totalCapacity = 0;
+      const capacityByDayOfWeek = new Array(7).fill(0);
+      const occupiedByDayOfWeek = new Array(7).fill(0);
+
+      const start = new Date(dateRange.start + 'T00:00:00');
+      const end = new Date(dateRange.end + 'T23:59:59');
+
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          const dayIdx = d.getDay();
+          const config = settings.businessHours[dayIdx];
+          const dateStr = toLocalISO(d);
+          const isBlocked = settings.blockedDates?.includes(dateStr);
+
+          if (config.isOpen && !isBlocked) {
+              let hours = config.end - config.start;
+              if (config.end === 0) hours = 24 - config.start;
+              else if (config.end < config.start) hours = (24 - config.start) + config.end;
+              
+              const dayCapacity = hours * settings.activeLanes;
+              totalCapacity += dayCapacity;
+              capacityByDayOfWeek[dayIdx] += dayCapacity;
+          }
+      }
+
+      realizedReservations.forEach(r => {
+          const d = new Date(r.date + 'T00:00:00');
+          const dayIdx = d.getDay();
+          const slots = calculateSlots(r);
+          occupiedByDayOfWeek[dayIdx] += slots;
+      });
+
+      const occupiedTotal = realizedReservations.reduce((acc, r) => acc + calculateSlots(r), 0);
+      const percentage = totalCapacity > 0 ? (occupiedTotal / totalCapacity) * 100 : 0;
+
+      const byDayData = DAYS_NAME.map((name, i) => ({
+          name,
+          porcentagem: capacityByDayOfWeek[i] > 0 ? Math.round((occupiedByDayOfWeek[i] / capacityByDayOfWeek[i]) * 100) : 0
+      }));
+
+      return { totalCapacity, occupiedTotal, percentage, byDay: byDayData };
+  }, [dateRange, settings, realizedReservations]);
+
   const totalRevenue = realizedReservations.reduce((acc, curr) => acc + curr.totalValue, 0);
-  const pendingRevenue = pendingReservations.reduce((acc, curr) => acc + curr.totalValue, 0);
+  const pendingRevenue = reservations.filter(r => r.status === ReservationStatus.PENDENTE || (r.status !== ReservationStatus.CANCELADA && r.paymentStatus !== PaymentStatus.PAGO)).reduce((acc, curr) => acc + curr.totalValue, 0);
   const confirmedSlotsCount = realizedReservations.reduce((acc, r) => acc + calculateSlots(r), 0);
   const avgTicket = confirmedSlotsCount > 0 ? totalRevenue / confirmedSlotsCount : 0;
   
@@ -182,7 +230,6 @@ const Financeiro: React.FC = () => {
 
   const revenueBySourceData = useMemo(() => {
     const sourceMap = new Map<string, number>();
-    
     realizedReservations.forEach(r => {
         let sourceName = "SITE (Venda Direta)";
         if (r.createdBy) {
@@ -191,25 +238,21 @@ const Financeiro: React.FC = () => {
         }
         sourceMap.set(sourceName, (sourceMap.get(sourceName) || 0) + r.totalValue);
     });
-
-    return Array.from(sourceMap.entries())
-        .map(([name, value]) => ({ name, value }))
-        .sort((a, b) => b.value - a.value);
+    return Array.from(sourceMap.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
   }, [realizedReservations, allUsers]);
-
-  const hoursMap = new Array(24).fill(0);
-  realizedReservations.forEach(r => {
-      const startH = parseInt(r.time.split(':')[0]);
-      for (let i = 0; i < Math.ceil(r.duration); i++) hoursMap[(startH + i) % 24] += (r.laneCount || 1);
-  });
-  const peakHoursChartData = hoursMap.map((count, hour) => ({ hour: `${hour}:00`, count })).filter(d => d.count > 0 || (parseInt(d.hour) >= 16 || parseInt(d.hour) <= 2));
 
   const COLORS = ['#22c55e', '#3b82f6', '#f97316', '#a855f7', '#ef4444', '#eab308', '#64748b', '#06b6d4', '#ec4899'];
 
   const getDrillDownList = () => {
-      if (drillDownType === 'PENDING') return pendingReservations;
+      if (drillDownType === 'PENDING') return rawReservations.filter(r => r.status === ReservationStatus.PENDENTE || (r.status !== ReservationStatus.CANCELADA && r.paymentStatus !== PaymentStatus.PAGO));
       if (drillDownType === 'CANCELLED') return cancelledReservations;
       return [];
+  };
+
+  const getGaugeColor = (val: number) => {
+      if (val <= 50) return '#ef4444'; 
+      if (val <= 70) return '#eab308'; 
+      return '#22c55e'; 
   };
 
   if (loading) return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin text-neon-blue" size={48} /></div>;
@@ -260,47 +303,167 @@ const Financeiro: React.FC = () => {
                     <div className="bg-slate-800 p-4 rounded-xl border border-green-500/30 shadow-lg hover:border-green-500 transition xl:col-span-2"><div className="flex justify-between items-start"><div><p className="text-[10px] text-green-500 font-black uppercase mb-1 tracking-widest">Faturamento Realizado</p><h3 className="text-2xl font-black text-white">{totalRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3><p className="text-[8px] text-slate-500 font-bold mt-1 uppercase tracking-tighter">Somente reservas Confirmadas e Pagas</p></div><div className="p-2 bg-green-500/10 rounded-lg text-green-500"><DollarSign size={24}/></div></div></div>
                     <div onClick={() => setDrillDownType('PENDING')} className="bg-slate-800 p-4 rounded-xl border border-yellow-500/30 shadow-lg hover:border-yellow-500 transition xl:col-span-2 cursor-pointer group"><div className="flex justify-between items-start"><div><p className="text-[10px] text-yellow-500 font-black uppercase mb-1 tracking-widest">A Receber / Pendente</p><h3 className="text-2xl font-black text-white">{pendingRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3><p className="text-[8px] text-slate-500 font-bold mt-1 uppercase underline group-hover:text-yellow-400 transition-colors">Clique para ver lista</p></div><div className="p-2 bg-yellow-500/10 rounded-lg text-yellow-500"><AlertCircle size={24}/></div></div></div>
                     <div className="bg-slate-800 p-4 rounded-xl border border-neon-blue/30 shadow-lg hover:border-neon-blue transition xl:col-span-2"><div className="flex justify-between items-start"><div><p className="text-[10px] text-neon-blue font-black uppercase mb-1 tracking-widest">Ticket Médio (H)</p><h3 className="text-2xl font-black text-white">{avgTicket.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3></div><div className="p-2 bg-neon-blue/10 rounded-lg text-neon-blue"><TrendingUp size={24}/></div></div></div>
-                    <div className="bg-slate-800 p-4 rounded-xl border border-slate-600 shadow-lg xl:col-span-2"><div className="flex justify-between items-start"><div><p className="text-[10px] text-slate-400 font-black uppercase mb-1 tracking-widest">Horas Vendidas</p><h3 className="text-2xl font-black text-white">{confirmedSlotsCount}</h3></div><div className="p-2 bg-slate-700 rounded-lg text-slate-300"><ListChecks size={24}/></div></div></div>
-                    <div className="bg-slate-800 p-4 rounded-xl border border-purple-500/30 shadow-lg hover:border-purple-500 transition xl:col-span-2"><div className="flex justify-between items-start"><div><p className="text-[10px] text-purple-400 font-black uppercase mb-1 tracking-widest">Média Diária</p><h3 className="text-2xl font-black text-white">{dailyAverage.toFixed(1)} <span className="text-sm font-normal text-slate-400 uppercase font-black">res/dia</span></h3></div><div className="p-2 bg-purple-500/10 rounded-lg text-purple-500"><Calculator size={24}/></div></div></div>
-                    <div onClick={() => setDrillDownType('CANCELLED')} className="bg-slate-800 p-4 rounded-xl border border-red-500/30 shadow-lg hover:border-red-500 transition xl:col-span-2 cursor-pointer group"><div className="flex justify-between items-start"><div><p className="text-[10px] text-red-400 font-black uppercase mb-1 tracking-widest">Taxa Estorno</p><h3 className="text-2xl font-black text-white">{cancellationRate.toFixed(1)}%</h3><p className="text-[8px] text-slate-500 font-bold mt-1 uppercase underline group-hover:text-red-400 transition-colors">Clique para ver lista</p></div><div className="p-2 bg-red-500/10 rounded-lg text-red-500"><Percent size={24}/></div></div></div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg lg:col-span-2"><h3 className="text-lg font-black text-white mb-6 flex items-center gap-2 uppercase tracking-tighter"><DollarSign size={20} className="text-green-500"/> Evolução do Faturamento no Período</h3><div className="h-80 w-full"><ResponsiveContainer width="100%" height="100%"><AreaChart data={revenueChartData}><defs><linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#22c55e" stopOpacity={0.3}/><stop offset="95%" stopColor="#22c55e" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke="#334155"/><XAxis dataKey="date" stroke="#94a3b8" fontSize={12} tick={{fontWeight: 'bold'}}/><YAxis stroke="#94a3b8" fontSize={12} tick={{fontWeight: 'bold'}}/><Tooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontWeight: 'bold'}} itemStyle={{color: '#fff'}} labelStyle={{color: '#fff'}} formatter={(v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/><Area type="monotone" dataKey="value" name="Valor" stroke="#22c55e" strokeWidth={3} fillOpacity={1} fill="url(#colorRevenue)"/></AreaChart></ResponsiveContainer></div></div>
-                    
-                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg"><h3 className="text-lg font-black text-white mb-4 flex items-center gap-2 uppercase tracking-tighter"><PieIcon size={20} className="text-neon-orange"/> Receita por Meio de Pagamento</h3><div className="h-80 w-full"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={revenueByMethodData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value" stroke="none">{revenueByMethodData.map((e, i) => (<Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]}/>))}</Pie><Tooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontWeight: 'bold'}} itemStyle={{color: '#fff'}} labelStyle={{color: '#fff'}} formatter={(v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/><Legend verticalAlign="bottom" height={36} wrapperStyle={{fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase'}}/></PieChart></ResponsiveContainer></div></div>
-                    
-                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg"><h3 className="text-lg font-black text-white mb-4 flex items-center gap-2 uppercase tracking-tighter"><Tag size={20} className="text-neon-blue"/> Receita por Tipo de Reserva</h3><div className="h-80 w-full"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={revenueByTypeData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value" stroke="none">{revenueByTypeData.map((e, i) => (<Cell key={`cell-type-${i}`} fill={EVENT_TYPE_COLORS[e.name] || COLORS[i % COLORS.length]}/>))}</Pie><Tooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontWeight: 'bold'}} itemStyle={{color: '#fff'}} labelStyle={{color: '#fff'}} formatter={(v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/><Legend verticalAlign="bottom" height={36} wrapperStyle={{fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase'}}/></PieChart></ResponsiveContainer></div></div>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* VELOCÍMETRO DE OCUPAÇÃO GERAL - ATUALIZADO COM HORAS DISPONÍVEIS */}
+                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg flex flex-col items-center justify-center overflow-hidden">
+                        <h3 className="text-sm font-black text-white mb-2 flex items-center gap-2 uppercase tracking-tighter text-center"><Gauge size={18} className="text-neon-orange"/> Taxa de Ocupação Geral</h3>
+                        <p className="text-[9px] text-slate-500 font-bold uppercase mb-4 text-center">Desempenho da Unidade</p>
+                        <div className="h-48 w-full relative">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                    <Pie
+                                        data={[
+                                            { value: occupancyStats.percentage },
+                                            { value: 100 - occupancyStats.percentage }
+                                        ]}
+                                        cx="50%"
+                                        cy="80%"
+                                        startAngle={180}
+                                        endAngle={0}
+                                        innerRadius={60}
+                                        outerRadius={85}
+                                        paddingAngle={0}
+                                        dataKey="value"
+                                        stroke="none"
+                                    >
+                                        <Cell fill={getGaugeColor(occupancyStats.percentage)} />
+                                        <Cell fill="#1e293b" />
+                                    </Pie>
+                                </PieChart>
+                            </ResponsiveContainer>
+                            <div className="absolute inset-0 flex flex-col items-center justify-center pt-12">
+                                <span className="text-3xl font-black text-white leading-none">{Math.round(occupancyStats.percentage)}%</span>
+                                <span className="text-[8px] font-black text-slate-500 uppercase mt-1 tracking-widest">Capacidade</span>
+                            </div>
+                        </div>
+                        <div className="w-full bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 flex justify-between gap-4 mt-2">
+                            <div className="flex flex-col items-center flex-1">
+                                <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Horas Disponíveis</span>
+                                <span className="text-base font-black text-white">{occupancyStats.totalCapacity}h</span>
+                            </div>
+                            <div className="w-px bg-slate-700"></div>
+                            <div className="flex flex-col items-center flex-1">
+                                <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Horas Vendidas</span>
+                                <span className="text-base font-black text-neon-blue">{occupancyStats.occupiedTotal}h</span>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 w-full mt-4">
+                            <div className="flex flex-col items-center"><div className="w-full h-1 bg-red-500 rounded-full mb-1 opacity-50"></div><span className="text-[7px] font-bold text-slate-600">BAIXA</span></div>
+                            <div className="flex flex-col items-center"><div className="w-full h-1 bg-yellow-500 rounded-full mb-1 opacity-50"></div><span className="text-[7px] font-bold text-slate-600">MÉDIA</span></div>
+                            <div className="flex flex-col items-center"><div className="w-full h-1 bg-green-500 rounded-full mb-1 opacity-50"></div><span className="text-[7px] font-bold text-slate-600">ALTA</span></div>
+                        </div>
+                    </div>
 
-                    {/* GRÁFICO: ORIGEM / CANAL DE VENDA - AJUSTADO PARA MOBILE */}
-                    <div className="lg:col-span-2 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
+                    {/* GRÁFICO: OCUPAÇÃO POR DIA DA SEMANA */}
+                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg lg:col-span-2">
+                        <h3 className="text-sm font-black text-white mb-6 flex items-center gap-2 uppercase tracking-tighter"><Calendar size={18} className="text-neon-blue"/> Taxa de Ocupação por Dia da Semana</h3>
+                        <div className="h-56 w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={occupancyStats.byDay}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                                    <XAxis dataKey="name" stroke="#94a3b8" fontSize={10} tick={{fontWeight: 'black'}} />
+                                    <YAxis stroke="#94a3b8" fontSize={10} tickFormatter={(v) => `${v}%`} />
+                                    <Tooltip 
+                                        cursor={{fill: '#334155', opacity: 0.3}}
+                                        contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px'}}
+                                        formatter={(v: number) => [`${v}%`, 'Ocupação']}
+                                    />
+                                    <Bar dataKey="porcentagem" radius={[4, 4, 0, 0]}>
+                                        {occupancyStats.byDay.map((entry, index) => (
+                                            <Cell key={`cell-day-${index}`} fill={getGaugeColor(entry.porcentagem)} />
+                                        ))}
+                                    </Bar>
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+
+                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg lg:col-span-3">
+                        <h3 className="text-lg font-black text-white mb-6 flex items-center gap-2 uppercase tracking-tighter"><DollarSign size={20} className="text-green-500"/> Evolução do Faturamento no Período</h3>
+                        <div className="h-80 w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={revenueChartData}>
+                                    <defs>
+                                        <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3}/>
+                                            <stop offset="95%" stopColor="#22c55e" stopOpacity={0}/>
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155"/>
+                                    <XAxis dataKey="date" stroke="#94a3b8" fontSize={12} tick={{fontWeight: 'bold'}}/>
+                                    <YAxis stroke="#94a3b8" fontSize={12} tick={{fontWeight: 'bold'}}/>
+                                    <Tooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontWeight: 'bold'}} itemStyle={{color: '#fff'}} labelStyle={{color: '#fff'}} formatter={(v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/>
+                                    <Area type="monotone" dataKey="value" name="Valor" stroke="#22c55e" strokeWidth={3} fillOpacity={1} fill="url(#colorRevenue)"/>
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+                    
+                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
+                        <h3 className="text-sm font-black text-white mb-4 flex items-center gap-2 uppercase tracking-tighter"><PieIcon size={18} className="text-neon-orange"/> Receita por Meio</h3>
+                        <div className="h-64 w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                    <Pie data={revenueByMethodData} cx="50%" cy="50%" innerRadius={50} outerRadius={70} paddingAngle={5} dataKey="value" stroke="none">
+                                        {revenueByMethodData.map((e, i) => (<Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]}/>))}
+                                    </Pie>
+                                    <Tooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px'}} formatter={(v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/>
+                                    <Legend verticalAlign="bottom" height={36} wrapperStyle={{fontSize: '9px', fontWeight: 'bold', textTransform: 'uppercase'}}/>
+                                </PieChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+                    
+                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
+                        <h3 className="text-sm font-black text-white mb-4 flex items-center gap-2 uppercase tracking-tighter"><Tag size={18} className="text-neon-blue"/> Receita por Tipo</h3>
+                        <div className="h-64 w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                    <Pie data={revenueByTypeData} cx="50%" cy="50%" innerRadius={50} outerRadius={70} paddingAngle={5} dataKey="value" stroke="none">
+                                        {revenueByTypeData.map((e, i) => (<Cell key={`cell-type-${i}`} fill={EVENT_TYPE_COLORS[e.name] || COLORS[i % COLORS.length]}/>))}
+                                    </Pie>
+                                    <Tooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px'}} formatter={(v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/>
+                                    <Legend verticalAlign="bottom" height={36} wrapperStyle={{fontSize: '9px', fontWeight: 'bold', textTransform: 'uppercase'}}/>
+                                </PieChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+
+                    <div className="lg:col-span-1 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg flex flex-col justify-center">
+                        <h3 className="text-sm font-black text-white mb-6 flex items-center gap-2 uppercase tracking-tighter"><Clock size={18} className="text-neon-orange"/> Resumo Operacional</h3>
+                        <div className="space-y-4">
+                            <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+                                <span className="text-[9px] text-slate-500 font-black uppercase block mb-1">Média Diária</span>
+                                <span className="text-xl font-black text-white">{dailyAverage.toFixed(1)} <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">horas</span></span>
+                            </div>
+                            <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+                                <span className="text-[9px] text-slate-500 font-black uppercase block mb-1">Total de Horas Vendidas</span>
+                                <span className="text-xl font-black text-white">{confirmedSlotsCount} <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">horas</span></span>
+                            </div>
+                            <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+                                <span className="text-[9px] text-slate-500 font-black uppercase block mb-1">Estornos / Cancelados</span>
+                                <span className="text-xl font-black text-red-500">{cancellationRate.toFixed(1)}%</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="lg:col-span-3 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
                         <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6">
                             <h3 className="text-lg font-black text-white flex items-center gap-2 uppercase tracking-tighter"><Monitor size={20} className="text-neon-blue"/> Faturamento por Origem</h3>
                             <div className="flex flex-wrap items-center gap-4 text-[9px] font-black uppercase tracking-widest border-t md:border-t-0 border-slate-700 pt-2 md:pt-0">
-                                <div className="flex items-center gap-1.5 text-blue-400"><div className="w-2 h-2 rounded-full bg-blue-500"></div> Venda Direta (Site)</div>
-                                <div className="flex items-center gap-1.5 text-purple-400"><div className="w-2 h-2 rounded-full bg-purple-500"></div> Membros Equipe</div>
+                                <div className="flex items-center gap-1.5 text-blue-400"><div className="w-2 h-2 rounded-full bg-blue-500"></div> Site</div>
+                                <div className="flex items-center gap-1.5 text-purple-400"><div className="w-2 h-2 rounded-full bg-purple-500"></div> Equipe</div>
                             </div>
                         </div>
-                        <div className="h-72 w-full">
+                        <div className="h-64 w-full">
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart layout="vertical" data={revenueBySourceData} margin={{ left: -10, right: 30, top: 10, bottom: 10 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={false} />
                                     <XAxis type="number" stroke="#94a3b8" fontSize={10} tickFormatter={(v) => `R$ ${v/1000}k`} />
-                                    <YAxis 
-                                        dataKey="name" 
-                                        type="category" 
-                                        stroke="#fff" 
-                                        fontSize={9} 
-                                        width={100} 
-                                        tick={{fontWeight: 'black'}} 
-                                        tickFormatter={(val) => val.length > 15 ? val.substring(0, 12) + '...' : val}
-                                    />
-                                    <Tooltip 
-                                        contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px'}} 
-                                        itemStyle={{color: '#fff', fontSize: '12px'}} 
-                                        labelStyle={{color: '#3b82f6', fontWeight: 'black', marginBottom: '4px'}}
-                                        formatter={(v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} 
-                                    />
+                                    <YAxis dataKey="name" type="category" stroke="#fff" fontSize={9} width={100} tick={{fontWeight: 'black'}} />
+                                    <Tooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px'}} formatter={(v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} />
                                     <Bar dataKey="value" radius={[0, 4, 4, 0]}>
                                         {revenueBySourceData.map((entry, index) => (
                                             <Cell key={`cell-source-${index}`} fill={entry.name.includes('SITE') ? '#3b82f6' : '#a855f7'} />
@@ -310,28 +473,26 @@ const Financeiro: React.FC = () => {
                             </ResponsiveContainer>
                         </div>
                     </div>
-
-                    <div className="lg:col-span-2 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg"><h3 className="text-lg font-black text-white mb-6 flex items-center gap-2 uppercase tracking-tighter"><Clock size={20} className="text-neon-orange"/> Movimentação por Hora (Ocupação Pistas)</h3><div className="h-64 w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={peakHoursChartData}><CartesianGrid strokeDasharray="3 3" stroke="#334155"/><XAxis dataKey="hour" stroke="#94a3b8" fontSize={12} tick={{fontWeight: 'bold'}}/><YAxis stroke="#94a3b8" fontSize={12} tick={{fontWeight: 'bold'}}/><Tooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontWeight: 'bold'}} itemStyle={{color: '#fff'}} labelStyle={{color: '#fff'}} cursor={{fill: '#334155', opacity: 0.4}}/><Bar dataKey="count" name="Pistas Ocupadas" fill="#f97316" radius={[4, 4, 0, 0]}/></BarChart></ResponsiveContainer></div></div>
                 </div>
             </div>
         ) : (
             <div className="animate-fade-in bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg flex flex-col h-[700px]">
                 <div className="mb-4">
-                    <h3 className="text-xl font-black text-white flex items-center gap-2 mb-4 uppercase tracking-tighter"><Shield className="text-neon-orange"/> Registro de Auditoria do Sistema</h3>
+                    <h3 className="text-xl font-black text-white flex items-center gap-2 mb-4 uppercase tracking-tighter"><Shield className="text-neon-orange"/> Registro de Auditoria</h3>
                     <div className="flex flex-col md:flex-row gap-2 bg-slate-900/50 p-3 rounded-lg border border-slate-700">
                         <select className="bg-slate-800 border border-slate-600 rounded text-xs text-white p-2 flex-1 outline-none font-bold uppercase" value={auditFilters.userId} onChange={e => setAuditFilters({...auditFilters, userId: e.target.value})}><option value="ALL">Todos Usuários</option>{allUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
-                        <select className="bg-slate-800 border border-slate-600 rounded text-xs text-white p-2 flex-1 outline-none font-bold uppercase" value={auditFilters.actionType} onChange={e => setAuditFilters({...auditFilters, actionType: e.target.value})}><option value="ALL">Todas Ações</option><option value="LOGIN">Acessos (Login)</option><option value="CREATE_RESERVATION">Novas Reservas</option><option value="UPDATE_RESERVATION">Edições</option><option value="CREATE_CLIENT">Cadastro Clientes</option></select>
+                        <select className="bg-slate-800 border border-slate-600 rounded text-xs text-white p-2 flex-1 outline-none font-bold uppercase" value={auditFilters.actionType} onChange={e => setAuditFilters({...auditFilters, actionType: e.target.value})}><option value="ALL">Todas Ações</option><option value="LOGIN">Acessos</option><option value="CREATE_RESERVATION">Novas Reservas</option><option value="UPDATE_RESERVATION">Edições</option><option value="CREATE_CLIENT">Cadastros</option></select>
                         <button onClick={refreshAuditLogs} className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded text-xs font-black uppercase flex items-center gap-2 transition-all"><History size={14}/> Sincronizar</button>
                     </div>
                 </div>
-                <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">{auditLogs.length === 0 ? (<div className="text-center text-slate-500 py-10 font-bold uppercase tracking-widest text-[10px]">Nenhuma atividade registrada no período.</div>) : (auditLogs.map(log => (<div key={log.id} className="relative pl-6 pb-6 border-l border-slate-700 last:border-0 last:pb-0"><div className="absolute left-[-5px] top-0 w-2.5 h-2.5 rounded-full bg-neon-blue border-2 border-slate-800 shadow-[0_0_8px_rgba(59,130,246,0.5)]"></div><p className="text-[10px] text-slate-500 mb-1 flex justify-between font-bold"><span>{new Date(log.createdAt).toLocaleString('pt-BR')}</span></p><div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700/50"><p className="text-sm text-white font-black flex items-center gap-2 uppercase tracking-tighter">{log.userName} <span className="text-[9px] uppercase font-black px-1.5 py-0.5 rounded-md bg-slate-700 text-neon-blue border border-neon-blue/20">{log.actionType}</span></p><p className="text-xs text-slate-400 mt-1 font-medium">{log.details}</p></div></div>)))}</div>
+                <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">{auditLogs.length === 0 ? (<div className="text-center text-slate-500 py-10 font-bold uppercase tracking-widest text-[10px]">Nenhuma atividade registrada no período.</div>) : (auditLogs.map(log => (<div key={log.id} className="relative pl-6 pb-6 border-l border-slate-700 last:border-0 last:pb-0"><div className="absolute left-[-5px] top-0 w-2.5 h-2.5 rounded-full bg-neon-blue border-2 border-slate-800"></div><p className="text-[10px] text-slate-500 mb-1 flex justify-between font-bold"><span>{new Date(log.createdAt).toLocaleString('pt-BR')}</span></p><div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700/50"><p className="text-sm text-white font-black flex items-center gap-2 uppercase tracking-tighter">{log.userName} <span className="text-[9px] uppercase font-black px-1.5 py-0.5 rounded-md bg-slate-700 text-neon-blue border border-neon-blue/20">{log.actionType}</span></p><p className="text-xs text-slate-400 mt-1 font-medium">{log.details}</p></div></div>)))}</div>
             </div>
         )}
 
         {drillDownType && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4">
                 <div className="bg-slate-800 border border-slate-600 w-full max-w-2xl rounded-3xl shadow-2xl animate-scale-in flex flex-col max-h-[90vh]">
-                    <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-900/50 rounded-t-3xl"><div className="flex items-center gap-4">{drillDownType === 'PENDING' ? (<div className="p-3 bg-yellow-500/10 rounded-2xl text-yellow-500"><AlertCircle size={32}/></div>) : (<div className="p-3 bg-red-500/10 rounded-2xl text-red-500"><Ban size={32}/></div>)}<div><h3 className="text-xl font-black text-white uppercase tracking-tighter leading-none mb-1">{drillDownType === 'PENDING' ? 'Reservas Pendentes' : 'Reservas Canceladas'}</h3><p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{getDrillDownList().length} registros encontrados</p></div></div><button onClick={() => setDrillDownType(null)} className="text-slate-400 hover:text-white p-2 transition-colors"><X size={24}/></button></div>
+                    <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-900/50 rounded-t-3xl"><div className="flex items-center gap-4">{drillDownType === 'PENDING' ? (<div className="p-3 bg-yellow-500/10 rounded-2xl text-yellow-500"><AlertCircle size={32}/></div>) : (<div className="p-3 bg-red-500/10 rounded-2xl text-red-500"><Ban size={32}/></div>)}<div><h3 className="text-xl font-black text-white uppercase tracking-tighter leading-none mb-1">{drillDownType === 'PENDING' ? 'Reservas Pendentes' : 'Reservas Canceladas'}</h3><p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{getDrillDownList().length} registros</p></div></div><button onClick={() => setDrillDownType(null)} className="text-slate-400 hover:text-white p-2 transition-colors"><X size={24}/></button></div>
                     <div className="flex-1 overflow-y-auto p-6 space-y-3 custom-scrollbar bg-slate-800/50">
                         {getDrillDownList().length === 0 ? (<div className="text-center py-20 text-slate-600 font-black uppercase text-sm italic tracking-widest">Nenhum registro para exibir.</div>) : (getDrillDownList().map(res => (
                             <div key={res.id} className="bg-slate-900/80 border border-slate-700 p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-lg group hover:border-slate-500 transition-colors">
@@ -340,10 +501,6 @@ const Financeiro: React.FC = () => {
                                     <div className="text-[10px] text-slate-500 font-bold flex items-center gap-3 mt-1 uppercase tracking-widest">
                                         <div className="flex items-center gap-1"><Calendar size={12}/> {res.date.split('-').reverse().join('/')}</div>
                                         <div className="flex items-center gap-1"><Clock size={12}/> {res.time}</div>
-                                    </div>
-                                    <div className="mt-2 flex items-center gap-2">
-                                        <span className="text-[9px] font-black text-slate-400 border border-slate-700 px-2 py-0.5 rounded-md uppercase tracking-tighter bg-slate-800">MEIO: {res.paymentMethod || 'NÃO INF.'}</span>
-                                        <span className="text-[9px] font-black text-slate-400 border border-slate-700 px-2 py-0.5 rounded-md uppercase tracking-tighter bg-slate-800">TIPO: {res.eventType}</span>
                                     </div>
                                 </div>
                                 <div className="text-right flex flex-col items-end gap-1.5 w-full sm:w-auto pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-700/30">
