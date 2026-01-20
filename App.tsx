@@ -13,6 +13,7 @@ import Financeiro from './pages/Financeiro';
 import ClientDashboard from './pages/ClientDashboard';
 import ResetPassword from './pages/ResetPassword';
 import Home from './pages/Home';
+import LP from './pages/LP';
 import { UserRole, User } from './types';
 
 declare global {
@@ -21,20 +22,13 @@ declare global {
   }
 }
 
-/**
- * PixelTracker - Monitor de Navegação SPA
- * Este componente avisa o Facebook toda vez que o usuário muda de tela no App.
- */
 const PixelTracker: React.FC = () => {
   const location = useLocation();
 
   useEffect(() => {
-    // Garante que o fbq existe e dispara PageView
     if (window.fbq) {
       window.fbq('track', 'PageView');
       console.log(`%c[Meta Pixel] Evento PageView em: ${location.pathname}`, 'color: #1877F2; font-weight: bold;');
-    } else {
-      console.warn("[Meta Pixel] Script não detectado. Verifique AdBlockers.");
     }
   }, [location]);
 
@@ -86,6 +80,7 @@ const AppContent: React.FC = () => {
             <PixelTracker />
             <Routes>
                 <Route path="/" element={<Home />} />
+                <Route path="/lp" element={<LP />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/agendamento" element={<PublicBooking />} />
                 <Route path="/checkout" element={<Checkout />} />
