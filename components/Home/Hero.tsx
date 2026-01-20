@@ -51,7 +51,7 @@ export const Hero: React.FC<HeroProps> = ({ onReserve }) => {
               onClick={() => onReserve('Hero Primary')} 
               className="group relative px-8 md:px-12 py-5 md:py-6 bg-neon-orange hover:bg-orange-500 text-white rounded-2xl font-black uppercase text-[10px] md:text-sm tracking-[0.2em] shadow-[0_15px_40px_rgba(249,115,22,0.3)] transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-4"
             >
-               RESERVA MINHA PISTA AGORA <ChevronRight size={18} className="group-hover:translate-x-1 transition-transform" />
+               RESERVAR MINHA PISTA AGORA <ChevronRight size={18} className="group-hover:translate-x-1 transition-transform" />
             </button>
           </div>
 
