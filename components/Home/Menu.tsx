@@ -6,7 +6,7 @@ export const Menu: React.FC = () => {
   const features = [
     {
       title: 'Pizza Tô Na Pista',
-      desc: 'Massa artesanal, presunto, mussarela, bacon em cubos, palmito, ervilha fresca, cebola e catupiry.',
+      desc: 'Massa artesanal, presunto copa, mussarela, bacon em cubos, palmito, ervilha fresca, cebola roxa e catupiry.',
       icon: <Pizza className="text-orange-500" size={28} />,
       tag: 'Assinatura',
       price: 'R$ 85,00',
@@ -14,7 +14,7 @@ export const Menu: React.FC = () => {
     },
     {
       title: 'Hambúrguer X-Strike',
-      desc: 'Pão brioche, burger 120g, provolone, bacon, cebola caramelizada, geléia de abacaxi apimentada e fritas.',
+      desc: 'Pão brioche, burger 120g, provolone, bacon, cebola caramelizada, geléia de abacaxi apimentada, alface e fritas.',
       icon: <Utensils className="text-blue-500" size={28} />,
       tag: 'Mais Pedido',
       price: 'R$ 32,00',
