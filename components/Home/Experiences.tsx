@@ -64,22 +64,20 @@ export const Experiences: React.FC = () => {
           ))}
         </div>
 
-        {/* INFORMATIVO DE REGRAS DE MESA - DESIGN ATUALIZADO CONFORME PRINT */}
+        {/* INFORMATIVO DE REGRAS DE MESA */}
         <div className="max-w-2xl mx-auto">
           <div className="bg-[#111827] border border-slate-800 rounded-[2.5rem] p-8 md:p-12 shadow-2xl relative overflow-hidden text-center flex flex-col items-center">
-            {/* Ícone de Talher no fundo para textura */}
             <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none">
               <Utensils size={300} />
             </div>
 
-            {/* Ícone de Informação Laranja */}
             <div className="w-20 h-20 bg-orange-500/10 rounded-[1.8rem] flex items-center justify-center text-neon-orange border border-orange-500/20 shadow-inner mb-8 relative z-10">
               <Info size={40} strokeWidth={2.5} />
             </div>
             
             <p className="text-slate-400 text-sm md:text-lg leading-relaxed mb-10 relative z-10 max-w-md">
               <strong className="text-white font-black">Além das pistas, você pode solicitar a reserva de mesas e cadeiras. 
-              Garantimos até <br /> <span className="text-neon-orange font-black">25 cadeiras por reserva padrão</span> para o conforto do seu grupo.
+              Garantimos até <br /> <span className="text-neon-orange font-black">25 cadeiras por reserva padrão</span> para o conforto do seu grupo.</strong>
             </p>
 
             <div className="flex flex-col gap-3 w-full max-w-sm relative z-10">
