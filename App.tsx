@@ -12,6 +12,7 @@ import Settings from './pages/Settings';
 import Financeiro from './pages/Financeiro';
 import ClientDashboard from './pages/ClientDashboard';
 import ResetPassword from './pages/ResetPassword';
+import Home from './pages/Home';
 import { UserRole, User } from './types';
 
 declare global {
@@ -84,11 +85,11 @@ const AppContent: React.FC = () => {
         <Router>
             <PixelTracker />
             <Routes>
+                <Route path="/" element={<Home />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/agendamento" element={<PublicBooking />} />
                 <Route path="/checkout" element={<Checkout />} />
                 <Route path="/redefinir-senha" element={<ResetPassword />} />
-                <Route path="/" element={<Navigate to="/agendamento" />} />
                 <Route path="/minha-conta" element={<ClientDashboard />} />
                 
                 <Route path="/agenda" element={

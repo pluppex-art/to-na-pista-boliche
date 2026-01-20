@@ -1,5 +1,4 @@
 
-
 import { EventType, FunnelStage, ReservationStatus, UserRole, AppSettings, User } from './types';
 
 export const MOCK_DELAY = 500;
@@ -26,9 +25,9 @@ const DEFAULT_HOURS = [
 
 export const INITIAL_SETTINGS: AppSettings = {
   establishmentName: 'Tô Na Pista Boliche',
-  address: 'Av. das Américas, 5000 - Barra da Tijuca',
-  phone: '(21) 99999-9999',
-  whatsappLink: 'https://wa.me/5521999999999',
+  address: 'Av. Juscelino Kubitschek, 103 Norte - Segundo estacionamento - Centro, Palmas - TO, 77001-014',
+  phone: '(63) 99117-8242',
+  whatsappLink: 'https://wa.me/5563991178242',
   logoUrl: '',
   activeLanes: 6,
   weekdayPrice: 99.90, 
