@@ -1,27 +1,28 @@
+
 {
   "short_name": "Tô Na Pista",
   "name": "Tô Na Pista - Agenda & CRM",
   "icons": [
     {
-      "src": "/logo.png",
+      "src": "https://drive.google.com/thumbnail?id=1HFiVgdc1l0JAsFJpOOIYfd-hqpeG_7bB&sz=w192",
       "type": "image/png",
       "sizes": "192x192",
       "purpose": "any"
     },
     {
-      "src": "/logo.png",
+      "src": "https://drive.google.com/thumbnail?id=1HFiVgdc1l0JAsFJpOOIYfd-hqpeG_7bB&sz=w512",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "any"
     },
     {
-      "src": "/logo.png",
+      "src": "https://drive.google.com/thumbnail?id=1HFiVgdc1l0JAsFJpOOIYfd-hqpeG_7bB&sz=w192",
       "type": "image/png",
       "sizes": "192x192",
       "purpose": "maskable"
     },
     {
-      "src": "/logo.png",
+      "src": "https://drive.google.com/thumbnail?id=1HFiVgdc1l0JAsFJpOOIYfd-hqpeG_7bB&sz=w512",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "maskable"
