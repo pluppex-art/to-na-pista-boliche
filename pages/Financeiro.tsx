@@ -368,6 +368,8 @@ const Financeiro: React.FC = () => {
                                     <Tooltip 
                                         cursor={{fill: '#334155', opacity: 0.3}}
                                         contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px'}}
+                                        labelStyle={{color: '#fff'}}
+                                        itemStyle={{color: '#fff'}}
                                         formatter={(v: number) => [`${v}%`, 'Ocupação']}
                                     />
                                     <Bar dataKey="porcentagem" radius={[4, 4, 0, 0]}>
