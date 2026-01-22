@@ -55,7 +55,8 @@ const Agenda: React.FC = () => {
 
   const dayStatus = useMemo(() => {
     if (!settings) return { isClosed: false, reason: '' };
-    const isBlocked = settings.blockedDates?.includes(selectedDate);
+    const cleanSelected = selectedDate.trim().substring(0, 10);
+    const isBlocked = settings.blockedDates?.some(d => d.trim().substring(0, 10) === cleanSelected);
     if (isBlocked) return { isClosed: true, reason: 'BLOQUEIO EXCEPCIONAL' };
     
     const config = getDayConfiguration(selectedDate, settings);
@@ -84,18 +85,27 @@ const Agenda: React.FC = () => {
       (allClients || []).forEach(c => { if(c && c.id) phoneMap[c.id] = c.phone; });
       setClientPhones(phoneMap);
 
+      // Filtro da Agenda Robustecido
       const dayReservations = validReservations
-        .filter(r => r.date === selectedDate && r.status !== ReservationStatus.CANCELADA)
+        .filter(r => {
+            const rDate = String(r.date || "").trim().substring(0, 10);
+            const sDate = String(selectedDate || "").trim().substring(0, 10);
+            return rDate === sDate && r.status !== ReservationStatus.CANCELADA;
+        })
         .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
       setReservations(dayReservations);
 
       let total = 0, pending = 0, confirmed = 0, checkIn = 0, noShow = 0;
       dayReservations.forEach(r => {
-          const slotCount = (r.laneCount || 1) * Math.ceil(r.duration || 1);
+          const lCount = Math.max(1, r.laneCount || 1);
+          const dur = Math.max(1, Math.ceil(r.duration || 1));
+          const slotCount = lCount * dur;
+          
           total += slotCount;
-          if (r.status === ReservationStatus.CHECK_IN) checkIn += (r.checkedInIds?.length || 0);
+          if (r.status === ReservationStatus.CHECK_IN) checkIn += (r.checkedInIds?.length || lCount);
           else if (r.status === ReservationStatus.NO_SHOW) noShow += (r.noShowIds?.length || 0);
+          
           if (r.paymentStatus === PaymentStatus.PENDENTE) pending += slotCount;
           else confirmed += slotCount;
       });
@@ -106,7 +116,7 @@ const Agenda: React.FC = () => {
 
   useEffect(() => { 
     loadData();
-    const channel = supabase.channel(`agenda-sync-v29`)
+    const channel = supabase.channel(`agenda-sync-realtime`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => loadData(true))
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -120,7 +130,6 @@ const Agenda: React.FC = () => {
       allReservationsForAlerts.forEach(res => {
           if (!res || res.status === ReservationStatus.CANCELADA || res.paymentStatus === PaymentStatus.PAGO) return;
 
-          // 1. RESERVAS DO SITE AGUARDANDO PAGAMENTO (30 MINUTOS)
           if (res.status === ReservationStatus.PENDENTE && !res.payOnSite && res.createdAt) {
               const created = new Date(res.createdAt).getTime();
               const diffMinutes = (now.getTime() - created) / 60000;
@@ -137,10 +146,8 @@ const Agenda: React.FC = () => {
               return; 
           }
 
-          // 2. COMANDAS E DÉBITOS
           const resDate = new Date(res.date + 'T00:00:00');
           if (resDate < todayDate) {
-              // PENDÊNCIA PASSADA
               const diffTime = Math.abs(todayDate.getTime() - resDate.getTime());
               const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
               globalAlerts.push({
@@ -151,8 +158,7 @@ const Agenda: React.FC = () => {
                   color: 'border-red-600 bg-red-900/60 text-white shadow-xl animate-pulse'
               });
           } else if (res.date === todayStr) {
-              // COMANDA DE HOJE
-              const startTime = new Date(res.date + 'T' + (res.time.length === 5 ? res.time : '0' + res.time));
+              const startTime = new Date(res.date + 'T' + (res.time.length === 5 ? res.time : res.time.slice(0,5)));
               const endTime = new Date(startTime.getTime() + (res.duration * 60 * 60 * 1000));
 
               if (res.status === ReservationStatus.CHECK_IN) {
@@ -185,7 +191,6 @@ const Agenda: React.FC = () => {
           }
       });
       
-      // Ordenação: Pendência Passada > Partida Encerrada > Site Urgente > Comanda Hoje
       return globalAlerts.sort((a,b) => {
           const order = { 'PENDENCIA_PASSADA': 0, 'PARTIDA_ENCERRADA': 1, 'SITE_URGENTE': 2, 'COMANDA_HOJE': 3 };
           return order[a.type] - order[b.type];
@@ -289,7 +294,7 @@ const Agenda: React.FC = () => {
 
   const formatDateDisplay = (dateStr: string) => {
     if (!dateStr) return '---';
-    const parts = dateStr.split('-');
+    const parts = dateStr.trim().substring(0, 10).split('-');
     if (parts.length < 3) return dateStr;
     return parts.reverse().join('/');
   };
@@ -313,7 +318,6 @@ const Agenda: React.FC = () => {
                                   <p className="text-sm font-bold group-hover:underline transition-all truncate">{alert.message}</p>
                               </div>
                           </div>
-                          
                           <div className="flex items-center gap-2 w-full sm:w-auto">
                               {(alert.type !== 'ATRASO_CHECKIN') && (
                                   <button onClick={() => handleQuickCheckout(alert.res)} className="flex-1 sm:flex-none bg-white text-slate-900 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2 transition active:scale-95 shadow-xl border border-white/20">
@@ -370,12 +374,16 @@ const Agenda: React.FC = () => {
              {timeSlots.map(slot => {
                const timeParts = slot.time.split(':');
                const currentHourInt = parseInt(timeParts[0] || "0");
+               
                const hourReservations = reservations.filter(r => {
-                 const rTimeParts = (r.time || "00:00").split(':');
+                 const rTimeParts = (r.time || "00:00").trim().split(':');
                  const start = parseInt(rTimeParts[0] || "0");
-                 return currentHourInt >= start && currentHourInt < start + (r.duration || 1);
+                 // Força duracao de pelo menos 1 para garantir exibicao
+                 const dur = Math.max(1, r.duration || 1);
+                 return currentHourInt >= start && currentHourInt < start + dur;
                });
-               const lanesOccupied = hourReservations.reduce((acc, curr) => acc + (curr.laneCount || 0), 0);
+               
+               const lanesOccupied = hourReservations.reduce((acc, curr) => acc + (curr.laneCount || 1), 0);
                return (
                  <div key={slot.time} className="bg-slate-900/40 rounded-[2rem] border border-slate-700/50 overflow-hidden group transition-colors mb-8">
                     <div className="bg-slate-900/80 p-4 px-8 flex justify-between items-center border-b border-slate-700/50 backdrop-blur-sm">
@@ -393,7 +401,9 @@ const Agenda: React.FC = () => {
                                 <span className="text-[10px] font-black uppercase tracking-[0.2em]">Sem reservas neste horário</span>
                             </div>
                          ) : hourReservations.flatMap(res => {
-                           return Array.from({ length: res.laneCount || 1 }).map((_, idx) => {
+                           // Força laneCount de pelo menos 1 para garantir renderizacao
+                           const lCount = Math.max(1, res.laneCount || 1);
+                           return Array.from({ length: lCount }).map((_, idx) => {
                              const uid = `${res.id}_${currentHourInt}:00_${idx+1}`;
                              return (
                                <ReservationCard 
@@ -443,7 +453,7 @@ const Agenda: React.FC = () => {
 
       {isCancelling && selectedRes && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4">
-          <div className="bg-slate-800 border border-slate-600 w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl animate-scale-in space-y-6">
+          <div className="bg-slate-800 border border-slate-600 w-full max-md rounded-[2.5rem] p-8 shadow-2xl animate-scale-in space-y-6">
             <h3 className="text-xl font-black text-white uppercase tracking-tighter">Confirmar Cancelamento</h3>
             <textarea className="w-full bg-slate-950 border border-slate-700 rounded-2xl p-4 text-white text-sm h-24" placeholder="Motivo..." value={cancelReason} onChange={e => setCancelReason(e.target.value)} />
             <div className="flex gap-4">
