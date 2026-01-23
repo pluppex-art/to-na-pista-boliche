@@ -10,14 +10,6 @@ export interface TimeSlot {
 }
 
 /**
- * Normalizador interno para garantir que as datas de comparação sejam limpas (YYYY-MM-DD)
- */
-const cleanDateStr = (s: string): string => {
-    if (!s) return '';
-    return s.trim().split(/[\sT]/)[0];
-};
-
-/**
  * Verifica se uma data específica é "Hoje"
  */
 export const isDateToday = (dateStr: string): boolean => {
@@ -28,7 +20,7 @@ export const isDateToday = (dateStr: string): boolean => {
     String(now.getMonth() + 1).padStart(2, '0'),
     String(now.getDate()).padStart(2, '0')
   ].join('-');
-  return cleanDateStr(dateStr) === todayStr;
+  return dateStr === todayStr;
 };
 
 /**
@@ -36,7 +28,7 @@ export const isDateToday = (dateStr: string): boolean => {
  */
 export const getDayConfiguration = (dateStr: string, settings: AppSettings) => {
   if (!dateStr || !settings) return null;
-  const parts = cleanDateStr(dateStr).split('-');
+  const parts = dateStr.split('-');
   if (parts.length < 3) return null;
   
   const [y, m, d] = parts.map(Number);
@@ -57,21 +49,16 @@ export const checkHourCapacity = (
 ): { occupied: number; left: number; available: boolean } => {
   
   const now = new Date();
-  const targetDate = cleanDateStr(dateStr);
 
   const dayReservations = allReservations.filter(r => {
-    if (!r || cleanDateStr(r.date) !== targetDate) return false;
-    
-    // NUNCA ignora Check-in ou Confirmada para liberação de vaga
+    if (!r || r.date !== dateStr) return false;
     if (r.status === ReservationStatus.CANCELADA) return false;
-    
     if (r.id === excludeReservationId) return false;
 
-    // Se estiver pendente (ainda não pago), só ocupa vaga se tiver menos de 35min de criação
     if (r.status === ReservationStatus.PENDENTE && !r.payOnSite && r.createdAt) {
         const created = new Date(r.createdAt);
         const diffMinutes = (now.getTime() - created.getTime()) / (1000 * 60);
-        if (diffMinutes >= 35) { 
+        if (diffMinutes >= 30) {
             return false; 
         }
     }
@@ -82,17 +69,13 @@ export const checkHourCapacity = (
   let occupied = 0;
 
   dayReservations.forEach(r => {
-    // Garante que estamos lidando com números, ignorando segundos na hora
-    const rTime = String(r.time || "00:00");
-    const rStart = parseInt(rTime.split(':')[0] || "0");
-    const rDur = Number(r.duration) || 1;
-    const rEnd = rStart + rDur;
+    // Proteção contra r.time indefinido
+    const timeStr = r.time || "00:00";
+    const rStart = parseInt(timeStr.split(':')[0] || "0");
+    const rEnd = rStart + (r.duration || 1);
     
-    const rLanes = Number(r.laneCount) || 1;
-    
-    // Se a hora que estamos checando (hourInt) está entre o início e o fim da reserva
     if (hourInt >= rStart && hourInt < rEnd) {
-      occupied += rLanes;
+      occupied += (r.laneCount || 1);
     }
   });
 
@@ -116,20 +99,19 @@ export const generateDailySlots = (
   excludeReservationId?: string,
   isStaff: boolean = false
 ): TimeSlot[] => {
-  const targetDate = cleanDateStr(dateStr);
-  if (!targetDate) return [];
-  const dayConfig = getDayConfiguration(targetDate, settings);
-  const isBlocked = settings?.blockedDates?.some(d => cleanDateStr(d) === targetDate);
+  if (!dateStr) return [];
+  const dayConfig = getDayConfiguration(dateStr, settings);
+  const isBlocked = settings?.blockedDates?.includes(dateStr);
 
   if (!dayConfig || !dayConfig.isOpen || isBlocked) return [];
 
-  let start = Number(dayConfig.start);
-  let end = Number(dayConfig.end);
+  let start = dayConfig.start;
+  let end = dayConfig.end;
   
   if (end === 0) end = 24;
   if (end < start) end += 24;
 
-  const isToday = isDateToday(targetDate);
+  const isToday = isDateToday(dateStr);
   const now = new Date();
   const currentHour = now.getHours();
   const currentMinute = now.getMinutes();
@@ -142,7 +124,7 @@ export const generateDailySlots = (
 
     const { left, available } = checkHourCapacity(
       displayHourInt,
-      targetDate,
+      dateStr,
       allReservations,
       settings.activeLanes,
       excludeReservationId
@@ -154,7 +136,7 @@ export const generateDailySlots = (
             isPast = true;
         } else if (displayHourInt === currentHour) {
             if (isStaff) {
-                isPast = currentMinute > 10; 
+                isPast = currentMinute > 5; 
             } else {
                 isPast = true; 
             }
