@@ -666,11 +666,11 @@ const PublicBooking: React.FC = () => {
           } else {
               for (const block of blocks) {
                  const startH = parseInt(block.time.split(':')[0]);
-                 const reservationsAtStart = allRes.filter(r => r.date === selectedDate && r.time === block.time && r.status !== ReservationStatus.CANCELADA);
-                 if (reservationsAtStart.length >= 2) { alert(`Limite de reservas atingido para ${block.time}.`); setIsSaving(false); return; }
+                 // REMOVIDA TRAVA DE LIMITE DE 2 AGENDAMENTOS POR HORÁRIO.
+                 // AGORA VALIDA APENAS AS PISTAS (activeLanes) VIA checkHourCapacity.
                  for(let h=0; h<block.duration; h++) {
                      const { left } = checkHourCapacity(startH + h, selectedDate, allRes, settings.activeLanes);
-                     if(left < formData.lanes) { alert(`Horário lotado.`); setIsSaving(false); return; }
+                     if(left < formData.lanes) { alert(`Infelizmente não há pistas suficientes disponíveis às ${startH + h}:00.`); setIsSaving(false); return; }
                  }
               }
           }
