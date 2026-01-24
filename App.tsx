@@ -84,7 +84,7 @@ const AppContent: React.FC = () => {
                 <Route path="/login" element={<Login />} />
                 <Route path="/agendamento" element={<PublicBooking />} />
                 <Route path="/checkout" element={<Checkout />} />
-                <Route path="/redefinir-senha" element={<ResetPassword />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
                 <Route path="/minha-conta" element={<ClientDashboard />} />
                 
                 <Route path="/agenda" element={

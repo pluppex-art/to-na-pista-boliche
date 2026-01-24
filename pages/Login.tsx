@@ -191,13 +191,15 @@ const Login: React.FC = () => {
                             <div>
                                 <div className="flex justify-between mb-1">
                                     <label className="block text-xs font-bold text-slate-400 uppercase">Senha</label>
-                                    <button type="button" onClick={() => setIsForgotPassword(true)} className="text-[10px] text-neon-blue hover:underline">Esqueceu a senha?</button>
                                 </div>
                                 <input type="password" required className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 text-white focus:border-neon-blue outline-none" value={password} onChange={e => setPassword(e.target.value)} />
                             </div>
                             {error && <div className="p-3 bg-red-500/10 border border-red-500/50 text-red-400 text-sm rounded-lg text-center">{error}</div>}
                             <button type="submit" disabled={isLoading} className="w-full bg-neon-blue hover:bg-blue-600 text-white font-bold py-3 rounded-lg shadow-lg transition flex items-center justify-center gap-2">{isLoading ? <Loader2 className="animate-spin"/> : 'Entrar'}</button>
                             <div className="text-center mt-4 text-sm text-slate-400">Não tem conta? <button type="button" onClick={() => setIsRegistering(true)} className="text-neon-blue font-bold hover:underline">Cadastre-se</button></div>
+                            <div className="flex justify-center mb-1">
+                                    <button type="button" onClick={() => setIsForgotPassword(true)} className="text-[10px] text-neon-blue hover:underline">Esqueceu a senha?</button>
+                            </div>
                         </form>
                     ) : (
                         <form onSubmit={handleClientRegister} className="space-y-4">

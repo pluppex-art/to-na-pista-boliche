@@ -20,19 +20,11 @@ const safeTags = (tags: any): string[] => {
   return [];
 };
 
-/**
- * Normaliza datas de forma extremamente robusta para comparação na agenda.
- * Garante o formato YYYY-MM-DD ignorando timestamps ou espaços.
- */
 const normalizeDate = (dateStr: any): string => {
     if (!dateStr) return '';
     const s = String(dateStr).trim();
-    
-    // Suporta 2026-01-22T00:00:00 ou 2026-01-22 00:00:00
     const match = s.match(/^\d{4}-\d{2}-\d{2}/);
     if (match) return match[0];
-
-    // Suporta DD/MM/YYYY
     if (s.includes('/')) {
         const parts = s.split(' ')[0].split('/');
         if (parts.length === 3) {
@@ -40,13 +32,9 @@ const normalizeDate = (dateStr: any): string => {
             return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
         }
     }
-    
     return s.substring(0, 10);
 };
 
-/**
- * Normaliza o tempo ignorando segundos e garantindo HH:MM
- */
 const normalizeTime = (timeStr: any): string => {
     if (!timeStr) return '00:00';
     const s = String(timeStr).trim();
@@ -195,7 +183,8 @@ export const db = {
       return { client: { id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url, address: data.address, tags: safeTags(data.tags), createdAt: data.created_at, lastContactAt: data.last_contact_at, funnelStage: data.funnel_stage, loyaltyBalance: data.loyalty_balance || 0 } };
     },
     forgotPassword: async (email: string) => {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/#/redefinir-senha` });
+      // ATUALIZADO: Usando a URL correta solicitada pelo usuário
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/#/reset-password` });
       return { error: error?.message };
     },
     updatePassword: async (password: string) => {
@@ -206,7 +195,7 @@ export const db = {
     getAll: async (): Promise<Client[]> => {
       const { data, error } = await supabase.from('clientes').select('*').limit(5000);
       if (error) throw error;
-      return (data || []).map((c: any) => ({ id: c.client_id, name: c.name || 'Sem Nome', phone: c.phone || '', email: c.email, photoUrl: c.photo_url, address: c.address, tags: safeTags(c.tags), createdAt: c.created_at, lastContactAt: c.last_contact_at, funnelStage: c.funnel_stage, loyaltyBalance: c.loyalty_balance || 0 }));
+      return (data || []).map((c: any) => ({ id: c.client_id, name: c.name || 'Sem Nome', phone: c.phone || '', email: c.email, photoUrl: c.photo_url, address: c.address, tags: safeTags(c.tags), createdAt: c.created_at, lastContactAt: c.last_contact_at, funnelStage: c.funnel_stage, loyaltyBalance: data.loyalty_balance || 0 }));
     },
     getById: async (id: string): Promise<Client | null> => {
       const { data } = await supabase.from('clientes').select('*').eq('client_id', id).maybeSingle();
@@ -267,7 +256,6 @@ export const db = {
         return db.reservations._mapReservations(data);
     },
     getAll: async (): Promise<Reservation[]> => {
-      // AUMENTADO O LIMITE PARA 5000 E ADICIONADA ORDENAÇÃO POR DATA PARA NÃO PERDER RESERVAS NOVAS
       const { data, error } = await supabase.from('reservas').select('*').order('date', { ascending: false }).limit(5000);
       if (error) throw error;
       return db.reservations._mapReservations(data);
@@ -276,16 +264,13 @@ export const db = {
         return data.map((r: any) => {
             let rawStatus = String(r.status || 'Pendente').trim();
             let mappedStatus = ReservationStatus.PENDENTE;
-            
             const lowStatus = rawStatus.toLowerCase();
             if (lowStatus.includes('check') || lowStatus.includes('in')) mappedStatus = ReservationStatus.CHECK_IN;
             else if (lowStatus === 'confirmada') mappedStatus = ReservationStatus.CONFIRMADA;
             else if (lowStatus === 'cancelada') mappedStatus = ReservationStatus.CANCELADA;
             else if (lowStatus === 'no-show' || lowStatus === 'no show') mappedStatus = ReservationStatus.NO_SHOW;
-
             const safeDuration = Math.max(1, Number(r.duration) || 1);
             const safeLanes = Math.max(1, Number(r.lane_count) || 1);
-
             return {
                 id: r.id, 
                 clientId: r.client_id || '', 
@@ -330,24 +315,12 @@ export const db = {
     },
     update: async (res: Reservation, updatedByUserId?: string, actionDetail?: string) => {
       const { error } = await supabase.from('reservas').update({
-        date: res.date, 
-        time: res.time, 
-        people_count: res.peopleCount, 
-        lane_count: res.laneCount, 
-        duration: res.duration,
-        total_value: res.totalValue, 
-        event_type: res.eventType, 
-        observations: res.observations, 
-        status: res.status,
-        payment_status: res.paymentStatus, 
-        payment_method: res.paymentMethod,
-        checked_in_ids: res.checkedInIds || [], 
-        no_show_ids: res.noShowIds || [], 
-        has_table_reservation: res.hasTableReservation, 
-        table_seat_count: res.tableSeatCount, 
-        pistas_usadas: res.lanesAssigned,
-        pay_on_site: res.payOnSite, 
-        comanda_id: res.comandaId
+        date: res.date, time: res.time, people_count: res.peopleCount, lane_count: res.laneCount, duration: res.duration,
+        total_value: res.totalValue, event_type: res.eventType, observations: res.observations, status: res.status,
+        payment_status: res.paymentStatus, payment_method: res.paymentMethod,
+        checked_in_ids: res.checkedInIds || [], no_show_ids: res.noShowIds || [], has_table_reservation: res.hasTableReservation, 
+        table_seat_count: res.tableSeatCount, pistas_usadas: res.lanesAssigned,
+        pay_on_site: res.payOnSite, comanda_id: res.comandaId
       }).eq('id', res.id);
       if (error) throw error;
     }
@@ -380,6 +353,7 @@ export const db = {
     saveGeneral: async (s: AppSettings) => {
       const { error } = await supabase.from('configuracoes').update({
         establishment_name: s.establishmentName, address: s.address, phone: s.phone, whatsapp_link: s.whatsappLink, 
+        // Fix: Changed s.active_lanes to s.activeLanes to match AppSettings interface
         logo_url: s.logoUrl, active_lanes: s.activeLanes, weekday_price: s.weekdayPrice, weekend_price: s.weekendPrice,
         online_payment_enabled: s.onlinePaymentEnabled, mercadopago_public_key: s.mercadopagoPublicKey,
         mercadopago_access_token: s.mercadopagoAccessToken, blocked_dates: s.blockedDates
