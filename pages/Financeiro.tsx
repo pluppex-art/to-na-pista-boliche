@@ -1,20 +1,30 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { db } from '../services/mockBackend';
-import { Reservation, ReservationStatus, AuditLog, User, PaymentStatus, EventType } from '../types';
-import { Loader2, DollarSign, TrendingUp, Users, Calendar, AlertCircle, Shield, History, Calculator, Percent, CalendarRange, ListChecks, ChevronDown, Clock, PieChart as PieIcon, Tag, X, FileText, Ban, CreditCard, Filter, Monitor, Gauge } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts';
+import { Reservation, ReservationStatus, User, PaymentStatus, EventType } from '../types';
+import { Loader2, CalendarRange, X, CreditCard, ChevronDown, TrendingUp, RefreshCw, Check } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 import { useApp } from '../contexts/AppContext';
 
+// Componentes Individuais
+import { SummaryCards } from '../components/Financeiro/SummaryCards';
+import { OccupancyCharts } from '../components/Financeiro/OccupancyCharts';
+import { RevenueEvolutionChart } from '../components/Financeiro/RevenueEvolutionChart';
+import { RevenueByOriginChart } from '../components/Financeiro/RevenueByOriginChart';
+import { RevenueByMethodChart } from '../components/Financeiro/RevenueByMethodChart';
+import { RevenueByTypeChart } from '../components/Financeiro/RevenueByTypeChart';
+
 const DATE_PRESETS = [
-    { id: 'TODAY', label: 'HOJE' },
-    { id: 'WEEK', label: 'ESSA SEMANA' },
-    { id: 'MONTH', label: 'ESTE MÊS' },
-    { id: '7D', label: '7 DIAS' },
-    { id: '30D', label: '30 DIAS' },
-    { id: '90D', label: '90 DIAS' },
-    { id: 'YEAR', label: 'ANO' }
+    { id: 'HOJE', label: 'HOJE' },
+    { id: 'ONTEM', label: 'ONTEM' },
+    { id: '7D', label: 'ÚLTIMOS 7 DIAS' },
+    { id: '30D', label: 'ÚLTIMOS 30 DIAS' },
+    { id: '60D', label: 'ÚLTIMOS 60 DIAS' },
+    { id: '90D', label: 'ÚLTIMOS 90 DIAS' },
+    { id: 'WEEK', label: 'ESTA SEMANA' },
+    { id: 'MONTH', label: 'ESSE MÊS' },
+    { id: 'YEAR', label: 'ESSE ANO' }
 ];
 
 const EVENT_TYPE_COLORS: Record<string, string> = {
@@ -26,28 +36,20 @@ const EVENT_TYPE_COLORS: Record<string, string> = {
 };
 
 const DAYS_NAME = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const COLORS = ['#22c55e', '#3b82f6', '#f97316', '#a855f7', '#ef4444', '#eab308', '#64748b', '#06b6d4', '#ec4899'];
 
 const Financeiro: React.FC = () => {
+  const navigate = useNavigate();
   const { settings } = useApp();
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'LOGS'>('OVERVIEW');
   const [loading, setLoading] = useState(true);
-  const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [backgroundLoading, setBackgroundLoading] = useState(false);
   const [rawReservations, setRawReservations] = useState<Reservation[]>([]);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [currentPreset, setCurrentPreset] = useState<string>('MONTH');
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>('ALL');
-
   const [drillDownType, setDrillDownType] = useState<'PENDING' | 'CANCELLED' | null>(null);
-
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
-
-  const [auditFilters, setAuditFilters] = useState({
-      userId: 'ALL',
-      actionType: 'ALL',
-      startDate: '',
-      endDate: ''
-  });
+  const [isDateModalOpen, setIsDateModalOpen] = useState(false);
 
   const toLocalISO = (date: Date) => {
     const year = date.getFullYear();
@@ -57,460 +59,330 @@ const Financeiro: React.FC = () => {
   };
 
   useEffect(() => {
-    const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    const startStr = toLocalISO(firstDay);
-    const endStr = toLocalISO(lastDay);
-    setDateRange({ start: startStr, end: endStr });
-    setAuditFilters(prev => ({ ...prev, startDate: startStr, endDate: endStr }));
+    if (!dateRange.start) {
+        const today = new Date();
+        const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+        const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+        setDateRange({ start: toLocalISO(firstDay), end: toLocalISO(lastDay) });
+    }
   }, []);
 
-  const refreshData = async (isBackground = false) => {
+  const refreshData = async (isSilent = false) => {
     if (!dateRange.start || !dateRange.end) return;
-    if (!isBackground) setLoading(true);
-    try {
-        const all = await db.reservations.getByDateRange(dateRange.start, dateRange.end);
-        setRawReservations(all);
-        setReservations(all.filter(r => r.status !== ReservationStatus.CANCELADA));
-        const users = await db.users.getAll();
-        setAllUsers(users);
-        await refreshAuditLogs();
-    } finally {
-        if (!isBackground) setLoading(false);
-    }
-  };
+    
+    if (rawReservations.length === 0) setLoading(true);
+    else if (!isSilent) setBackgroundLoading(true);
 
-  const refreshAuditLogs = async () => {
-      const logs = await db.audit.getLogs({
-          userId: auditFilters.userId,
-          actionType: auditFilters.actionType,
-          startDate: auditFilters.startDate,
-          endDate: auditFilters.endDate,
-          limit: 100 
-      });
-      setAuditLogs(logs);
+    try {
+        const [all, users] = await Promise.all([
+            db.reservations.getByDateRange(dateRange.start, dateRange.end),
+            db.users.getAll()
+        ]);
+        setRawReservations(all);
+        setAllUsers(users);
+    } finally { 
+        setLoading(false); 
+        setBackgroundLoading(false);
+    }
   };
 
   useEffect(() => {
     refreshData();
-    const channel = supabase.channel('financeiro-realtime-sync')
+    const channel = supabase.channel('financeiro-focus')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => refreshData(true))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_logs' }, () => refreshData(true))
         .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [dateRange]);
 
-  useEffect(() => { refreshAuditLogs(); }, [auditFilters.userId, auditFilters.actionType]); 
-
-  const applyDatePreset = (preset: string) => {
-      setCurrentPreset(preset);
-      if (preset === 'CUSTOM') return;
-      const today = new Date();
-      let start = new Date();
-      let end = new Date();
-      switch(preset) {
-          case 'TODAY': start = today; break;
-          case '7D': start.setDate(today.getDate() - 6); break;
-          case '30D': start.setDate(today.getDate() - 29); break;
-          case '90D': start.setDate(today.getDate() - 89); break;
-          case 'WEEK': start.setDate(today.getDate() - today.getDay() + (today.getDay() === 0 ? -6 : 1)); break;
-          case 'MONTH': start = new Date(today.getFullYear(), today.getMonth(), 1); end = new Date(today.getFullYear(), today.getMonth() + 1, 0); break;
-          case 'YEAR': start = new Date(today.getFullYear(), 0, 1); end = new Date(today.getFullYear(), 11, 31); break;
-      }
-      const s = toLocalISO(start);
-      const e = toLocalISO(end);
-      setDateRange({ start: s, end: e });
-      setAuditFilters(prev => ({ ...prev, startDate: s, endDate: e }));
+  const handlePresetChange = (presetId: string) => {
+    setCurrentPreset(presetId);
+    const today = new Date();
+    let start = new Date();
+    let end = new Date();
+    
+    switch(presetId) {
+        case 'HOJE': break;
+        case 'ONTEM': start.setDate(today.getDate() - 1); end.setDate(today.getDate() - 1); break;
+        case '7D': start.setDate(today.getDate() - 6); break;
+        case '30D': start.setDate(today.getDate() - 29); break;
+        case '60D': start.setDate(today.getDate() - 59); break;
+        case '90D': start.setDate(today.getDate() - 89); break;
+        case 'WEEK': start.setDate(today.getDate() - today.getDay()); break;
+        case 'MONTH': start = new Date(today.getFullYear(), today.getMonth(), 1); end = new Date(today.getFullYear(), today.getMonth() + 1, 0); break;
+        case 'YEAR': start = new Date(today.getFullYear(), 0, 1); end = new Date(today.getFullYear(), 11, 31); break;
+    }
+    setDateRange({ start: toLocalISO(start), end: toLocalISO(end) });
   };
 
-  const calculateSlots = (r: Reservation) => (r.laneCount || 1) * Math.ceil(r.duration || 1);
-
   const realizedReservations = useMemo(() => {
-      return reservations.filter(r => {
-          const isRealizedStatus = r.status === ReservationStatus.CONFIRMADA || r.status === ReservationStatus.CHECK_IN;
+      return rawReservations.filter(r => {
+          const isRealized = r.status === ReservationStatus.CONFIRMADA || r.status === ReservationStatus.CHECK_IN;
           const isPaid = r.paymentStatus === PaymentStatus.PAGO;
           const matchesMethod = paymentMethodFilter === 'ALL' || r.paymentMethod === paymentMethodFilter;
-          return isRealizedStatus && isPaid && matchesMethod;
+          return isRealized && isPaid && matchesMethod;
       });
-  }, [reservations, paymentMethodFilter]);
+  }, [rawReservations, paymentMethodFilter]);
 
   const occupancyStats = useMemo(() => {
-      if (!dateRange.start || !dateRange.end || !settings) return { totalCapacity: 0, occupiedTotal: 0, percentage: 0, byDay: [] };
-
+      if (!dateRange.start || !dateRange.end || !settings) return { totalCapacity: 0, occupiedTotal: 0, percentage: 0, byDay: [], byHour: [] };
       let totalCapacity = 0;
-      const capacityByDayOfWeek = new Array(7).fill(0);
-      const occupiedByDayOfWeek = new Array(7).fill(0);
-
+      const capacityByDay = new Array(7).fill(0);
+      const occupiedByDay = new Array(7).fill(0);
+      const capByHour = new Map<number, number>();
+      const occByHour = new Map<number, number>();
       const start = new Date(dateRange.start + 'T00:00:00');
       const end = new Date(dateRange.end + 'T23:59:59');
-
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
           const dayIdx = d.getDay();
           const config = settings.businessHours[dayIdx];
-          const dateStr = toLocalISO(d);
-          const isBlocked = settings.blockedDates?.includes(dateStr);
-
-          if (config.isOpen && !isBlocked) {
-              let hours = config.end - config.start;
-              if (config.end === 0) hours = 24 - config.start;
-              else if (config.end < config.start) hours = (24 - config.start) + config.end;
-              
-              const dayCapacity = hours * settings.activeLanes;
-              totalCapacity += dayCapacity;
-              capacityByDayOfWeek[dayIdx] += dayCapacity;
+          if (config.isOpen && !settings.blockedDates?.includes(toLocalISO(d))) {
+              let startH = Number(config.start);
+              let endH = Number(config.end) === 0 ? 24 : Number(config.end);
+              for (let h = startH; h < endH; h++) {
+                  const key = h % 24;
+                  capByHour.set(key, (capByHour.get(key) || 0) + settings.activeLanes);
+                  totalCapacity += settings.activeLanes;
+                  capacityByDay[dayIdx] += settings.activeLanes;
+              }
           }
       }
-
       realizedReservations.forEach(r => {
-          const d = new Date(r.date + 'T00:00:00');
-          const dayIdx = d.getDay();
-          const slots = calculateSlots(r);
-          occupiedByDayOfWeek[dayIdx] += slots;
+          const dayIdx = new Date(r.date + 'T00:00:00').getDay();
+          const startH = parseInt(r.time.split(':')[0]);
+          occupiedByDay[dayIdx] += (r.laneCount * r.duration);
+          for (let i = 0; i < r.duration; i++) {
+              const h = (startH + i) % 24;
+              occByHour.set(h, (occByHour.get(h) || 0) + r.laneCount);
+          }
       });
-
-      const occupiedTotal = realizedReservations.reduce((acc, r) => acc + calculateSlots(r), 0);
-      const percentage = totalCapacity > 0 ? (occupiedTotal / totalCapacity) * 100 : 0;
-
-      const byDayData = DAYS_NAME.map((name, i) => ({
-          name,
-          porcentagem: capacityByDayOfWeek[i] > 0 ? Math.round((occupiedByDayOfWeek[i] / capacityByDayOfWeek[i]) * 100) : 0
-      }));
-
-      return { totalCapacity, occupiedTotal, percentage, byDay: byDayData };
+      const occupiedTotal = realizedReservations.reduce((acc, r) => acc + (r.laneCount * r.duration), 0);
+      return { totalCapacity, occupiedTotal, percentage: totalCapacity > 0 ? (occupiedTotal / totalCapacity) * 100 : 0, byDay: DAYS_NAME.map((name, i) => ({ name, porcentagem: capacityByDay[i] > 0 ? Math.round((occupiedByDay[i] / capacityByDay[i]) * 100) : 0 })), byHour: Array.from(capByHour.keys()).sort((a,b) => a-b).map(h => ({ hora: `${String(h).padStart(2,'0')}:00`, porcentagem: Math.round(((occByHour.get(h) || 0) / capByHour.get(h)!) * 100) })) };
   }, [dateRange, settings, realizedReservations]);
 
-  const totalRevenue = realizedReservations.reduce((acc, curr) => acc + curr.totalValue, 0);
-  const pendingRevenue = reservations.filter(r => r.status === ReservationStatus.PENDENTE || (r.status !== ReservationStatus.CANCELADA && r.paymentStatus !== PaymentStatus.PAGO)).reduce((acc, curr) => acc + curr.totalValue, 0);
-  const confirmedSlotsCount = realizedReservations.reduce((acc, r) => acc + calculateSlots(r), 0);
-  const avgTicket = confirmedSlotsCount > 0 ? totalRevenue / confirmedSlotsCount : 0;
-  
-  const diffDays = useMemo(() => {
-      if (!dateRange.start || !dateRange.end) return 0;
-      const s = new Date(dateRange.start);
-      const e = new Date(dateRange.end);
-      return Math.ceil(Math.abs(e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-  }, [dateRange]);
-  
-  const dailyAverage = diffDays > 0 ? (confirmedSlotsCount / diffDays) : 0;
-
-  const cancelledReservations = rawReservations.filter(r => 
-      r.status === ReservationStatus.CANCELADA && 
-      r.createdBy && 
-      (r.paymentStatus === PaymentStatus.PAGO || r.paymentStatus === PaymentStatus.REEMBOLSADO)
-  );
-  
-  const cancelledSlotsCount = cancelledReservations.reduce((acc, r) => acc + calculateSlots(r), 0);
-  const totalRelevantSlots = confirmedSlotsCount + cancelledSlotsCount;
-  const cancellationRate = totalRelevantSlots > 0 ? (cancelledSlotsCount / totalRelevantSlots) * 100 : 0;
-
-  const revenueByDayMap = new Map<string, number>();
-  realizedReservations.forEach(r => {
-      const val = revenueByDayMap.get(r.date) || 0;
-      revenueByDayMap.set(r.date, val + r.totalValue);
-  });
-  const revenueChartData = Array.from(revenueByDayMap.entries())
-    .map(([date, value]) => ({ date: date.split('-').slice(1).reverse().join('/'), value }))
-    .sort((a,b) => a.date.localeCompare(b.date));
-
-  const revenueByTypeMap = new Map<string, number>();
-  realizedReservations.forEach(r => {
-      const current = revenueByTypeMap.get(r.eventType || 'NÃO INFORMADO') || 0;
-      revenueByTypeMap.set(r.eventType || 'NÃO INFORMADO', current + r.totalValue);
-  });
-  const revenueByTypeData = Array.from(revenueByTypeMap.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-
-  const revenueByMethodMap = new Map<string, number>();
-  realizedReservations.forEach(r => {
-      const method = r.paymentMethod || 'OUTRO/ANTERIOR';
-      const current = revenueByMethodMap.get(method) || 0;
-      revenueByMethodMap.set(method, current + r.totalValue);
-  });
-  const revenueByMethodData = Array.from(revenueByMethodMap.entries()).map(([name, value]) => ({ name, value }));
-
-  const revenueBySourceData = useMemo(() => {
-    const sourceMap = new Map<string, number>();
+  const financialData = useMemo(() => {
+    const trendMap = new Map<string, number>();
+    const originMap = new Map<string, number>();
+    const methodMap = new Map<string, number>();
+    const typeMap = new Map<string, number>();
     realizedReservations.forEach(r => {
-        let sourceName = "SITE (Venda Direta)";
-        if (r.createdBy) {
-            const user = allUsers.find(u => u.id === r.createdBy);
-            sourceName = user ? user.name.toUpperCase() : "EQUIPE (Geral)";
-        }
-        sourceMap.set(sourceName, (sourceMap.get(sourceName) || 0) + r.totalValue);
+        const dateKey = r.date.split('-').slice(1).reverse().join('/');
+        trendMap.set(dateKey, (trendMap.get(dateKey) || 0) + r.totalValue);
+        const origin = r.createdBy ? (allUsers.find(u => u.id === r.createdBy)?.name.toUpperCase() || "EQUIPE") : "SITE";
+        originMap.set(origin, (originMap.get(origin) || 0) + r.totalValue);
+        methodMap.set(r.paymentMethod || 'OUTRO', (methodMap.get(r.paymentMethod || 'OUTRO') || 0) + r.totalValue);
+        typeMap.set(r.eventType || 'N/I', (typeMap.get(r.eventType || 'N/I') || 0) + r.totalValue);
     });
-    return Array.from(sourceMap.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+    return { trend: Array.from(trendMap.entries()).map(([date, value]) => ({ date, value })).sort((a,b) => a.date.localeCompare(b.date)), origin: Array.from(originMap.entries()).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value), method: Array.from(methodMap.entries()).map(([name, value]) => ({ name, value })), type: Array.from(typeMap.entries()).map(([name, value]) => ({ name, value })) };
   }, [realizedReservations, allUsers]);
 
-  const COLORS = ['#22c55e', '#3b82f6', '#f97316', '#a855f7', '#ef4444', '#eab308', '#64748b', '#06b6d4', '#ec4899'];
+  const metrics = useMemo(() => {
+    const totalRev = realizedReservations.reduce((acc, r) => acc + r.totalValue, 0);
+    const pendingRev = rawReservations.filter(r => r.status === ReservationStatus.PENDENTE || (r.status !== ReservationStatus.CANCELADA && r.paymentStatus !== PaymentStatus.PAGO)).reduce((acc, r) => acc + r.totalValue, 0);
+    const totalHrs = realizedReservations.reduce((acc, r) => acc + (r.laneCount * r.duration), 0);
+    
+    const startDate = new Date(dateRange.start + 'T00:00:00');
+    const endDate = new Date(dateRange.end + 'T00:00:00');
+    const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
 
-  const getDrillDownList = () => {
-      if (drillDownType === 'PENDING') return rawReservations.filter(r => r.status === ReservationStatus.PENDENTE || (r.status !== ReservationStatus.CANCELADA && r.paymentStatus !== PaymentStatus.PAGO));
-      if (drillDownType === 'CANCELLED') return cancelledReservations;
-      return [];
-  };
-
-  const getGaugeColor = (val: number) => {
-      if (val <= 50) return '#ef4444'; 
-      if (val <= 70) return '#eab308'; 
-      return '#22c55e'; 
-  };
+    const cancelledLossReservations = rawReservations.filter(r => {
+        const isCancelled = r.status === ReservationStatus.CANCELADA;
+        const isNotTest = !r.observations?.toLowerCase().includes('teste');
+        const isStaffAction = !!r.createdBy;
+        const wasPaidOrRefunded = r.paymentStatus === PaymentStatus.REEMBOLSADO || r.paymentStatus === PaymentStatus.PENDENTE_ESTORNO;
+        return isCancelled && isNotTest && (isStaffAction || wasPaidOrRefunded);
+    });
+    
+    const cancelledCount = cancelledLossReservations.length;
+    const totalMeaningfulReservations = rawReservations.filter(r => 
+        (r.status !== ReservationStatus.PENDENTE && r.status !== ReservationStatus.CANCELADA) || 
+        r.createdBy || 
+        r.paymentStatus === PaymentStatus.PAGO ||
+        r.paymentStatus === PaymentStatus.REEMBOLSADO
+    ).length;
+    
+    return { 
+        totalRev, 
+        pendingRev, 
+        totalHrs, 
+        avgTicket: totalHrs > 0 ? totalRev / totalHrs : 0, 
+        avgDaily: diffDays > 0 ? totalHrs / diffDays : 0,
+        cancelRate: totalMeaningfulReservations > 0 ? (cancelledCount / totalMeaningfulReservations) * 100 : 0 
+    };
+  }, [realizedReservations, rawReservations, dateRange]);
 
   if (loading) return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin text-neon-blue" size={48} /></div>;
 
   return (
-    <div className="space-y-6 animate-fade-in pb-20 md:pb-0">
-        <div className="flex flex-col gap-4 border-b border-slate-800 pb-6">
-            <h1 className="text-3xl font-bold text-white uppercase tracking-tighter">Financeiro</h1>
-            <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex flex-col gap-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label className="text-xs text-slate-400 font-bold uppercase mb-2 block flex items-center gap-2"><CalendarRange size={14}/> Período de Análise</label>
-                        <div className="md:hidden relative">
-                            <select className="w-full bg-slate-900 border border-slate-600 text-white text-sm rounded-lg p-3 appearance-none focus:border-neon-blue outline-none font-bold" value={currentPreset} onChange={(e) => applyDatePreset(e.target.value)}>
-                                <option value="TODAY">Hoje</option><option value="WEEK">Esta Semana</option><option value="MONTH">Este Mês</option><option value="YEAR">Este Ano</option><option value="7D">Últimos 7 dias</option><option value="30D">Últimos 30 dias</option><option value="90D">Últimos 90 dias</option><option value="CUSTOM">Personalizado</option>
-                            </select>
-                            <ChevronDown className="absolute right-3 top-3.5 text-slate-400 pointer-events-none" size={16} />
-                        </div>
-                        <div className="hidden md:flex flex-wrap gap-2">
-                            {DATE_PRESETS.map(preset => (<button key={preset.id} onClick={() => applyDatePreset(preset.id)} className={`px-3 py-1.5 rounded-lg text-[10px] font-black tracking-widest transition-all border ${currentPreset === preset.id ? 'bg-neon-blue text-white border-neon-blue shadow-lg' : 'bg-slate-700 text-slate-400 border-transparent hover:bg-slate-600'}`}>{preset.label}</button>))}
-                        </div>
-                    </div>
-                    <div>
-                        <label className="text-xs text-slate-400 font-bold uppercase mb-2 block flex items-center gap-2"><Filter size={14}/> Filtro por Meio</label>
-                        <div className="relative">
-                            <select className="w-full bg-slate-900 border border-slate-600 text-white text-sm rounded-lg p-3 appearance-none focus:border-neon-blue outline-none font-bold" value={paymentMethodFilter} onChange={e => setPaymentMethodFilter(e.target.value)}>
-                                <option value="ALL">Todos os Meios</option><option value="DINHEIRO">Dinheiro</option><option value="PIX">PIX</option><option value="DEBITO">Cartão Débito</option><option value="CREDITO">Cartão Crédito</option><option value="ONLINE">Online (Mercado Pago)</option><option value="COMANDA">Comanda / Local</option>
-                            </select>
-                            <CreditCard className="absolute right-3 top-3.5 text-slate-400 pointer-events-none" size={16} />
-                        </div>
-                    </div>
+    <div className="space-y-8 animate-fade-in pb-20 md:pb-0">
+        
+        {/* HEADER COM FILTROS INTEGRADOS */}
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 border-b border-slate-800 pb-8">
+            <div className="flex items-center gap-4">
+                <div>
+                    <h1 className="text-3xl font-black text-white uppercase tracking-tighter flex items-center gap-3">
+                        <TrendingUp className="text-neon-green"/> Dashboard Financeiro
+                    </h1>
+                    <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest mt-1">Gestão de Receita e Ocupação</p>
                 </div>
-                <div className="grid grid-cols-2 md:flex md:items-center gap-3 pt-2 border-t border-slate-700/50">
-                    <div className="flex flex-col"><span className="text-[10px] text-slate-500 font-bold uppercase mb-1">De</span><input type="date" className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:border-neon-blue outline-none w-full font-bold" value={dateRange.start} onChange={e => { setDateRange({...dateRange, start: e.target.value}); setAuditFilters(prev => ({ ...prev, startDate: e.target.value })); setCurrentPreset('CUSTOM'); }}/></div>
-                    <div className="flex flex-col"><span className="text-[10px] text-slate-500 font-bold uppercase mb-1">Até</span><input type="date" className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:border-neon-blue outline-none w-full font-bold" value={dateRange.end} onChange={e => { setDateRange({...dateRange, end: e.target.value}); setAuditFilters(prev => ({ ...prev, endDate: e.target.value })); setCurrentPreset('CUSTOM'); }}/></div>
+                {backgroundLoading && <RefreshCw size={20} className="text-neon-blue animate-spin mt-2" />}
+            </div>
+            
+            {/* FILTROS NO LUGAR DA NAVEGAÇÃO ANTERIOR */}
+            <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto">
+                {/* Botão Período */}
+                <button 
+                    onClick={() => setIsDateModalOpen(true)}
+                    className="w-full sm:w-auto bg-slate-900 border border-slate-700 rounded-2xl p-3 flex items-center justify-between gap-6 hover:border-neon-blue transition group shadow-xl"
+                >
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-neon-blue/10 rounded-lg text-neon-blue group-hover:bg-neon-blue group-hover:text-white transition-all">
+                            <CalendarRange size={16} />
+                        </div>
+                        <div className="text-left">
+                            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">Período</p>
+                            <p className="text-white font-black text-[10px] uppercase truncate">
+                                {dateRange.start.split('-').reverse().join('/')} - {dateRange.end.split('-').reverse().join('/')}
+                            </p>
+                        </div>
+                    </div>
+                    <ChevronDown size={14} className="text-slate-500" />
+                </button>
+
+                {/* Seletor Meio de Pagamento */}
+                <div className="w-full sm:w-auto bg-slate-900 border border-slate-700 rounded-2xl p-1.5 flex items-center shadow-xl">
+                    <div className="pl-3 pr-1 flex items-center gap-2 text-neon-green">
+                        <CreditCard size={16} />
+                    </div>
+                    <select 
+                        value={paymentMethodFilter} 
+                        onChange={e => setPaymentMethodFilter(e.target.value)} 
+                        className="bg-transparent text-white font-black uppercase text-[8px] outline-none cursor-pointer p-2 pr-8 appearance-none"
+                    >
+                        <option value="ALL">TODOS OS MEIOS</option>
+                        <option value="PIX">PIX</option>
+                        <option value="CREDITO">CRÉDITO</option>
+                        <option value="DEBITO">DÉBITO</option>
+                        <option value="DINHEIRO">DINHEIRO</option>
+                        <option value="ONLINE">SITE (MP)</option>
+                        <option value="COMANDA">COMANDA</option>
+                    </select>
+                    <div className="relative -ml-6 pointer-events-none pr-2">
+                        <ChevronDown size={12} className="text-slate-500" />
+                    </div>
                 </div>
             </div>
         </div>
 
-        <div className="flex space-x-4 border-b border-slate-700 mb-6 overflow-x-auto no-scrollbar">
-            <button onClick={() => setActiveTab('OVERVIEW')} className={`pb-2 px-4 font-black uppercase text-xs tracking-widest transition flex items-center gap-2 whitespace-nowrap ${activeTab === 'OVERVIEW' ? 'text-neon-blue border-b-2 border-neon-blue' : 'text-slate-400 hover:text-white'}`}><TrendingUp size={16}/> Visão Geral</button>
-            <button onClick={() => setActiveTab('LOGS')} className={`pb-2 px-4 font-black uppercase text-xs tracking-widest transition flex items-center gap-2 whitespace-nowrap ${activeTab === 'LOGS' ? 'text-neon-orange border-b-2 border-neon-orange' : 'text-slate-400 hover:text-white'}`}><Shield size={16}/> Auditoria & Logs</button>
+        <div className="space-y-12 animate-fade-in relative">
+            {backgroundLoading && <div className="absolute inset-0 bg-neon-bg/10 backdrop-blur-[1px] z-10 rounded-3xl pointer-events-none transition-all" />}
+            
+            <SummaryCards totalRevenue={metrics.totalRev} pendingRevenue={metrics.pendingRev} avgTicket={metrics.avgTicket} avgDaily={metrics.avgDaily} totalHours={metrics.totalHrs} cancellationRate={metrics.cancelRate} onDrillDown={setDrillDownType} />
+            <OccupancyCharts stats={occupancyStats} />
+            <div className="space-y-8">
+                <RevenueEvolutionChart data={financialData.trend} />
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                    <div className="lg:col-span-12">
+                        <RevenueByOriginChart data={financialData.origin} />
+                    </div>
+                    <div className="lg:col-span-6">
+                        <RevenueByMethodChart data={financialData.method} colors={COLORS} />
+                    </div>
+                    <div className="lg:col-span-6">
+                        <RevenueByTypeChart data={financialData.type} typeColors={EVENT_TYPE_COLORS} fallbackColors={COLORS} />
+                    </div>
+                </div>
+            </div>
         </div>
 
-        {activeTab === 'OVERVIEW' ? (
-            <div className="space-y-6 animate-fade-in">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-                    <div className="bg-slate-800 p-4 rounded-xl border border-green-500/30 shadow-lg hover:border-green-500 transition xl:col-span-2"><div className="flex justify-between items-start"><div><p className="text-[10px] text-green-500 font-black uppercase mb-1 tracking-widest">Faturamento Realizado</p><h3 className="text-2xl font-black text-white">{totalRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3><p className="text-[8px] text-slate-500 font-bold mt-1 uppercase tracking-tighter">Somente reservas Confirmadas e Pagas</p></div><div className="p-2 bg-green-500/10 rounded-lg text-green-500"><DollarSign size={24}/></div></div></div>
-                    <div onClick={() => setDrillDownType('PENDING')} className="bg-slate-800 p-4 rounded-xl border border-yellow-500/30 shadow-lg hover:border-yellow-500 transition xl:col-span-2 cursor-pointer group"><div className="flex justify-between items-start"><div><p className="text-[10px] text-yellow-500 font-black uppercase mb-1 tracking-widest">A Receber / Pendente</p><h3 className="text-2xl font-black text-white">{pendingRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3><p className="text-[8px] text-slate-500 font-bold mt-1 uppercase underline group-hover:text-yellow-400 transition-colors">Clique para ver lista</p></div><div className="p-2 bg-yellow-500/10 rounded-lg text-yellow-500"><AlertCircle size={24}/></div></div></div>
-                    <div className="bg-slate-800 p-4 rounded-xl border border-neon-blue/30 shadow-lg hover:border-neon-blue transition xl:col-span-2"><div className="flex justify-between items-start"><div><p className="text-[10px] text-neon-blue font-black uppercase mb-1 tracking-widest">Ticket Médio (H)</p><h3 className="text-2xl font-black text-white">{avgTicket.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3></div><div className="p-2 bg-neon-blue/10 rounded-lg text-neon-blue"><TrendingUp size={24}/></div></div></div>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* VELOCÍMETRO DE OCUPAÇÃO GERAL - ATUALIZADO COM HORAS DISPONÍVEIS */}
-                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg flex flex-col items-center justify-center overflow-hidden">
-                        <h3 className="text-sm font-black text-white mb-2 flex items-center gap-2 uppercase tracking-tighter text-center"><Gauge size={18} className="text-neon-orange"/> Taxa de Ocupação Geral</h3>
-                        <p className="text-[9px] text-slate-500 font-bold uppercase mb-4 text-center">Desempenho da Unidade</p>
-                        <div className="h-48 w-full relative">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie
-                                        data={[
-                                            { value: occupancyStats.percentage },
-                                            { value: 100 - occupancyStats.percentage }
-                                        ]}
-                                        cx="50%"
-                                        cy="80%"
-                                        startAngle={180}
-                                        endAngle={0}
-                                        innerRadius={60}
-                                        outerRadius={85}
-                                        paddingAngle={0}
-                                        dataKey="value"
-                                        stroke="none"
+        {/* MODAL DE SELEÇÃO DE PERÍODO */}
+        {isDateModalOpen && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-4">
+                <div className="bg-slate-800 border border-slate-600 w-full max-w-lg rounded-[2.5rem] shadow-2xl animate-scale-in flex flex-col overflow-hidden">
+                    <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-900/50">
+                        <h3 className="text-xl font-black text-white uppercase tracking-tighter flex items-center gap-3">
+                            <CalendarRange className="text-neon-blue" /> Selecionar Período
+                        </h3>
+                        <button onClick={() => setIsDateModalOpen(false)} className="text-slate-400 hover:text-white transition"><X size={24}/></button>
+                    </div>
+                    
+                    <div className="p-8 space-y-8 max-h-[70vh] overflow-y-auto custom-scrollbar">
+                        <div className="space-y-3">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Atalhos Rápidos</label>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                {DATE_PRESETS.map(preset => (
+                                    <button 
+                                        key={preset.id} 
+                                        onClick={() => handlePresetChange(preset.id)}
+                                        className={`p-3 rounded-xl text-[10px] font-black uppercase transition-all border ${currentPreset === preset.id ? 'bg-neon-blue border-neon-blue text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-500'}`}
                                     >
-                                        <Cell fill={getGaugeColor(occupancyStats.percentage)} />
-                                        <Cell fill="#1e293b" />
-                                    </Pie>
-                                </PieChart>
-                            </ResponsiveContainer>
-                            <div className="absolute inset-0 flex flex-col items-center justify-center pt-12">
-                                <span className="text-3xl font-black text-white leading-none">{Math.round(occupancyStats.percentage)}%</span>
-                                <span className="text-[8px] font-black text-slate-500 uppercase mt-1 tracking-widest">Capacidade</span>
+                                        {preset.label}
+                                    </button>
+                                ))}
                             </div>
                         </div>
-                        <div className="w-full bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 flex justify-between gap-4 mt-2">
-                            <div className="flex flex-col items-center flex-1">
-                                <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Horas Disponíveis</span>
-                                <span className="text-base font-black text-white">{occupancyStats.totalCapacity}h</span>
-                            </div>
-                            <div className="w-px bg-slate-700"></div>
-                            <div className="flex flex-col items-center flex-1">
-                                <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Horas Vendidas</span>
-                                <span className="text-base font-black text-neon-blue">{occupancyStats.occupiedTotal}h</span>
-                            </div>
-                        </div>
-                        <div className="grid grid-cols-3 gap-2 w-full mt-4">
-                            <div className="flex flex-col items-center"><div className="w-full h-1 bg-red-500 rounded-full mb-1 opacity-50"></div><span className="text-[7px] font-bold text-slate-600">BAIXA</span></div>
-                            <div className="flex flex-col items-center"><div className="w-full h-1 bg-yellow-500 rounded-full mb-1 opacity-50"></div><span className="text-[7px] font-bold text-slate-600">MÉDIA</span></div>
-                            <div className="flex flex-col items-center"><div className="w-full h-1 bg-green-500 rounded-full mb-1 opacity-50"></div><span className="text-[7px] font-bold text-slate-600">ALTA</span></div>
-                        </div>
-                    </div>
 
-                    {/* GRÁFICO: OCUPAÇÃO POR DIA DA SEMANA */}
-                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg lg:col-span-2">
-                        <h3 className="text-sm font-black text-white mb-6 flex items-center gap-2 uppercase tracking-tighter"><Calendar size={18} className="text-neon-blue"/> Taxa de Ocupação por Dia da Semana</h3>
-                        <div className="h-56 w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={occupancyStats.byDay}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-                                    <XAxis dataKey="name" stroke="#94a3b8" fontSize={10} tick={{fontWeight: 'black'}} />
-                                    <YAxis stroke="#94a3b8" fontSize={10} tickFormatter={(v) => `${v}%`} />
-                                    <Tooltip 
-                                        cursor={{fill: '#334155', opacity: 0.3}}
-                                        contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px'}}
-                                        labelStyle={{color: '#fff'}}
-                                        itemStyle={{color: '#fff'}}
-                                        formatter={(v: number) => [`${v}%`, 'Ocupação']}
+                        <div className="space-y-4 pt-6 border-t border-slate-700/50">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Intervalo Personalizado</label>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div className="space-y-1.5">
+                                    <label className="text-[9px] font-bold text-slate-600 uppercase ml-1">De:</label>
+                                    <input 
+                                        type="date" 
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3.5 text-white font-bold text-xs focus:border-neon-blue outline-none" 
+                                        value={dateRange.start} 
+                                        onChange={e => { setCurrentPreset('CUSTOM'); setDateRange(prev => ({...prev, start: e.target.value})); }} 
                                     />
-                                    <Bar dataKey="porcentagem" radius={[4, 4, 0, 0]}>
-                                        {occupancyStats.byDay.map((entry, index) => (
-                                            <Cell key={`cell-day-${index}`} fill={getGaugeColor(entry.porcentagem)} />
-                                        ))}
-                                    </Bar>
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
-
-                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg lg:col-span-3">
-                        <h3 className="text-lg font-black text-white mb-6 flex items-center gap-2 uppercase tracking-tighter"><DollarSign size={20} className="text-green-500"/> Evolução do Faturamento no Período</h3>
-                        <div className="h-80 w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={revenueChartData}>
-                                    <defs>
-                                        <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3}/>
-                                            <stop offset="95%" stopColor="#22c55e" stopOpacity={0}/>
-                                        </linearGradient>
-                                    </defs>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155"/>
-                                    <XAxis dataKey="date" stroke="#94a3b8" fontSize={12} tick={{fontWeight: 'bold'}}/>
-                                    <YAxis stroke="#94a3b8" fontSize={12} tick={{fontWeight: 'bold'}}/>
-                                    <Tooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontWeight: 'bold'}} itemStyle={{color: '#fff'}} labelStyle={{color: '#fff'}} formatter={(v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/>
-                                    <Area type="monotone" dataKey="value" name="Valor" stroke="#22c55e" strokeWidth={3} fillOpacity={1} fill="url(#colorRevenue)"/>
-                                </AreaChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
-                    
-                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-                        <h3 className="text-sm font-black text-white mb-4 flex items-center gap-2 uppercase tracking-tighter"><PieIcon size={18} className="text-neon-orange"/> Receita por Meio</h3>
-                        <div className="h-64 w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie data={revenueByMethodData} cx="50%" cy="50%" innerRadius={50} outerRadius={70} paddingAngle={5} dataKey="value" stroke="none">
-                                        {revenueByMethodData.map((e, i) => (<Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]}/>))}
-                                    </Pie>
-                                    <Tooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px'}} formatter={(v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/>
-                                    <Legend verticalAlign="bottom" height={36} wrapperStyle={{fontSize: '9px', fontWeight: 'bold', textTransform: 'uppercase'}}/>
-                                </PieChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
-                    
-                    <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-                        <h3 className="text-sm font-black text-white mb-4 flex items-center gap-2 uppercase tracking-tighter"><Tag size={18} className="text-neon-blue"/> Receita por Tipo</h3>
-                        <div className="h-64 w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie data={revenueByTypeData} cx="50%" cy="50%" innerRadius={50} outerRadius={70} paddingAngle={5} dataKey="value" stroke="none">
-                                        {revenueByTypeData.map((e, i) => (<Cell key={`cell-type-${i}`} fill={EVENT_TYPE_COLORS[e.name] || COLORS[i % COLORS.length]}/>))}
-                                    </Pie>
-                                    <Tooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px'}} formatter={(v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/>
-                                    <Legend verticalAlign="bottom" height={36} wrapperStyle={{fontSize: '9px', fontWeight: 'bold', textTransform: 'uppercase'}}/>
-                                </PieChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
-
-                    <div className="lg:col-span-1 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg flex flex-col justify-center">
-                        <h3 className="text-sm font-black text-white mb-6 flex items-center gap-2 uppercase tracking-tighter"><Clock size={18} className="text-neon-orange"/> Resumo Operacional</h3>
-                        <div className="space-y-4">
-                            <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
-                                <span className="text-[9px] text-slate-500 font-black uppercase block mb-1">Média Diária</span>
-                                <span className="text-xl font-black text-white">{dailyAverage.toFixed(1)} <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">horas</span></span>
-                            </div>
-                            <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
-                                <span className="text-[9px] text-slate-500 font-black uppercase block mb-1">Total de Horas Vendidas</span>
-                                <span className="text-xl font-black text-white">{confirmedSlotsCount} <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">horas</span></span>
-                            </div>
-                            <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
-                                <span className="text-[9px] text-slate-500 font-black uppercase block mb-1">Estornos / Cancelados</span>
-                                <span className="text-xl font-black text-red-500">{cancellationRate.toFixed(1)}%</span>
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label className="text-[9px] font-bold text-slate-600 uppercase ml-1">Até:</label>
+                                    <input 
+                                        type="date" 
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3.5 text-white font-bold text-xs focus:border-neon-blue outline-none" 
+                                        value={dateRange.end} 
+                                        onChange={e => { setCurrentPreset('CUSTOM'); setDateRange(prev => ({...prev, end: e.target.value})); }} 
+                                    />
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    <div className="lg:col-span-3 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-                        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6">
-                            <h3 className="text-lg font-black text-white flex items-center gap-2 uppercase tracking-tighter"><Monitor size={20} className="text-neon-blue"/> Faturamento por Origem</h3>
-                            <div className="flex flex-wrap items-center gap-4 text-[9px] font-black uppercase tracking-widest border-t md:border-t-0 border-slate-700 pt-2 md:pt-0">
-                                <div className="flex items-center gap-1.5 text-blue-400"><div className="w-2 h-2 rounded-full bg-blue-500"></div> Site</div>
-                                <div className="flex items-center gap-1.5 text-purple-400"><div className="w-2 h-2 rounded-full bg-purple-500"></div> Equipe</div>
-                            </div>
-                        </div>
-                        <div className="h-64 w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <BarChart layout="vertical" data={revenueBySourceData} margin={{ left: -10, right: 30, top: 10, bottom: 10 }}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={false} />
-                                    <XAxis type="number" stroke="#94a3b8" fontSize={10} tickFormatter={(v) => `R$ ${v/1000}k`} />
-                                    <YAxis dataKey="name" type="category" stroke="#fff" fontSize={9} width={100} tick={{fontWeight: 'black'}} />
-                                    <Tooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px'}} formatter={(v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} />
-                                    <Bar dataKey="value" radius={[0, 4, 4, 0]}>
-                                        {revenueBySourceData.map((entry, index) => (
-                                            <Cell key={`cell-source-${index}`} fill={entry.name.includes('SITE') ? '#3b82f6' : '#a855f7'} />
-                                        ))}
-                                    </Bar>
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </div>
+                    <div className="p-6 bg-slate-900/50 border-t border-slate-700">
+                        <button 
+                            onClick={() => setIsDateModalOpen(false)}
+                            className="w-full py-4 bg-neon-blue hover:bg-blue-600 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl transition active:scale-95 flex items-center justify-center gap-2"
+                        >
+                            <Check size={18}/> APLICAR FILTRO
+                        </button>
                     </div>
                 </div>
-            </div>
-        ) : (
-            <div className="animate-fade-in bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg flex flex-col h-[700px]">
-                <div className="mb-4">
-                    <h3 className="text-xl font-black text-white flex items-center gap-2 mb-4 uppercase tracking-tighter"><Shield className="text-neon-orange"/> Registro de Auditoria</h3>
-                    <div className="flex flex-col md:flex-row gap-2 bg-slate-900/50 p-3 rounded-lg border border-slate-700">
-                        <select className="bg-slate-800 border border-slate-600 rounded text-xs text-white p-2 flex-1 outline-none font-bold uppercase" value={auditFilters.userId} onChange={e => setAuditFilters({...auditFilters, userId: e.target.value})}><option value="ALL">Todos Usuários</option>{allUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
-                        <select className="bg-slate-800 border border-slate-600 rounded text-xs text-white p-2 flex-1 outline-none font-bold uppercase" value={auditFilters.actionType} onChange={e => setAuditFilters({...auditFilters, actionType: e.target.value})}><option value="ALL">Todas Ações</option><option value="LOGIN">Acessos</option><option value="CREATE_RESERVATION">Novas Reservas</option><option value="UPDATE_RESERVATION">Edições</option><option value="CREATE_CLIENT">Cadastros</option></select>
-                        <button onClick={refreshAuditLogs} className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded text-xs font-black uppercase flex items-center gap-2 transition-all"><History size={14}/> Sincronizar</button>
-                    </div>
-                </div>
-                <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">{auditLogs.length === 0 ? (<div className="text-center text-slate-500 py-10 font-bold uppercase tracking-widest text-[10px]">Nenhuma atividade registrada no período.</div>) : (auditLogs.map(log => (<div key={log.id} className="relative pl-6 pb-6 border-l border-slate-700 last:border-0 last:pb-0"><div className="absolute left-[-5px] top-0 w-2.5 h-2.5 rounded-full bg-neon-blue border-2 border-slate-800"></div><p className="text-[10px] text-slate-500 mb-1 flex justify-between font-bold"><span>{new Date(log.createdAt).toLocaleString('pt-BR')}</span></p><div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700/50"><p className="text-sm text-white font-black flex items-center gap-2 uppercase tracking-tighter">{log.userName} <span className="text-[9px] uppercase font-black px-1.5 py-0.5 rounded-md bg-slate-700 text-neon-blue border border-neon-blue/20">{log.actionType}</span></p><p className="text-xs text-slate-400 mt-1 font-medium">{log.details}</p></div></div>)))}</div>
             </div>
         )}
 
+        {/* Modal de Detalhamento */}
         {drillDownType && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4">
-                <div className="bg-slate-800 border border-slate-600 w-full max-w-2xl rounded-3xl shadow-2xl animate-scale-in flex flex-col max-h-[90vh]">
-                    <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-900/50 rounded-t-3xl"><div className="flex items-center gap-4">{drillDownType === 'PENDING' ? (<div className="p-3 bg-yellow-500/10 rounded-2xl text-yellow-500"><AlertCircle size={32}/></div>) : (<div className="p-3 bg-red-500/10 rounded-2xl text-red-500"><Ban size={32}/></div>)}<div><h3 className="text-xl font-black text-white uppercase tracking-tighter leading-none mb-1">{drillDownType === 'PENDING' ? 'Reservas Pendentes' : 'Reservas Canceladas'}</h3><p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{getDrillDownList().length} registros</p></div></div><button onClick={() => setDrillDownType(null)} className="text-slate-400 hover:text-white p-2 transition-colors"><X size={24}/></button></div>
-                    <div className="flex-1 overflow-y-auto p-6 space-y-3 custom-scrollbar bg-slate-800/50">
-                        {getDrillDownList().length === 0 ? (<div className="text-center py-20 text-slate-600 font-black uppercase text-sm italic tracking-widest">Nenhum registro para exibir.</div>) : (getDrillDownList().map(res => (
-                            <div key={res.id} className="bg-slate-900/80 border border-slate-700 p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-lg group hover:border-slate-500 transition-colors">
-                                <div className="flex-1">
-                                    <h4 className="font-black text-white uppercase tracking-tight group-hover:text-neon-blue transition-colors">{res.clientName}</h4>
-                                    <div className="text-[10px] text-slate-500 font-bold flex items-center gap-3 mt-1 uppercase tracking-widest">
-                                        <div className="flex items-center gap-1"><Calendar size={12}/> {res.date.split('-').reverse().join('/')}</div>
-                                        <div className="flex items-center gap-1"><Clock size={12}/> {res.time}</div>
-                                    </div>
+                <div className="bg-slate-800 border border-slate-600 w-full max-w-2xl rounded-3xl shadow-2xl flex flex-col max-h-[90vh]">
+                    <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-900/50 rounded-t-3xl">
+                        <h3 className="text-xl font-black text-white uppercase tracking-tighter">
+                            {drillDownType === 'PENDING' ? 'Pendências Financeiras' : 'Cancelamentos / Perdas'}
+                        </h3>
+                        <button onClick={() => setDrillDownType(null)} className="text-slate-400 hover:text-white transition"><X/></button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-6 space-y-3 custom-scrollbar">
+                        {rawReservations.filter(r => drillDownType === 'PENDING' ? (r.status !== ReservationStatus.CANCELADA && r.paymentStatus !== PaymentStatus.PAGO) : (r.status === ReservationStatus.CANCELADA && (r.createdBy || r.paymentStatus === PaymentStatus.REEMBOLSADO))).map(res => (
+                            <div key={res.id} className="bg-slate-900/80 border border-slate-700 p-4 rounded-2xl flex justify-between items-center group hover:border-slate-500 transition">
+                                <div>
+                                    <h4 className="font-black text-white uppercase text-sm group-hover:text-neon-blue transition-colors">{res.clientName}</h4>
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase">{res.date.split('-').reverse().join('/')} às {res.time}</p>
                                 </div>
-                                <div className="text-right flex flex-col items-end gap-1.5 w-full sm:w-auto pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-700/30">
-                                    <span className={`font-black text-xl tracking-tighter ${drillDownType === 'PENDING' ? 'text-yellow-500' : 'text-red-500'}`}>{res.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                                    <span className={`text-[9px] px-2 py-0.5 rounded-md font-black uppercase tracking-widest shadow-sm ${res.status === 'Cancelada' ? 'bg-red-600 text-white' : 'bg-yellow-500 text-black'}`}>{res.status}</span>
+                                <div className="text-right">
+                                    <span className="font-black text-lg text-white">
+                                        {res.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                    </span>
                                 </div>
                             </div>
-                        )))}
+                        ))}
                     </div>
                 </div>
             </div>

@@ -17,7 +17,6 @@ export enum PaymentStatus {
   PENDENTE = 'Pendente',
   PAGO = 'Pago',
   REEMBOLSADO = 'Reembolsado',
-  // Fix: Added PENDENTE_ESTORNO to the enum to match values used in the system for failed automatic refunds
   PENDENTE_ESTORNO = 'Pendente Estorno'
 }
 
@@ -107,6 +106,11 @@ export interface Guest {
   phone: string;
 }
 
+export interface PaymentDetail {
+  method: string;
+  amount: number;
+}
+
 export interface Reservation {
   id: string;
   clientId: string;
@@ -122,6 +126,7 @@ export interface Reservation {
   status: ReservationStatus;
   paymentStatus: PaymentStatus;
   paymentMethod?: string;
+  paymentDetails?: PaymentDetail[];
   createdAt: string;
   lanes?: number[]; 
   guests?: Guest[];

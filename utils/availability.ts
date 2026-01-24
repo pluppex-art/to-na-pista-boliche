@@ -64,15 +64,15 @@ export const checkHourCapacity = (
     
     // NUNCA ignora Check-in ou Confirmada para liberação de vaga
     if (r.status === ReservationStatus.CANCELADA) return false;
-    
     if (r.id === excludeReservationId) return false;
 
-    // Se estiver pendente (ainda não pago), só ocupa vaga se tiver menos de 35min de criação
+    // REGRA DE OURO: Se estiver pendente (do site), só ocupa vaga se tiver menos de 30min de criação.
+    // Aumentamos para 31min para dar margem de segurança ao processamento do Mercado Pago.
     if (r.status === ReservationStatus.PENDENTE && !r.payOnSite && r.createdAt) {
         const created = new Date(r.createdAt);
         const diffMinutes = (now.getTime() - created.getTime()) / (1000 * 60);
-        if (diffMinutes >= 35) { 
-            return false; 
+        if (diffMinutes > 30) { 
+            return false; // A vaga está livre para outro cliente, mesmo que o status ainda não tenha mudado no banco.
         }
     }
 
@@ -82,15 +82,12 @@ export const checkHourCapacity = (
   let occupied = 0;
 
   dayReservations.forEach(r => {
-    // Garante que estamos lidando com números, ignorando segundos na hora
     const rTime = String(r.time || "00:00");
     const rStart = parseInt(rTime.split(':')[0] || "0");
     const rDur = Number(r.duration) || 1;
     const rEnd = rStart + rDur;
-    
     const rLanes = Number(r.laneCount) || 1;
     
-    // Se a hora que estamos checando (hourInt) está entre o início e o fim da reserva
     if (hourInt >= rStart && hourInt < rEnd) {
       occupied += rLanes;
     }

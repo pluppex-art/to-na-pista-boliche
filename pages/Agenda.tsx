@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { db } from '../services/mockBackend';
 import { supabase } from '../services/supabaseClient';
-import { Reservation, ReservationStatus, EventType, UserRole, PaymentStatus } from '../types';
+import { Reservation, ReservationStatus, EventType, UserRole, PaymentStatus, User } from '../types';
 import { useApp } from '../contexts/AppContext'; 
 import { generateDailySlots, checkHourCapacity, getDayConfiguration } from '../utils/availability'; 
 import { 
@@ -36,6 +36,7 @@ const Agenda: React.FC = () => {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [allReservationsForAlerts, setAllReservationsForAlerts] = useState<Reservation[]>([]);
   const [clientPhones, setClientPhones] = useState<Record<string, string>>({});
+  const [staffMap, setStaffMap] = useState<Record<string, string>>({}); 
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(new Date());
   
@@ -73,9 +74,10 @@ const Agenda: React.FC = () => {
   const loadData = async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
-      const [allReservations, allClients] = await Promise.all([
+      const [allReservations, allClients, allUsers] = await Promise.all([
           db.reservations.getAll(),
-          db.clients.getAll()
+          db.clients.getAll(),
+          db.users.getAll()
       ]);
 
       const validReservations = (allReservations || []).filter(r => r && r.id);
@@ -85,12 +87,28 @@ const Agenda: React.FC = () => {
       (allClients || []).forEach(c => { if(c && c.id) phoneMap[c.id] = c.phone; });
       setClientPhones(phoneMap);
 
-      // Filtro da Agenda Robustecido
+      const uMap: Record<string, string> = {};
+      (allUsers || []).forEach(u => { uMap[u.id] = u.name; });
+      setStaffMap(uMap);
+
       const dayReservations = validReservations
         .filter(r => {
             const rDate = String(r.date || "").trim().substring(0, 10);
             const sDate = String(selectedDate || "").trim().substring(0, 10);
-            return rDate === sDate && r.status !== ReservationStatus.CANCELADA;
+            const isTodayRes = rDate === sDate;
+            
+            if (!isTodayRes) return false;
+            if (r.status === ReservationStatus.CANCELADA) return false;
+
+            // FILTRO DE LIMPEZA VISUAL: Se a reserva estiver pendente e tiver mais de 45 minutos (margem de erro do robô cron)
+            // nós não mostramos ela na agenda principal para não confundir o staff.
+            if (r.status === ReservationStatus.PENDENTE && !r.payOnSite && r.createdAt) {
+                const created = new Date(r.createdAt).getTime();
+                const diffMin = (now.getTime() - created) / 60000;
+                if (diffMin > 45) return false; 
+            }
+
+            return true;
         })
         .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
@@ -378,7 +396,6 @@ const Agenda: React.FC = () => {
                const hourReservations = reservations.filter(r => {
                  const rTimeParts = (r.time || "00:00").trim().split(':');
                  const start = parseInt(rTimeParts[0] || "0");
-                 // Força duracao de pelo menos 1 para garantir exibicao
                  const dur = Math.max(1, r.duration || 1);
                  return currentHourInt >= start && currentHourInt < start + dur;
                });
@@ -401,7 +418,6 @@ const Agenda: React.FC = () => {
                                 <span className="text-[10px] font-black uppercase tracking-[0.2em]">Sem reservas neste horário</span>
                             </div>
                          ) : hourReservations.flatMap(res => {
-                           // Força laneCount de pelo menos 1 para garantir renderizacao
                            const lCount = Math.max(1, res.laneCount || 1);
                            return Array.from({ length: lCount }).map((_, idx) => {
                              const uid = `${res.id}_${currentHourInt}:00_${idx+1}`;
@@ -414,6 +430,7 @@ const Agenda: React.FC = () => {
                                  isNS={!!res.noShowIds?.includes(uid)}
                                  laneIdx={idx}
                                  canEdit={canEdit}
+                                 staffName={res.createdBy ? staffMap[res.createdBy] : undefined} 
                                  onOpen={() => { setSelectedRes(res); setIsEditMode(false); }}
                                  onGranularStatus={(e, type) => handleGranularStatus(e, res, uid, type)}
                                />
@@ -435,6 +452,7 @@ const Agenda: React.FC = () => {
           phone={clientPhones[selectedRes.clientId] || ''}
           canEdit={canEdit}
           canCreate={canCreateReservation}
+          staffName={selectedRes.createdBy ? staffMap[selectedRes.createdBy] : undefined}
           onClose={() => setSelectedRes(null)}
           onEdit={() => setIsEditMode(true)}
           onNewBooking={() => navigate('/agendamento', { state: { prefilledClient: { id: selectedRes.clientId, name: selectedRes.clientName, phone: clientPhones[selectedRes.clientId] || '' } } })}

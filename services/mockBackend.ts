@@ -80,7 +80,11 @@ export const db = {
       log: async (userId: string, userName: string, actionType: string, details: string, entityId?: string) => {
           try {
               await supabase.from('audit_logs').insert({
-                  user_id: userId, user_name: userName, action_type: actionType, details: details, entity_id: entityId
+                  user_id: userId, 
+                  user_name: userName || 'Sistema', 
+                  action_type: actionType, 
+                  details: details, 
+                  entity_id: entityId
               });
           } catch (e) { console.warn("[AUDIT LOG ERROR]", e); }
       },
@@ -90,7 +94,7 @@ export const db = {
           if (filters?.actionType && filters.actionType !== 'ALL') query = query.eq('action_type', filters.actionType);
           if (filters?.startDate) query = query.gte('created_at', `${filters.startDate}T00:00:00`);
           if (filters?.endDate) query = query.lte('created_at', `${filters.endDate}T23:59:59`);
-          const { data, error } = query.limit(filters?.limit || 100);
+          const { data, error } = await query.limit(filters?.limit || 300);
           if (error) return [];
           return (data || []).map((l: any) => ({
               id: l.id, userId: l.user_id, userName: l.user_name || 'Sistema', actionType: l.action_type, entityId: l.entity_id, details: l.details, createdAt: l.created_at
@@ -125,20 +129,23 @@ export const db = {
       if (authError) return { error: 'E-mail ou senha inválidos.' };
       const { data, error } = await supabase.from('usuarios').select('*').eq('id', authData.user.id).maybeSingle();
       if (error || !data) return { error: 'Perfil não configurado.' };
-      return {
-          user: {
-            id: data.id, name: data.nome, email: data.email, role: data.role as UserRole, passwordHash: '',
-            perm_view_agenda: data.role === 'ADMIN' ? true : (data.perm_view_agenda ?? false),
-            perm_view_financial: data.role === 'ADMIN' ? true : (data.perm_view_financial ?? false),
-            perm_view_crm: data.role === 'ADMIN' ? true : (data.perm_view_crm ?? false),
-            perm_create_reservation: data.role === 'ADMIN' ? true : (data.perm_create_reservation ?? false),
-            perm_edit_reservation: data.role === 'ADMIN' ? true : (data.perm_edit_reservation ?? false),
-            perm_delete_reservation: data.role === 'ADMIN' ? true : (data.perm_delete_reservation ?? false),
-            perm_edit_client: data.role === 'ADMIN' ? true : (data.perm_edit_client ?? false),
-            perm_receive_payment: data.role === 'ADMIN' ? true : (data.perm_receive_payment ?? false),
-            perm_create_reservation_no_contact: data.role === 'ADMIN' ? true : (data.perm_create_reservation_no_contact ?? false)
-          }
+      
+      const mappedUser = {
+        id: data.id, name: data.nome, email: data.email, role: data.role as UserRole, passwordHash: '',
+        perm_view_agenda: data.role === 'ADMIN' ? true : (data.perm_view_agenda ?? false),
+        perm_view_financial: data.role === 'ADMIN' ? true : (data.perm_view_financial ?? false),
+        perm_view_crm: data.role === 'ADMIN' ? true : (data.perm_view_crm ?? false),
+        perm_create_reservation: data.role === 'ADMIN' ? true : (data.perm_create_reservation ?? false),
+        perm_edit_reservation: data.role === 'ADMIN' ? true : (data.perm_edit_reservation ?? false),
+        perm_delete_reservation: data.role === 'ADMIN' ? true : (data.perm_delete_reservation ?? false),
+        perm_edit_client: data.role === 'ADMIN' ? true : (data.perm_edit_client ?? false),
+        perm_receive_payment: data.role === 'ADMIN' ? true : (data.perm_receive_payment ?? false),
+        perm_create_reservation_no_contact: data.role === 'ADMIN' ? true : (data.perm_create_reservation_no_contact ?? false)
       };
+
+      await db.audit.log(mappedUser.id, mappedUser.name, 'LOGIN', `Usuário realizou login no sistema.`);
+
+      return { user: mappedUser };
     },
     logout: async () => { await supabase.auth.signOut(); },
     getAll: async (): Promise<User[]> => {
@@ -180,10 +187,9 @@ export const db = {
       const phoneToInsert = cleanPhone(client.phone);
       const { data, error } = await supabase.from('clientes').insert({ client_id: authData.user.id, name: client.name, phone: phoneToInsert, email: client.email || null, address: client.address || null, tags: client.tags || [], funnel_stage: 'Novo', last_contact_at: new Date().toISOString() }).select().single();
       if (error) return { error: error.message };
-      return { client: { id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url, address: data.address, tags: safeTags(data.tags), createdAt: data.created_at, lastContactAt: data.last_contact_at, funnelStage: data.funnel_stage, loyaltyBalance: data.loyalty_balance || 0 } };
+      return { client: { id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url, address: data.address, tags: safeTags(data.tags), createdAt: data.created_at, last_contact_at: data.last_contact_at, funnelStage: data.funnel_stage, loyaltyBalance: data.loyalty_balance || 0 } };
     },
     forgotPassword: async (email: string) => {
-      // ATUALIZADO: Usando a URL correta solicitada pelo usuário
       const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/#/reset-password` });
       return { error: error?.message };
     },
@@ -218,13 +224,19 @@ export const db = {
       const clientId = client.id || uuidv4();
       const { data, error } = await supabase.from('clientes').insert({ client_id: clientId, name: client.name, phone: phoneCleaned, email: client.email?.trim() || null, address: client.address || null, tags: client.tags || ['Lead'], funnel_stage: client.funnelStage || 'Novo', last_contact_at: new Date().toISOString() }).select().single();
       if (error) throw error;
-      if (userId) db.audit.log(userId, 'STAFF', 'CREATE_CLIENT', `Criou cliente ${client.name}`, data.client_id);
+      if (userId) {
+          const staff = await db.users.getById(userId);
+          db.audit.log(userId, staff?.name || 'STAFF', 'CREATE_CLIENT', `Criou cliente ${client.name}`, data.client_id);
+      }
       return { id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url, address: data.address, tags: safeTags(data.tags), createdAt: data.created_at, lastContactAt: data.last_contact_at, funnelStage: data.funnel_stage, loyaltyBalance: data.loyalty_balance || 0 };
     },
     update: async (client: Client, updatedBy?: string) => {
       const { error } = await supabase.from('clientes').update({ name: client.name, phone: cleanPhone(client.phone), email: client.email?.trim() || null, address: client.address || null, last_contact_at: client.lastContactAt, photo_url: client.photoUrl, funnel_stage: client.funnelStage }).eq('client_id', client.id);
       if (error) throw error;
-      if (updatedBy) db.audit.log(updatedBy, 'STAFF', 'UPDATE_CLIENT', `Atualizou ${client.name}`, client.id);
+      if (updatedBy) {
+          const staff = await db.users.getById(updatedBy);
+          db.audit.log(updatedBy, staff?.name || 'STAFF', 'UPDATE_CLIENT', `Atualizou dados do cliente ${client.name}`, client.id);
+      }
     },
     updateStage: async (clientId: string, newStage: string) => {
         const { error } = await supabase.from('clientes').update({ funnel_stage: newStage }).eq('client_id', clientId);
@@ -286,6 +298,7 @@ export const db = {
                 status: mappedStatus, 
                 paymentStatus: r.payment_status as PaymentStatus, 
                 paymentMethod: r.payment_method,
+                paymentDetails: r.payment_details || [],
                 createdAt: r.created_at, 
                 guests: r.guests || [], 
                 lanes: r.lanes || [],
@@ -306,23 +319,35 @@ export const db = {
         id: res.id, client_id: res.clientId || null, client_name: res.clientName, date: res.date, time: res.time,
         people_count: res.peopleCount, lane_count: res.laneCount, duration: res.duration, total_value: res.totalValue,
         event_type: res.eventType, observations: res.observations, status: res.status, payment_status: res.paymentStatus,
-        payment_method: res.paymentMethod, created_at: res.createdAt, has_table_reservation: res.hasTableReservation, 
+        payment_method: res.paymentMethod, payment_details: res.paymentDetails, created_at: res.createdAt, has_table_reservation: res.hasTableReservation, 
         birthday_name: res.birthdayName, table_seat_count: res.tableSeatCount, created_by: createdByUserId || null,
         pay_on_site: res.payOnSite || false, comanda_id: res.comandaId || null
       });
       if (error) throw error;
+
+      if (createdByUserId) {
+          const staff = await db.users.getById(createdByUserId);
+          await db.audit.log(createdByUserId, staff?.name || 'EQUIPE', 'CREATE_RESERVATION', `Criou nova reserva para ${res.clientName} dia ${res.date} às ${res.time}`, res.id);
+      }
+
       return res;
     },
     update: async (res: Reservation, updatedByUserId?: string, actionDetail?: string) => {
       const { error } = await supabase.from('reservas').update({
         date: res.date, time: res.time, people_count: res.peopleCount, lane_count: res.laneCount, duration: res.duration,
         total_value: res.totalValue, event_type: res.eventType, observations: res.observations, status: res.status,
-        payment_status: res.paymentStatus, payment_method: res.paymentMethod,
+        payment_status: res.paymentStatus, payment_method: res.paymentMethod, payment_details: res.paymentDetails,
         checked_in_ids: res.checkedInIds || [], no_show_ids: res.noShowIds || [], has_table_reservation: res.hasTableReservation, 
         table_seat_count: res.tableSeatCount, pistas_usadas: res.lanesAssigned,
         pay_on_site: res.payOnSite, comanda_id: res.comandaId
       }).eq('id', res.id);
       if (error) throw error;
+
+      if (updatedByUserId) {
+          const staff = await db.users.getById(updatedByUserId);
+          const detail = actionDetail || `Alterou reserva de ${res.clientName} (Status: ${res.status})`;
+          await db.audit.log(updatedByUserId, staff?.name || 'EQUIPE', 'UPDATE_RESERVATION', detail, res.id);
+      }
     }
   },
 
@@ -347,16 +372,24 @@ export const db = {
         onlinePaymentEnabled: data.online_payment_enabled ?? INITIAL_SETTINGS.onlinePaymentEnabled,
         mercadopagoPublicKey: data.mercadopago_public_key || INITIAL_SETTINGS.mercadopagoPublicKey,
         mercadopagoAccessToken: data.mercadopago_access_token || '',
-        businessHours: businessHours, blockedDates: data.blocked_dates || []
+        businessHours: businessHours, 
+        blockedDates: data.blocked_dates || []
       };
     },
     saveGeneral: async (s: AppSettings) => {
       const { error } = await supabase.from('configuracoes').update({
-        establishment_name: s.establishmentName, address: s.address, phone: s.phone, whatsapp_link: s.whatsappLink, 
-        // Fix: Changed s.active_lanes to s.activeLanes to match AppSettings interface
-        logo_url: s.logoUrl, active_lanes: s.activeLanes, weekday_price: s.weekdayPrice, weekend_price: s.weekendPrice,
-        online_payment_enabled: s.onlinePaymentEnabled, mercadopago_public_key: s.mercadopagoPublicKey,
-        mercadopago_access_token: s.mercadopagoAccessToken, blocked_dates: s.blockedDates
+        establishment_name: s.establishmentName, 
+        address: s.address, 
+        phone: s.phone, 
+        whatsapp_link: s.whatsappLink, 
+        logo_url: s.logoUrl, 
+        active_lanes: s.activeLanes, 
+        weekday_price: s.weekdayPrice, 
+        weekend_price: s.weekendPrice,
+        online_payment_enabled: s.onlinePaymentEnabled, 
+        mercadopago_public_key: s.mercadopagoPublicKey,
+        mercadopago_access_token: s.mercadopagoAccessToken, 
+        blocked_dates: s.blockedDates
       }).eq('id', SETTINGS_ID);
       if (error) throw error;
       window.dispatchEvent(new Event('settings_updated'));

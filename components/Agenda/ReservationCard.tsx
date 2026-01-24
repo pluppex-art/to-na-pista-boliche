@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Reservation, ReservationStatus } from '../../types';
-import { Users, Clock, Hash, Utensils, Cake, Check, Ban, Tag, User, AtSign, Store } from 'lucide-react';
+import { Users, Clock, Hash, Utensils, Cake, Check, Ban, Tag, User, Globe, Store } from 'lucide-react';
 
 interface ReservationCardProps {
   res: Reservation;
@@ -10,12 +10,13 @@ interface ReservationCardProps {
   isNS: boolean;
   laneIdx: number;
   canEdit: boolean;
+  staffName?: string; // Nome do funcionário que criou
   onOpen: () => void;
   onGranularStatus: (e: React.MouseEvent, type: 'CHECK_IN' | 'NS') => void;
 }
 
 export const ReservationCard: React.FC<ReservationCardProps> = ({ 
-  res, uniqueId, isCI, isNS, laneIdx, canEdit, onOpen, onGranularStatus 
+  res, uniqueId, isCI, isNS, laneIdx, canEdit, staffName, onOpen, onGranularStatus 
 }) => {
   const getStatusConfig = () => {
     if (isCI) return { color: 'green', border: 'border-l-green-600', badge: 'bg-green-600 text-white' };
@@ -29,21 +30,24 @@ export const ReservationCard: React.FC<ReservationCardProps> = ({
   const statusLabel = isCI ? 'CHECK-IN' : isNS ? 'NO-SHOW' : res.status.toUpperCase();
 
   const isFromStaff = !!res.createdBy;
-  const OriginIcon = isFromStaff ? User : AtSign;
 
   return (
     <div 
       onClick={onOpen} 
-      className={`relative bg-[#1e293b]/40 rounded-[1.2rem] border border-slate-700/50 ${statusConfig.border} border-l-4 p-4 cursor-pointer hover:bg-[#1e293b]/60 transition-all shadow-xl group flex flex-col gap-2.5 overflow-hidden h-full min-h-[180px]`}
+      className={`relative bg-[#1e293b]/40 rounded-[1.2rem] border ${isFromStaff ? 'border-purple-500/40' : 'border-slate-700/50'} ${statusConfig.border} border-l-4 p-4 cursor-pointer hover:bg-[#1e293b]/60 transition-all shadow-xl group flex flex-col gap-2.5 overflow-hidden h-full min-h-[180px]`}
     >
       <div className="flex justify-between items-start">
         <div className="flex flex-wrap gap-1.5 items-center">
             <span className={`text-[9px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider shadow-sm transition-colors ${statusConfig.badge}`}>
                 {statusLabel}
             </span>
-            <div className="p-1 bg-slate-800/50 rounded-md border border-slate-700 text-slate-500" title={isFromStaff ? "Reservado pela Equipe" : "Reservado pelo Site"}>
-                <OriginIcon size={12} />
+            
+            {/* ORIGEM: DIFERENCIAÇÃO SITE vs EQUIPE */}
+            <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[8px] font-black uppercase ${isFromStaff ? 'bg-purple-900/30 border-purple-500/30 text-purple-400' : 'bg-blue-900/30 border-blue-500/30 text-blue-400'}`} title={isFromStaff ? `Por: ${staffName || 'Equipe'}` : "Reserva pelo Site"}>
+                {isFromStaff ? <User size={10} /> : <Globe size={10} />}
+                <span>{isFromStaff ? (staffName || 'EQUIPE') : 'SITE'}</span>
             </div>
+
             {res.payOnSite && (
               <div className="flex items-center gap-1 bg-purple-600/20 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-tighter">
                 <Store size={10}/> Local

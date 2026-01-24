@@ -4,7 +4,7 @@ import { Reservation, ReservationStatus, PaymentStatus } from '../../types';
 import { 
   X, Info, CalendarPlus, Pencil, Layout, User as UserIcon, 
   MessageCircle, Monitor, DollarSign, Hash, FileText, 
-  Clock, CheckCircle, Ban
+  Clock, CheckCircle, Ban, Globe, CreditCard
 } from 'lucide-react';
 
 interface InfoModalProps {
@@ -12,6 +12,7 @@ interface InfoModalProps {
   phone: string;
   canEdit: boolean;
   canCreate: boolean;
+  staffName?: string;
   onClose: () => void;
   onEdit: () => void;
   onNewBooking: () => void;
@@ -20,12 +21,14 @@ interface InfoModalProps {
 }
 
 export const InfoModal: React.FC<InfoModalProps> = ({ 
-  res, phone, canEdit, canCreate, onClose, onEdit, onNewBooking, onStatusChange, onCancel 
+  res, phone, canEdit, canCreate, staffName, onClose, onEdit, onNewBooking, onStatusChange, onCancel 
 }) => {
   const openWhatsApp = () => {
     if(!phone) return;
     window.open(`https://wa.me/55${phone.replace(/\D/g, '')}`, '_blank');
   };
+
+  const isFromStaff = !!res.createdBy;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-xl p-2 md:p-4 overflow-y-auto">
@@ -79,11 +82,15 @@ export const InfoModal: React.FC<InfoModalProps> = ({
             </div>
             <div className="bg-slate-900/40 p-6 rounded-3xl border border-slate-700 shadow-inner">
               <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2"><Monitor size={14}/> Canal de Origem</h4>
-              <div className="flex items-center gap-4 bg-slate-800 p-4 rounded-2xl border border-slate-700">
-                <div className="p-2 bg-orange-900/20 text-neon-orange rounded-lg"><Monitor size={20}/></div>
+              <div className={`flex items-center gap-4 bg-slate-800 p-4 rounded-2xl border ${isFromStaff ? 'border-purple-500/30' : 'border-blue-500/30'}`}>
+                <div className={`p-2 rounded-lg ${isFromStaff ? 'bg-purple-900/20 text-purple-400' : 'bg-blue-900/20 text-blue-400'}`}>
+                  {isFromStaff ? <UserIcon size={20}/> : <Globe size={20}/>}
+                </div>
                 <div className="flex flex-col">
-                  <span className="text-[7px] text-slate-500 font-bold uppercase mb-0.5">Canal de Origem</span>
-                  <span className="text-white font-black text-[10px] uppercase">Reserva Online (Cliente)</span>
+                  <span className="text-[7px] text-slate-500 font-bold uppercase mb-0.5">Origem da Reserva</span>
+                  <span className={`font-black text-[10px] uppercase ${isFromStaff ? 'text-purple-400' : 'text-blue-400'}`}>
+                    {isFromStaff ? `EQUIPE: ${staffName || 'NÃO IDENTIFICADO'}` : 'RESERVA ONLINE (SITE)'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -91,9 +98,10 @@ export const InfoModal: React.FC<InfoModalProps> = ({
 
           <div className="bg-slate-900/40 p-6 rounded-3xl border border-slate-700 shadow-inner">
             <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2"><DollarSign size={14}/> Financeiro e Pagamento</h4>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
               <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700/50"><p className="text-[7px] text-slate-500 font-bold uppercase mb-1">Valor</p><p className="text-neon-green text-xl font-black">{res.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p></div>
               <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700/50"><p className="text-[7px] text-slate-500 font-bold uppercase mb-1">Status Pagamento</p><span className={`text-[8px] font-black uppercase px-2 py-1 rounded w-fit inline-block ${res.paymentStatus === PaymentStatus.PAGO ? 'bg-green-600/20 text-green-400' : 'bg-red-600/20 text-red-400'}`}>{res.paymentStatus}</span></div>
+              <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700/50"><p className="text-[7px] text-slate-500 font-bold uppercase mb-1">Forma</p><p className="text-white font-black text-[11px] uppercase flex items-center gap-2"><CreditCard size={14} className="text-slate-500"/> {res.paymentMethod || 'PENDENTE'}</p></div>
               <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700/50"><p className="text-[7px] text-slate-500 font-bold uppercase mb-1">Comanda</p><p className="text-white font-black text-sm uppercase flex items-center gap-2"><Hash size={14} className="text-slate-500"/> {res.comandaId || 'Sem Comanda'}</p></div>
             </div>
           </div>
