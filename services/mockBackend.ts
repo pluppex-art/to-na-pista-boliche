@@ -198,15 +198,13 @@ export const db = {
         date: res.date,
         time: res.time,
         people_count: res.peopleCount,
-        // Fix: res.lane_count changed to res.laneCount to match Reservation type
-        lane_count: res.laneCount,
+        lane_count: res.lane_count,
         duration: res.duration,
         total_value: res.totalValue,
         event_type: res.eventType,
         observations: res.observations,
         status: res.status,
         payment_status: res.paymentStatus,
-        // Fix: res.pay_on_site changed to res.payOnSite to match Reservation type
         pay_on_site: res.payOnSite,
         comanda_id: res.comandaId,
         has_table_reservation: res.hasTableReservation,
@@ -221,8 +219,7 @@ export const db = {
         client_id: res.clientId,
         date: res.date,
         time: res.time,
-        // Fix: res.lane_count changed to res.laneCount to match Reservation type
-        lane_count: res.laneCount,
+        lane_count: res.lane_count,
         people_count: res.peopleCount,
         duration: res.duration,
         total_value: res.totalValue,
@@ -230,20 +227,15 @@ export const db = {
         status: res.status,
         payment_status: res.paymentStatus,
         payment_method: res.paymentMethod,
-        // Fix: res.lanes_assigned changed to res.lanesAssigned to match Reservation type
-        lanes_assigned: res.lanesAssigned,
-        // Fix: res.checked_in_ids changed to res.checkedInIds to match Reservation type
-        checked_in_ids: res.checkedInIds,
-        // Fix: res.no_show_ids changed to res.noShowIds to match Reservation type
-        no_show_ids: res.noShowIds,
-        // Fix: res.pay_on_site changed to res.payOnSite to match Reservation type
-        pay_on_site: res.payOnSite,
+        lanes_assigned: res.lanes_assigned,
+        checked_in_ids: res.checked_in_ids,
+        no_show_ids: res.no_show_ids,
+        pay_on_site: res.pay_on_site,
         comanda_id: res.comandaId,
         observations: res.observations,
         has_table_reservation: res.hasTableReservation,
         birthday_name: res.birthdayName,
-        // Fix: res.table_seat_count changed to res.tableSeatCount to match Reservation type
-        table_seat_count: res.tableSeatCount
+        table_seat_count: res.table_seat_count
       }).eq('id', res.id);
       
       if (logDetails && userId) {

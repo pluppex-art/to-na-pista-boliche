@@ -2,15 +2,13 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../services/mockBackend';
-import { Loader2, Lock, CheckCircle, ShieldCheck, ArrowRight, KeyRound, ArrowLeft, AlertTriangle, RefreshCw, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Lock, CheckCircle, ShieldCheck, ArrowRight, KeyRound, ArrowLeft, AlertTriangle, RefreshCw } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
 const ResetPassword: React.FC = () => {
   const navigate = useNavigate();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
   const [urlError, setUrlError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -93,9 +91,6 @@ const ResetPassword: React.FC = () => {
       }
   };
 
-  // Lógica para cor do campo de confirmação
-  const isConfirmError = confirmPassword !== '' && password !== confirmPassword;
-
   // TELA DE ERRO (LINK EXPIRADO)
   if (urlError) {
       return (
@@ -153,47 +148,30 @@ const ResetPassword: React.FC = () => {
                         <div className="relative group">
                             <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-neon-blue transition-colors" size={18}/>
                             <input 
-                                type={showPassword ? "text" : "password"} 
+                                type="password" 
                                 required 
                                 autoFocus
-                                className="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 pl-12 pr-12 text-white font-bold outline-none focus:border-neon-blue transition-all" 
+                                className="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 pl-12 text-white font-bold outline-none focus:border-neon-blue transition-all" 
                                 placeholder="Mínimo 6 dígitos"
                                 value={password}
                                 onChange={e => setPassword(e.target.value)}
                             />
-                            <button 
-                                type="button"
-                                onClick={() => setShowPassword(!showPassword)}
-                                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors"
-                            >
-                                {showPassword ? <EyeOff size={18}/> : <Eye size={18}/>}
-                            </button>
                         </div>
                     </div>
 
                     <div className="space-y-1.5">
                         <label className="block text-[10px] font-black text-slate-500 mb-1 uppercase tracking-widest">Confirme a senha</label>
                         <div className="relative group">
-                            <ShieldCheck className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors ${isConfirmError ? 'text-red-500' : 'text-slate-600 group-focus-within:text-neon-blue'}`} size={18}/>
+                            <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-neon-blue transition-colors" size={18}/>
                             <input 
-                                type={showConfirmPassword ? "text" : "password"} 
+                                type="password" 
                                 required 
-                                className={`w-full bg-slate-800 border rounded-2xl p-4 pl-12 pr-12 text-white font-bold outline-none transition-all ${isConfirmError ? 'border-red-500 ring-2 ring-red-500/20' : 'border-slate-700 focus:border-neon-blue'}`} 
+                                className="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 pl-12 text-white font-bold outline-none focus:border-neon-blue transition-all" 
                                 placeholder="Repita a senha"
                                 value={confirmPassword}
                                 onChange={e => setConfirmPassword(e.target.value)}
                             />
-                            <button 
-                                type="button"
-                                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors"
-                            >
-                                {showConfirmPassword ? <EyeOff size={18}/> : <Eye size={18}/>}
-                            </button>
                         </div>
-                        {isConfirmError && (
-                            <p className="text-[9px] text-red-500 font-bold uppercase tracking-tight mt-1 ml-1 animate-fade-in">As senhas ainda não coincidem</p>
-                        )}
                     </div>
 
                     {error && (
@@ -204,8 +182,8 @@ const ResetPassword: React.FC = () => {
 
                     <button 
                         type="submit" 
-                        disabled={isLoading || isConfirmError} 
-                        className={`w-full font-black py-5 rounded-2xl shadow-xl transition-all transform active:scale-95 flex items-center justify-center gap-3 uppercase text-xs tracking-widest ${isConfirmError ? 'bg-slate-700 text-slate-500 cursor-not-allowed opacity-50' : 'bg-neon-blue hover:bg-blue-600 text-white'}`}
+                        disabled={isLoading} 
+                        className="w-full bg-neon-blue hover:bg-blue-600 text-white font-black py-5 rounded-2xl shadow-xl transition-all transform active:scale-95 flex items-center justify-center gap-3 uppercase text-xs tracking-widest"
                     >
                         {isLoading ? <Loader2 className="animate-spin" size={20} /> : 'DEFINIR NOVA SENHA'}
                     </button>
