@@ -2,8 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../services/mockBackend';
-// Fix: Added ArrowLeft to the imports from lucide-react
-import { Loader2, Lock, CheckCircle, ShieldCheck, ArrowRight, KeyRound, ArrowLeft } from 'lucide-react';
+import { Loader2, Lock, CheckCircle, ShieldCheck, ArrowRight, KeyRound, ArrowLeft, AlertTriangle, RefreshCw } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
 const ResetPassword: React.FC = () => {
@@ -11,28 +10,32 @@ const ResetPassword: React.FC = () => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
+  const [urlError, setUrlError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isTokenValid, setIsTokenValid] = useState(true);
 
   useEffect(() => {
+      // Verifica se a URL contém parâmetros de erro vindos do Supabase
+      const hash = window.location.hash;
+      if (hash.includes('error=')) {
+          const params = new URLSearchParams(hash.substring(hash.indexOf('error=')));
+          const errorDesc = params.get('error_description');
+          const errorCode = params.get('error_code');
+          
+          if (errorCode === 'otp_expired' || hash.includes('otp_expired')) {
+              setUrlError('Este link de recuperação expirou ou já foi utilizado. Por segurança, solicite um novo link.');
+          } else {
+              setUrlError(errorDesc || 'Ocorreu um erro ao validar seu link de acesso.');
+          }
+          return;
+      }
+
       // Captura o evento de recuperação de senha do Supabase
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
           if (event === 'PASSWORD_RECOVERY') {
               console.log("Evento PASSWORD_RECOVERY detectado");
-              setIsTokenValid(true);
           }
       });
-
-      // Se o usuário cair aqui sem sessão ou sem evento, damos um aviso (opcional)
-      const checkSession = async () => {
-        const { data } = await supabase.auth.getSession();
-        if (!data.session) {
-            // Em produção, se não houver sessão, o link pode estar expirado
-            // Mas mantemos habilitado pois o Supabase injeta o token na URL
-        }
-      };
-      checkSession();
 
       return () => subscription.unsubscribe();
   }, []);
@@ -61,9 +64,7 @@ const ResetPassword: React.FC = () => {
               }
           } else {
               setSuccess(true);
-              // Faz logout por segurança para garantir que o próximo acesso use a senha nova
               await db.clients.logout();
-              // Meta Pixel: Track de redefinição concluída
               if (window.fbq) window.fbq('trackCustom', 'PasswordResetComplete');
               setTimeout(() => navigate('/login'), 4000);
           }
@@ -73,6 +74,35 @@ const ResetPassword: React.FC = () => {
           setIsLoading(false);
       }
   };
+
+  // INTERFACE DE ERRO NO LINK (URL INVÁLIDA/EXPIRADA)
+  if (urlError) {
+      return (
+          <div className="min-h-screen bg-neon-bg flex items-center justify-center p-4">
+              <div className="max-w-md w-full bg-slate-900 border border-red-500/50 p-10 rounded-[2.5rem] shadow-[0_0_50px_rgba(239,68,68,0.1)] text-center animate-scale-in">
+                  <div className="w-20 h-20 bg-red-500/20 text-red-500 rounded-[1.5rem] flex items-center justify-center mx-auto mb-6 border border-red-500/30 shadow-inner">
+                      <AlertTriangle size={40} />
+                  </div>
+                  <h2 className="text-2xl font-black text-white mb-4 uppercase tracking-tighter">Link Inválido</h2>
+                  <p className="text-slate-400 mb-8 font-medium leading-relaxed">{urlError}</p>
+                  <div className="space-y-3">
+                    <button 
+                        onClick={() => navigate('/login')}
+                        className="w-full bg-white text-black font-black py-4 rounded-2xl transition-all transform active:scale-95 flex items-center justify-center gap-2 uppercase text-xs tracking-widest"
+                    >
+                        <RefreshCw size={16}/> Solicitar Novo Link
+                    </button>
+                    <button 
+                        onClick={() => navigate('/')}
+                        className="w-full text-slate-500 hover:text-slate-300 font-bold py-2 uppercase text-[10px] tracking-widest transition-colors"
+                    >
+                        Voltar ao Início
+                    </button>
+                  </div>
+              </div>
+          </div>
+      );
+  }
 
   if (success) {
       return (
