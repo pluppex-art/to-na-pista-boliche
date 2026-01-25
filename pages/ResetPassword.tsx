@@ -17,46 +17,70 @@ const ResetPassword: React.FC = () => {
   useEffect(() => {
     const validateToken = async () => {
       try {
-        // Extrai parâmetros da URL com HashRouter
-        const fullHash = window.location.hash;
+        console.log('Iniciando validação...');
         
-        // Tenta extrair os parâmetros de diferentes formas
+        // Extrai parâmetros da URL
+        const fullHash = window.location.hash;
+        console.log('Hash completa:', fullHash);
+        
         let params: URLSearchParams;
         
         if (fullHash.includes('?')) {
-          // Formato: #/reset-password?access_token=xxx
           const queryString = fullHash.split('?')[1];
           params = new URLSearchParams(queryString);
-        } else if (fullHash.includes('#access_token=')) {
-          // Formato: #/reset-password#access_token=xxx (hash duplo)
-          const tokenPart = fullHash.split('#access_token=')[1];
-          params = new URLSearchParams('access_token=' + tokenPart);
+          console.log('Query string extraída:', queryString);
         } else {
-          throw new Error('Formato de URL inválido');
+          throw new Error('URL sem parâmetros');
         }
 
         const accessToken = params.get('access_token');
-        const refreshToken = params.get('refresh_token');
+        const type = params.get('type');
 
-        if (!accessToken) {
-          throw new Error('Token não encontrado');
+        console.log('Access token:', accessToken ? 'Presente' : 'Ausente');
+        console.log('Type:', type);
+
+        if (!accessToken || type !== 'recovery') {
+          throw new Error('Token ou tipo inválido');
         }
 
-        // Define a sessão
-        const { error: sessionError } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken || '',
+        // MUDANÇA AQUI: Usar exchangeCodeForSession em vez de setSession
+        // O Supabase espera que você use o fluxo PKCE
+        // Mas como estamos no HashRouter, vamos usar uma abordagem diferente
+        
+        // Primeiro, tenta verificar se já existe uma sessão ativa
+        const { data: { session: existingSession } } = await supabase.auth.getSession();
+        
+        if (existingSession) {
+          console.log('Sessão já existe!');
+          setIsTokenValid(true);
+          setIsValidating(false);
+          return;
+        }
+
+        // Se não existe sessão, vamos criar uma usando verifyOtp
+        const { data, error: verifyError } = await supabase.auth.verifyOtp({
+          token_hash: accessToken,
+          type: 'recovery'
         });
 
-        if (sessionError) {
-          throw sessionError;
+        console.log('Resultado verifyOtp:', data);
+        console.log('Erro verifyOtp:', verifyError);
+
+        if (verifyError) {
+          throw verifyError;
         }
 
-        setIsTokenValid(true);
+        if (data.session) {
+          console.log('Sessão criada com sucesso!');
+          setIsTokenValid(true);
+        } else {
+          throw new Error('Não foi possível criar a sessão');
+        }
+        
       } catch (err: any) {
-        console.error('Erro ao validar token:', err);
+        console.error('Erro completo:', err);
         setIsTokenValid(false);
-        setError(err?.message || 'Link de recuperação inválido ou expirado.');
+        setError(err?.message || 'Link inválido ou expirado');
       } finally {
         setIsValidating(false);
       }
@@ -122,7 +146,7 @@ const ResetPassword: React.FC = () => {
             <Lock size={32} className="text-red-400" />
           </div>
           <h2 className="text-2xl font-black text-red-400 mb-4 uppercase">Link Inválido</h2>
-          <p className="text-slate-400 mb-2">{error || 'Este link de recuperação não é válido.'}</p>
+          <p className="text-slate-400 mb-2">{error || 'Auth session missing!'}</p>
           <p className="text-slate-500 text-sm mb-6">Solicite um novo link na página de login.</p>
           <button
             onClick={() => navigate('/login')}
