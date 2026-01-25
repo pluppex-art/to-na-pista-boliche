@@ -58,7 +58,7 @@ const Agenda: React.FC = () => {
     if (!settings) return { isClosed: false, reason: '' };
     const cleanSelected = selectedDate.trim().substring(0, 10);
     const isBlocked = settings.blockedDates?.some(d => d.trim().substring(0, 10) === cleanSelected);
-    if (isBlocked) return { isClosed: true, reason: 'BLOQUEIO EXCEPCIONAL' };
+    if (isBlocked) return { isClosed: true, reason: 'ESTABELECIMENTO FECHADO NESTE DIA' };
     
     const config = getDayConfiguration(selectedDate, settings);
     if (!config || !config.isOpen) return { isClosed: true, reason: 'ESTABELECIMENTO FECHADO NESTE DIA' };
