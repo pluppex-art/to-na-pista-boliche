@@ -2,7 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
-import { X, Calendar } from 'lucide-react';
+import { X, Calendar, MapPin, Phone, ArrowRight, MessageCircle, Instagram } from 'lucide-react';
+import { Analytics } from '../services/analytics';
 
 // Importação das Seções Modulares
 import { Navbar } from '../components/Home/Navbar';
@@ -12,9 +13,6 @@ import { HowItWorks } from '../components/Home/HowItWorks';
 import { FAQ } from '../components/Home/FAQ';
 import { Experiences } from '../components/Home/Experiences';
 import { Menu } from '../components/Home/Menu';
-
-// Importação de componentes que permanecem internos ou pequenos
-import { MapPin, Phone, ArrowRight, MessageCircle, Instagram } from 'lucide-react';
 
 const Home: React.FC = () => {
   const navigate = useNavigate();
@@ -45,6 +43,7 @@ const Home: React.FC = () => {
   };
 
   const trackCta = (label: string) => {
+    Analytics.trackEvent('click_reserve_cta', { cta_label: label });
     if (window.fbq) {
       window.fbq('track', 'Contact', { content_name: label });
     }

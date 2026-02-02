@@ -15,6 +15,7 @@ import ResetPassword from './pages/ResetPassword';
 import Home from './pages/Home';
 import LP from './pages/LP';
 import { UserRole, User } from './types';
+import { Analytics } from './services/analytics';
 
 declare global {
   interface Window {
@@ -26,10 +27,16 @@ const PixelTracker: React.FC = () => {
   const location = useLocation();
 
   useEffect(() => {
+    // Meta Pixel
     if (window.fbq) {
       window.fbq('track', 'PageView');
-      console.log(`%c[Meta Pixel] Evento PageView em: ${location.pathname}`, 'color: #1877F2; font-weight: bold;');
     }
+    
+    // Rastreamento Interno Supabase
+    const path = location.pathname === '/' ? 'home' : location.pathname.replace('/', '');
+    Analytics.trackEvent(`visit_${path || 'home'}`);
+    
+    console.log(`%c[Analytics] Tracking PageView: ${location.pathname}`, 'color: #10b981; font-weight: bold;');
   }, [location]);
 
   return null;
