@@ -36,13 +36,13 @@ export const Hero: React.FC<HeroProps> = ({ onReserve }) => {
           </div>
           
           <div className="space-y-4">
-            <h1 className="text-4xl md:text-8xl font-black text-white leading-[1.1] md:leading-[1.05] tracking-tighter uppercase">
-              A melhor diversão <br/> 
-              <span className="text-neon-orange drop-shadow-[0_0_15px_rgba(249,115,22,0.4)]">de Palmas te espera</span>
+            <h1 className="text-2xl md:text-6xl font-black text-white leading-[1.1] md:leading-[1.05] tracking-tighter uppercase">
+              Sua noite perfeita começa <br/> 
+              <span className="text-neon-orange drop-shadow-[0_0_15px_rgba(249,115,22,0.4)]">com uma pista reservada</span>
             </h1>
             
             <p className="text-xs md:text-xl text-slate-300 max-w-md md:max-w-xl mx-auto lg:mx-0 font-medium leading-relaxed">
-              Reserve sua pista agora e garanta momentos inesquecíveis, ambiente <strong>100% climatizado</strong> e a melhor pizza da capital.
+              Reserve sua pista agora e garanta momentos inesquecíveis, ambiente <strong>100% climatizado</strong> e a melhor pizza da capital. São 6 pistas de boliche, bar completo, pizza artesanal e jogos para toda a família. Reserve em menos de 1 minuto.
             </p>
           </div>
           
@@ -51,7 +51,7 @@ export const Hero: React.FC<HeroProps> = ({ onReserve }) => {
               onClick={() => onReserve('Hero Primary')} 
               className="group relative px-8 md:px-12 py-5 md:py-6 bg-neon-orange hover:bg-orange-500 text-white rounded-2xl font-black uppercase text-[10px] md:text-sm tracking-[0.2em] shadow-[0_15px_40px_rgba(249,115,22,0.3)] transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-4"
             >
-               RESERVAR MINHA PISTA AGORA <ChevronRight size={18} className="group-hover:translate-x-1 transition-transform" />
+               Ver horários disponíveis agora <ChevronRight size={18} className="group-hover:translate-x-1 transition-transform" />
             </button>
           </div>
 
