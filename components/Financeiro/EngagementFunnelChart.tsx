@@ -16,7 +16,7 @@ export const EngagementFunnelChart: React.FC<EngagementFunnelProps> = ({ data })
   const funnelData = [
     { name: 'Visitas (Site)', value: data.visits, fill: '#3b82f6', label: '100%' },
     { name: 'Interesse (Botão)', value: data.clicks, fill: '#f97316', label: `${data.visits > 0 ? Math.round((data.clicks / data.visits) * 100) : 0}%` },
-    { name: 'Agendamento', value: data.bookingStarts, fill: '#a855f7', label: `${data.clicks > 0 ? Math.round((data.bookingStarts / data.clicks) * 100) : 0}%` },
+    { name: 'Pré-Reserva (Site)', value: data.bookingStarts, fill: '#a855f7', label: `${data.clicks > 0 ? Math.round((data.bookingStarts / data.clicks) * 100) : 0}%` },
     { name: 'Vendas Pagas', value: data.conversions, fill: '#22c55e', label: `${data.bookingStarts > 0 ? Math.round((data.conversions / data.bookingStarts) * 100) : 0}%` },
   ];
 

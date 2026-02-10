@@ -68,23 +68,27 @@ const Financeiro: React.FC = () => {
         const startTimestamp = `${dateRange.start}T00:00:00`;
         const endTimestamp = `${dateRange.end}T23:59:59`;
 
-        const [resData, usersData, visitsCount, clicksCount, startsCount] = await Promise.all([
+        const [resData, usersData, visitsCount, clicksCount] = await Promise.all([
             db.reservations.getByDateRange(dateRange.start, dateRange.end),
             db.users.getAll(),
             // Agregações de Analytics
             supabase.from('analytics_events').select('*', { count: 'exact', head: true }).eq('event_name', 'visit_home').gte('created_at', startTimestamp).lte('created_at', endTimestamp),
             supabase.from('analytics_events').select('*', { count: 'exact', head: true }).eq('event_name', 'click_reserve_cta').gte('created_at', startTimestamp).lte('created_at', endTimestamp),
-            supabase.from('analytics_events').select('*', { count: 'exact', head: true }).eq('event_name', 'visit_agendamento').gte('created_at', startTimestamp).lte('created_at', endTimestamp),
         ]);
 
-        const conversions = (resData || []).filter(r => r.status !== ReservationStatus.CANCELADA && r.paymentStatus === PaymentStatus.PAGO).length;
+        // NOVA LÓGICA DO FUNIL:
+        // Passo 3: Contar quantas reservas foram criadas pelo site (sem createdBy) no período.
+        const createdOnSite = (resData || []).filter(r => !r.createdBy).length;
+        
+        // Passo 4: Contar quantas dessas reservas do site foram pagas.
+        const conversions = (resData || []).filter(r => !r.createdBy && r.status !== ReservationStatus.CANCELADA && r.paymentStatus === PaymentStatus.PAGO).length;
 
         setRawReservations(resData || []);
         setAllUsers(usersData || []);
         setAnalyticsData({
             visits: visitsCount.count || 0,
             clicks: clicksCount.count || 0,
-            bookingStarts: startsCount.count || 0,
+            bookingStarts: createdOnSite, // Agora representa ações reais de criação
             conversions: conversions
         });
     } finally { 
