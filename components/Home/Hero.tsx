@@ -1,39 +1,141 @@
 
-import React from 'react';
-import { Zap, ChevronRight, ArrowDown, Star, Trophy, Users } from 'lucide-react';
+import React, { useRef, useState, useEffect } from 'react';
+import { Zap, ChevronRight, ArrowDown, Star, Volume2, VolumeX } from 'lucide-react';
 
 interface HeroProps {
   onReserve: (label: string) => void;
 }
 
 export const Hero: React.FC<HeroProps> = ({ onReserve }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  
+  // Inicia mutado para garantir compatibilidade total com autoplay
+  const [isMuted, setIsMuted] = useState(true);
+  
+  const [progress, setProgress] = useState(0);
+  const [isDesktopView, setIsDesktopView] = useState(typeof window !== 'undefined' ? window.innerWidth >= 1024 : true);
+
+  // Monitora redimensionamento para alternar entre layouts mobile/desktop
+  useEffect(() => {
+    const handleResize = () => {
+      const isNowDesktop = window.innerWidth >= 1024;
+      if (isNowDesktop !== isDesktopView) {
+        setIsDesktopView(isNowDesktop);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [isDesktopView]);
+
+  // Função para controlar áudio
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newMuted = !isMuted;
+    setIsMuted(newMuted);
+    if (videoRef.current) {
+      videoRef.current.muted = newMuted;
+    }
+  };
+
+  // Atualiza a barra de progresso baseada no tempo real do vídeo
+  const handleTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const video = e.currentTarget;
+    if (!video.duration || isNaN(video.duration)) return;
+    const u = video.currentTime / video.duration; 
+    
+    // Mapeamento visual para a barra de progresso
+    let visualProgress = u <= 0.5 ? u * 1.6 : 0.8 + (u - 0.5) * 0.4;
+    setProgress(Math.min(visualProgress * 100, 100));
+  };
+
+  // Tenta reproduzir o vídeo após a montagem
+  useEffect(() => {
+    const attemptPlay = async () => {
+      if (videoRef.current) {
+        try {
+          videoRef.current.muted = true; // Sempre inicia mutado para o autoplay não falhar
+          await videoRef.current.play();
+        } catch (err) {
+          console.warn("Autoplay falhou:", err);
+        }
+      }
+    };
+    const timer = setTimeout(attemptPlay, 300);
+    return () => clearTimeout(timer);
+  }, [isDesktopView]);
+
+  // JSX do Player de Vídeo Centralizado
+  const videoElementJSX = (
+    <div className="relative w-full h-full group/player animate-fade-in overflow-hidden">
+      <video 
+        ref={videoRef}
+        onTimeUpdate={handleTimeUpdate}
+        src="https://rmirkhebjgvsqqenszts.supabase.co/storage/v1/object/public/public-assets/apresentacao.mp4"
+        className="w-full h-full object-cover pointer-events-none"
+        autoPlay 
+        loop
+        muted={isMuted}
+        playsInline
+        preload="auto"
+      />
+      
+      {/* Botão de Som e Indicador Visual */}
+      <div className="absolute top-4 right-4 z-20 flex items-center gap-3">
+        {/* Tooltip Chamativa (Só aparece se estiver mudo) */}
+        {isMuted && (
+          <div className="animate-bounce bg-neon-orange text-white text-[8px] md:text-[10px] font-black uppercase tracking-widest px-3 py-2 rounded-xl shadow-[0_0_15px_rgba(249,115,22,0.6)] border border-white/20 flex items-center gap-2 pointer-events-none">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+            </span>
+            Ativar Som
+          </div>
+        )}
+
+        <button 
+          onClick={toggleMute}
+          className="p-3 bg-black/40 backdrop-blur-md rounded-full text-white border border-white/10 hover:bg-black/60 transition-all active:scale-90 shadow-xl"
+        >
+          {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+        </button>
+      </div>
+
+      {/* Barra de Progresso Inferior */}
+      <div className="absolute bottom-0 left-0 w-full h-1.5 bg-white/10 overflow-hidden">
+         <div 
+           className="h-full bg-neon-orange transition-all duration-300 ease-linear shadow-[0_0_15px_#f97316]"
+           style={{ width: `${progress}%` }}
+         />
+      </div>
+    </div>
+  );
+
   return (
     <section id="hero" className="relative min-h-screen flex items-center justify-center pt-20 pb-12 px-4 overflow-hidden">
-      {/* Camada 1: Background com imagem suave */}
+      {/* Camadas de Estética Background */}
       <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1538356111083-7481997bb019?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-10 md:opacity-20 scale-105"></div>
-      
-      {/* Camada 2: Gradientes de Profundidade */}
       <div className="absolute inset-0 bg-gradient-to-b from-neon-bg via-transparent to-neon-bg"></div>
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,#0f172a_90%)]"></div>
 
-      {/* Camada 3: MARCA D'ÁGUA - O Pino Gigante que você pediu */}
-      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 opacity-[0.03] md:opacity-[0.05] pointer-events-none select-none animate-float">
-        <svg width="400" height="600" viewBox="0 0 240 320" fill="none" xmlns="http://www.w3.org/2000/svg" className="md:w-[800px] md:h-[1000px]">
-          <path d="M120 20C100 20 85 35 85 60C85 85 95 100 95 130C95 160 60 210 60 260C60 290 80 300 120 300C160 300 180 290 180 260C180 210 145 160 145 130C145 100 155 85 155 60C155 35 140 20 120 20Z" fill="white" />
-        </svg>
-      </div>
-
-      {/* Camada 4: Aura Glow (Brilho Neon) */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 md:w-[600px] md:h-[600px] bg-neon-orange/20 rounded-full blur-[80px] md:blur-[140px] animate-pulse"></div>
-
       <div className="relative max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center z-10 w-full">
         
-        {/* CONTEÚDO */}
-        <div className="text-center lg:text-left space-y-6 md:space-y-8 animate-fade-in w-full">
-          <div className="inline-flex items-center gap-2 bg-neon-orange/10 border border-neon-orange/20 px-4 py-2 rounded-full mb-2 mx-auto lg:mx-0 backdrop-blur-sm shadow-inner">
-            <Zap size={14} className="text-neon-orange animate-pulse" />
-            <span className="text-[8px] md:text-xs font-black text-neon-orange uppercase tracking-[0.3em]">A noite perfeita começa aqui</span>
+        {/* Lado Esquerdo: Conteúdo Textual */}
+        <div className="text-center lg:text-left space-y-6 md:space-y-8 animate-fade-in w-full order-1">
+          <div className="flex justify-center lg:justify-start">
+            <div className="inline-flex items-center gap-2 bg-neon-orange/10 border border-neon-orange/20 px-4 py-2 rounded-full backdrop-blur-sm shadow-inner">
+              <Zap size={14} className="text-neon-orange animate-pulse" />
+              <span className="text-[8px] md:text-xs font-black text-neon-orange uppercase tracking-[0.3em]">A noite perfeita começa aqui</span>
+            </div>
           </div>
+
+          {/* VÍDEO MOBILE (Condicional por JS para evitar duplicidade de áudio) */}
+          {!isDesktopView && (
+            <div className="lg:hidden">
+              <div className="bg-slate-900 border border-white/10 shadow-2xl overflow-hidden aspect-[9/16] rounded-[2.5rem] w-full max-w-[280px] mx-auto my-6">
+                 {videoElementJSX}
+              </div>
+            </div>
+          )}
           
           <div className="space-y-4">
             <h1 className="text-2xl md:text-6xl font-black text-white leading-[1.1] md:leading-[1.05] tracking-tighter uppercase">
@@ -42,10 +144,10 @@ export const Hero: React.FC<HeroProps> = ({ onReserve }) => {
             </h1>
             
             <p className="text-xs md:text-xl text-slate-300 max-w-md md:max-w-xl mx-auto lg:mx-0 font-medium leading-relaxed">
-              Reserve sua pista agora e garanta momentos inesquecíveis, ambiente <strong>100% climatizado</strong> e a melhor pizza da capital. São 6 pistas de boliche, bar completo, pizza artesanal e jogos para toda a família. Reserve em menos de 1 minuto.
+              Reserve sua pista agora e garanta momentos inesquecíveis, ambiente <strong>100% climatizado</strong> e a melhor pizza da capital.
             </p>
           </div>
-          
+
           <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start pt-2 md:pt-4">
             <button 
               onClick={() => onReserve('Hero Primary')} 
@@ -55,7 +157,7 @@ export const Hero: React.FC<HeroProps> = ({ onReserve }) => {
             </button>
           </div>
 
-          {/* Badges de Confiança */}
+          {/* Prova Social */}
           <div className="flex flex-wrap items-center justify-center lg:justify-start gap-4 md:gap-6 pt-6 md:pt-8 border-t border-slate-800/50">
             <div className="flex items-center gap-2">
               <div className="flex -space-x-2">
@@ -75,47 +177,17 @@ export const Hero: React.FC<HeroProps> = ({ onReserve }) => {
           </div>
         </div>
 
-        {/* ELEMENTOS DECORATIVOS (SÓ DESKTOP) */}
-        <div className="relative justify-center items-center flex">
-          <div className="hidden lg:flex flex-col items-center relative animate-float">
-            <div className="bg-slate-900/40 backdrop-blur-md border border-white/10 p-12 rounded-[4rem] shadow-2xl relative">
-              <div className="absolute -top-6 -left-6 bg-neon-blue p-5 rounded-3xl shadow-xl shadow-blue-500/30 animate-bounce">
-                <Trophy size={32} className="text-white" />
+        {/* VÍDEO DESKTOP (Condicional por JS para evitar duplicidade de áudio) */}
+        {isDesktopView && (
+          <div className="hidden lg:flex justify-center items-center order-2">
+              <div className="bg-slate-900 border border-white/10 shadow-2xl overflow-hidden aspect-[9/16] rounded-[4rem] w-full max-w-md animate-float">
+                 {videoElementJSX}
               </div>
-              
-              <svg width="240" height="320" viewBox="0 0 240 320" fill="none" xmlns="http://www.w3.org/2000/svg" className="drop-shadow-[0_0_30px_rgba(255,255,255,0.3)]">
-                <path d="M120 20C100 20 85 35 85 60C85 85 95 100 95 130C95 160 60 210 60 260C60 290 80 300 120 300C160 300 180 290 180 260C180 210 145 160 145 130C145 100 155 85 155 60C155 35 140 20 120 20Z" fill="white" />
-                <path d="M88 65H152V75H88V65Z" fill="#EF4444" />
-                <path d="M90 85H150V95H90V85Z" fill="#EF4444" />
-                <circle cx="180" cy="240" r="55" fill="#f97316" className="animate-pulse" />
-                <circle cx="165" cy="225" r="6" fill="#0f172a" />
-                <circle cx="182" cy="218" r="6" fill="#0f172a" />
-                <circle cx="198" cy="225" r="6" fill="#0f172a" />
-              </svg>
-            </div>
-
-            <div className="absolute top-1/3 -right-12 bg-slate-800 border border-slate-700 p-4 rounded-2xl shadow-2xl animate-float-delayed flex items-center gap-3">
-              <div className="bg-neon-blue/10 p-2 rounded-lg text-neon-blue">
-                <Users size={20} />
-              </div>
-              <div className="pr-2">
-                <p className="text-[8px] font-black text-slate-500 uppercase leading-none">Pistas</p>
-                <p className="text-[10px] font-black text-white uppercase">Disponíveis</p>
-              </div>
-            </div>
           </div>
-
-          {/* Versão flutuante sutil para Mobile (Ícones espalhados) */}
-          <div className="lg:hidden absolute top-[-20%] right-[-10%] opacity-20 animate-float-delayed">
-             <Trophy size={60} className="text-neon-orange" />
-          </div>
-          <div className="lg:hidden absolute bottom-0 left-[-10%] opacity-20 animate-float">
-             <Users size={60} className="text-neon-blue" />
-          </div>
-        </div>
+        )}
       </div>
       
-      {/* Indicador de Scroll */}
+      {/* Indicador de Deslizar */}
       <div className="absolute bottom-6 md:bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 opacity-30">
         <span className="text-[7px] md:text-[8px] font-black uppercase tracking-[0.4em] text-slate-500">Deslizar</span>
         <div className="animate-bounce">
