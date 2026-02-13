@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { db, cleanPhone } from '../services/mockBackend';
 import { Client, Reservation, FunnelStage, FunnelStageConfig, User, UserRole, ReservationStatus, LoyaltyTransaction, PaymentStatus } from '../types';
-import { Search, MessageCircle, Calendar, Plus, Users, Loader2, LayoutList, Kanban as KanbanIcon, GripVertical, Pencil, Save, X, Crown, Star, Sparkles, Clock, LayoutGrid, Gift, Coins, History, ArrowDown, ArrowUp, CalendarPlus, Check, DollarSign, CheckCircle2, Ban, AlertCircle, MapPin, Cake, UserCheck, Utensils, Trash2, Hash, FileText, Store, Zap, AlertTriangle } from 'lucide-react';
+import { Search, MessageCircle, Calendar, Plus, Users, Loader2, LayoutList, Kanban as KanbanIcon, GripVertical, Pencil, Save, X, Crown, Star, Sparkles, Clock, LayoutGrid, Gift, Coins, History, ArrowDown, ArrowUp, CalendarPlus, Check, DollarSign, CheckCircle2, Ban, AlertCircle, MapPin, Cake, UserCheck, Utensils, Trash2, Hash, FileText, Store, Zap, AlertTriangle, ChevronDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabaseClient';
 
@@ -11,13 +11,22 @@ type ClientTier = 'VIP' | 'FIEL' | 'NOVO';
 const CRM: React.FC = () => {
   const navigate = useNavigate();
   const [viewMode, setViewMode] = useState<'LIST' | 'KANBAN'>('LIST');
+  
+  // Dados Principais
   const [clients, setClients] = useState<Client[]>([]);
+  const [totalClientCount, setTotalClientCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  
+  // Paginação e Filtros
   const [searchTerm, setSearchTerm] = useState('');
+  const [loadedOffset, setLoadedOffset] = useState(0);
+  const PAGE_SIZE = 50;
+
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [clientHistory, setClientHistory] = useState<Reservation[]>([]);
   const [clientMetrics, setClientMetrics] = useState<Record<string, { count: number, tier: ClientTier }>>({});
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
   
   const [funnelStages, setFunnelStages] = useState<FunnelStageConfig[]>([]);
   const [editingStage, setEditingStage] = useState<FunnelStageConfig | null>(null);
@@ -42,22 +51,31 @@ const CRM: React.FC = () => {
   const canEditClient = isAdmin || currentUser?.perm_edit_client;
   const canCreateReservation = isAdmin || currentUser?.perm_create_reservation;
 
-  const fetchData = async (isBackground = false) => {
-    if (!isBackground) {
-        setLoading(true);
-        setLoadError(null);
-    }
+  // Função principal de carregamento
+  const fetchData = async (isLoadMore = false) => {
+    if (isLoadMore) setLoadingMore(true);
+    else setLoading(true);
+
     try {
-        const [clientsData, reservationsData, stagesData] = await Promise.all([
-            db.clients.getAll(),
+        const nextOffset = isLoadMore ? loadedOffset + PAGE_SIZE : 0;
+        const { data: clientsData, count } = await db.clients.getAll(nextOffset, nextOffset + PAGE_SIZE - 1);
+        const [reservationsData, stagesData] = await Promise.all([
             db.reservations.getAll(),
             db.funnelStages.getAll()
         ]);
         
-        setClients(clientsData);
+        if (isLoadMore) {
+            setClients(prev => [...prev, ...clientsData]);
+        } else {
+            setClients(clientsData);
+        }
+
+        setTotalClientCount(count);
+        setLoadedOffset(nextOffset);
         setFunnelStages(stagesData.sort((a, b) => a.ordem - b.ordem));
 
-        const metrics: Record<string, { count: number, tier: ClientTier }> = {};
+        // Calcular Métricas para os novos clientes
+        const metrics: Record<string, { count: number, tier: ClientTier }> = { ...clientMetrics };
         const threeMonthsAgo = new Date();
         threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
 
@@ -77,15 +95,16 @@ const CRM: React.FC = () => {
     } catch (e: any) { 
         setLoadError(e.message || "Erro ao conectar com o banco de dados.");
     } 
-    finally { if (!isBackground) setLoading(false); }
+    finally { 
+        setLoading(false);
+        setLoadingMore(false);
+    }
   };
 
   useEffect(() => {
     fetchData();
-    const channel = supabase.channel('crm-realtime-v17')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => fetchData(true))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservas' }, () => fetchData(true))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'etapas_funil' }, () => fetchData(true))
+    const channel = supabase.channel('crm-realtime-v18')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => fetchData(false))
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, []);
@@ -109,12 +128,11 @@ const CRM: React.FC = () => {
     fetchDetails();
   }, [selectedClient, detailTab]);
 
-  const filteredAndSortedClients = useMemo(() => {
-    const filtered = clients.filter(c => 
+  const filteredClients = useMemo(() => {
+    return clients.filter(c => 
         c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.phone.includes(searchTerm)
     );
-    return filtered.sort((a, b) => a.name.localeCompare(b.name));
   }, [clients, searchTerm]);
 
   const openWhatsApp = (phone: string) => {
@@ -137,25 +155,7 @@ const CRM: React.FC = () => {
       await db.clients.update(updatedClient);
       setSelectedClient(updatedClient);
       setIsEditing(false);
-      fetchData(true);
-  };
-
-  const initDefaultStages = async () => {
-    if (!isAdmin) return;
-    setIsSavingStage(true);
-    try {
-        const defaults = [
-            { n: 'Novo contato', o: 1 },
-            { n: 'Interessado', o: 2 },
-            { n: 'Agendado', o: 3 },
-            { n: 'Pós Venda', o: 4 },
-            { n: 'No Show', o: 5 }
-        ];
-        for (const d of defaults) await db.funnelStages.create(d.n, d.o);
-        await fetchData();
-        alert("Funil inicializado!");
-    } catch (e: any) { alert(`Erro: ${e.message}`); }
-    finally { setIsSavingStage(false); }
+      fetchData(false);
   };
 
   const handleEditStage = (stage: FunnelStageConfig) => {
@@ -169,30 +169,15 @@ const CRM: React.FC = () => {
     try {
       await db.funnelStages.update(editingStage.id, stageForm.nome, stageForm.ordem);
       setEditingStage(null);
-      fetchData(true);
+      fetchData(false);
     } catch (e) { alert("Erro ao salvar."); }
-    finally { setIsSavingStage(false); }
-  };
-
-  const deleteStage = async (stage: FunnelStageConfig) => {
-    const hasClients = clients.some(c => c.funnelStage === stage.nome);
-    if (hasClients) {
-      alert("Não é possível excluir uma etapa com clientes.");
-      return;
-    }
-    if (!window.confirm(`Excluir a etapa "${stage.nome}"?`)) return;
-    setIsSavingStage(true);
-    try {
-      await db.funnelStages.delete(stage.id);
-      fetchData(true);
-    } catch (e) { alert("Erro ao excluir."); }
     finally { setIsSavingStage(false); }
   };
 
   const renderTierBadge = (clientId: string) => {
       const metric = clientMetrics[clientId] || { count: 0, tier: 'NOVO' };
-      if (metric.tier === 'VIP') return <div className="flex items-center gap-1 bg-yellow-500/10 text-yellow-500 px-2 py-1 rounded-md text-[10px] font-bold border border-yellow-500/20"><Crown size={12} fill="currentColor" /><span>VIP ({metric.count})</span></div>;
-      if (metric.tier === 'FIEL') return <div className="flex items-center gap-1 bg-blue-500/10 text-blue-400 px-2 py-1 rounded-md text-[10px] font-bold border border-blue-500/20"><Star size={12} fill="currentColor" /><span>Fiel ({metric.count})</span></div>;
+      if (metric.tier === 'VIP') return <div className="flex items-center gap-1 bg-yellow-500/10 text-yellow-500 px-2 py-1 rounded-md text-[10px] font-bold border border-yellow-500/20"><Crown size={12} fill="currentColor" /><span>VIP</span></div>;
+      if (metric.tier === 'FIEL') return <div className="flex items-center gap-1 bg-blue-500/10 text-blue-400 px-2 py-1 rounded-md text-[10px] font-bold border border-blue-500/20"><Star size={12} fill="currentColor" /><span>Fiel</span></div>;
       return <div className="flex items-center gap-1 bg-slate-800 text-slate-500 px-2 py-1 rounded-md text-[10px] font-bold border border-slate-700"><span>Novo</span></div>;
   };
 
@@ -201,7 +186,7 @@ const CRM: React.FC = () => {
       <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4 flex-shrink-0 px-1">
           <div className="flex items-center gap-3 w-full md:w-auto">
             <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">Gestão de Clientes</h1>
-            <div className="bg-slate-800 border border-slate-700 text-neon-blue px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-2 shadow-inner"><Users size={14} /><span>{loading ? '...' : clients.length}</span></div>
+            <div className="bg-slate-800 border border-slate-700 text-neon-blue px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-2 shadow-inner"><Users size={14} /><span>{totalClientCount}</span></div>
           </div>
           <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-700 w-full md:w-auto shadow-lg">
              <button onClick={() => { setViewMode('LIST'); setSelectedClient(null); }} className={`flex-1 md:flex-none px-6 py-2 rounded-lg flex items-center justify-center gap-2 text-xs font-bold uppercase transition-all ${viewMode === 'LIST' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}><LayoutList size={16} /> Lista</button>
@@ -214,48 +199,59 @@ const CRM: React.FC = () => {
                 {viewMode === 'LIST' ? (
                     <div className="flex flex-col bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden h-full">
                         <div className="p-4 border-b border-slate-700 bg-slate-900/50 flex-shrink-0">
-                            <div className="relative">
+                            <div className="relative mb-3">
                                 <Search className="absolute left-3 top-3.5 text-slate-500" size={18} />
-                                <input type="text" placeholder="Buscar..." className="w-full bg-slate-700 border border-slate-600 text-white pl-10 pr-4 py-3 rounded-xl focus:outline-none transition-all text-sm font-medium" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                                <input type="text" placeholder="Buscar por nome ou telefone..." className="w-full bg-slate-700 border border-slate-600 text-white pl-10 pr-4 py-3 rounded-xl focus:outline-none transition-all text-sm font-medium" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                            </div>
+                            <div className="flex justify-between items-center px-1">
+                                <span className="text-[10px] text-slate-500 font-black uppercase tracking-widest">
+                                    Carregados: {clients.length} de {totalClientCount}
+                                </span>
                             </div>
                         </div>
                         <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-800/20">
-                        {loading ? <div className="flex justify-center p-12"><Loader2 className="animate-spin text-neon-blue" size={32}/></div> : filteredAndSortedClients.length === 0 ? <div className="text-center p-12 text-slate-500 text-sm italic">Nenhum cliente</div> : filteredAndSortedClients.map(client => (
-                            <div key={client.id} onClick={() => { setSelectedClient(client); setIsEditing(false); setDetailTab('INFO'); }} className={`p-4 border-b border-slate-700/50 cursor-pointer hover:bg-slate-700/30 transition-colors group ${selectedClient?.id === client.id ? 'bg-slate-700/80 border-l-4 border-l-neon-blue shadow-inner' : ''}`}>
-                                <div className="flex justify-between items-start mb-1">
-                                    <h3 className={`font-bold truncate pr-2 flex-1 text-sm ${selectedClient?.id === client.id ? 'text-neon-blue' : 'text-slate-200 group-hover:text-white'}`}>{client.name}</h3>
-                                    {renderTierBadge(client.id)}
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <p className="text-xs text-slate-500 font-mono">{client.phone}</p>
-                                    <span className="w-1 h-1 rounded-full bg-slate-700"></span>
-                                    <p className="text-[10px] text-slate-500 font-semibold uppercase">{client.funnelStage || 'Sem Etapa'}</p>
-                                </div>
-                            </div>
-                        ))}
+                        {loading && clients.length === 0 ? <div className="flex justify-center p-12"><Loader2 className="animate-spin text-neon-blue" size={32}/></div> : filteredClients.length === 0 ? <div className="text-center p-12 text-slate-500 text-sm italic">Nenhum cliente carregado</div> : (
+                            <>
+                                {filteredClients.map(client => (
+                                    <div key={client.id} onClick={() => { setSelectedClient(client); setIsEditing(false); setDetailTab('INFO'); }} className={`p-4 border-b border-slate-700/50 cursor-pointer hover:bg-slate-700/30 transition-colors group ${selectedClient?.id === client.id ? 'bg-slate-700/80 border-l-4 border-l-neon-blue shadow-inner' : ''}`}>
+                                        <div className="flex justify-between items-start mb-1">
+                                            <h3 className={`font-bold truncate pr-2 flex-1 text-sm ${selectedClient?.id === client.id ? 'text-neon-blue' : 'text-slate-200 group-hover:text-white'}`}>{client.name}</h3>
+                                            {renderTierBadge(client.id)}
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <p className="text-xs text-slate-500 font-mono">{client.phone}</p>
+                                            <span className="w-1 h-1 rounded-full bg-slate-700"></span>
+                                            <p className="text-[10px] text-slate-500 font-semibold uppercase">{client.funnelStage || 'Sem Etapa'}</p>
+                                        </div>
+                                    </div>
+                                ))}
+
+                                {/* Botão Carregar Mais */}
+                                {clients.length < totalClientCount && (
+                                    <div className="p-6 text-center">
+                                        <button 
+                                            onClick={() => fetchData(true)}
+                                            disabled={loadingMore}
+                                            className="inline-flex items-center gap-2 px-8 py-3 bg-slate-700 hover:bg-slate-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-95 border border-slate-600 disabled:opacity-50"
+                                        >
+                                            {loadingMore ? <Loader2 size={14} className="animate-spin"/> : <ChevronDown size={14}/>}
+                                            Carregar Mais Contatos
+                                        </button>
+                                        <p className="mt-3 text-[9px] text-slate-600 font-bold uppercase tracking-tighter">
+                                            Restam {totalClientCount - clients.length} contatos no banco
+                                        </p>
+                                    </div>
+                                )}
+                            </>
+                        )}
                         </div>
                     </div>
                 ) : (
                     <div className="flex-1 overflow-x-auto custom-scrollbar h-full bg-slate-900/10 rounded-2xl border border-slate-800/50">
-                        {loading ? <div className="flex justify-center items-center h-full"><Loader2 className="animate-spin text-neon-blue" size={48} /></div> : loadError ? (
-                             <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-8">
-                                <AlertTriangle size={48} className="text-red-500"/>
-                                <div>
-                                    <h3 className="text-white font-bold text-lg">Erro no Banco de Dados</h3>
-                                    <p className="text-red-400 text-sm mt-2 font-mono bg-slate-900 p-3 rounded-lg border border-red-500/30">{loadError}</p>
-                                </div>
-                                <button onClick={() => fetchData()} className="mt-4 px-6 py-3 bg-slate-700 text-white rounded-xl font-bold hover:bg-slate-600 transition flex items-center gap-2">Tentar Novamente</button>
-                            </div>
-                        ) : funnelStages.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-8">
-                                <AlertTriangle size={48} className="text-yellow-500 opacity-50"/>
-                                <div><h3 className="text-white font-bold">Funil não configurado</h3></div>
-                                {isAdmin && <button onClick={initDefaultStages} disabled={isSavingStage} className="mt-4 px-6 py-3 bg-neon-blue text-white rounded-xl font-bold flex items-center gap-2 hover:bg-blue-600 transition shadow-lg">{isSavingStage ? <Loader2 className="animate-spin"/> : <Zap size={18}/>} INICIALIZAR ETAPAS</button>}
-                            </div>
-                        ) : (
+                        {loading && funnelStages.length === 0 ? <div className="flex justify-center items-center h-full"><Loader2 className="animate-spin text-neon-blue" size={48} /></div> : (
                             <div className="flex gap-4 h-full min-w-max pb-4 px-2">
                                 {funnelStages.map((stage) => {
-                                    const stageClients = filteredAndSortedClients.filter(c => (c.funnelStage || '') === stage.nome);
+                                    const stageClients = clients.filter(c => (c.funnelStage || '') === stage.nome);
                                     return (
                                         <div key={stage.id} onDragOver={(e) => e.preventDefault()} onDrop={async (e) => { e.preventDefault(); const id = e.dataTransfer.getData('clientId'); if(id) await updateClientStage(id, stage.nome); }} className={`w-[300px] bg-slate-800/40 rounded-2xl border border-slate-700 flex flex-col transition-all hover:border-slate-600 shadow-sm ${selectedClient?.funnelStage === stage.nome ? 'ring-2 ring-neon-blue/20 bg-slate-800/60' : ''}`}>
                                             <div className="p-4 border-b border-slate-700/50 flex justify-between items-center sticky top-0 bg-slate-800 rounded-t-2xl z-10">
@@ -263,15 +259,9 @@ const CRM: React.FC = () => {
                                                     <span className="font-bold text-slate-200 uppercase text-[10px] tracking-widest truncate">{stage.nome}</span>
                                                     <span className="text-[9px] text-slate-500 font-semibold uppercase">{stageClients.length} leads</span>
                                                 </div>
-                                                {isAdmin && (
-                                                    <div className="flex items-center gap-1">
-                                                        <button onClick={() => handleEditStage(stage)} className="p-1.5 text-slate-500 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"><Pencil size={12}/></button>
-                                                        <button onClick={() => deleteStage(stage)} className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"><Trash2 size={12}/></button>
-                                                    </div>
-                                                )}
                                             </div>
                                             <div className="p-3 space-y-3 flex-1 overflow-y-auto custom-scrollbar min-h-[200px]">
-                                                {stageClients.length === 0 ? <div className="h-20 flex items-center justify-center border-2 border-dashed border-slate-700/30 rounded-xl text-[10px] text-slate-600 uppercase font-bold tracking-widest">Vazio</div> : stageClients.map(client => (
+                                                {stageClients.length === 0 ? <div className="h-20 flex items-center justify-center border-2 border-dashed border-slate-700/30 rounded-xl text-[10px] text-slate-600 uppercase font-bold tracking-widest">Sem leads carregados</div> : stageClients.map(client => (
                                                 <div key={client.id} draggable onDragStart={(e) => { e.dataTransfer.setData('clientId', client.id); }} onClick={() => { setSelectedClient(client); setIsEditing(false); setDetailTab('INFO'); }} className={`bg-slate-700/80 p-4 rounded-xl shadow-md border transition-all group relative cursor-pointer ${selectedClient?.id === client.id ? 'border-neon-blue ring-2 ring-neon-blue/20 bg-slate-700' : 'border-slate-600 hover:border-slate-500 hover:bg-slate-700'}`}>
                                                     <div className="flex justify-between items-start mb-1 gap-2">
                                                         <h4 className={`font-bold text-sm truncate leading-tight flex-1 ${selectedClient?.id === client.id ? 'text-neon-blue' : 'text-white'}`}>{client.name}</h4>
@@ -290,22 +280,18 @@ const CRM: React.FC = () => {
                 )}
             </div>
 
-            {/* PAINEL DE DETALHES - BOTÕES EMPILHADOS PARA LIBERAR ESPAÇO AO NOME */}
+            {/* PAINEL DE DETALHES */}
             <div className={`${!selectedClient ? 'hidden' : 'flex'} flex-col bg-slate-800 border lg:border-l border-slate-700 rounded-2xl lg:rounded-none lg:rounded-tr-2xl lg:rounded-br-2xl shadow-2xl overflow-hidden h-full animate-scale-in transition-all duration-300 ${viewMode === 'LIST' ? 'flex-1' : 'w-full lg:w-[550px] absolute lg:relative right-0 top-0 z-30'} min-h-0`}>
                 {selectedClient ? (
                 <>
                     <div className="p-4 sm:p-6 border-b border-slate-700 bg-slate-900/60 flex flex-row items-start justify-between gap-4 flex-shrink-0">
-                        
-                        {/* Container do Nome: Prioridade total de largura */}
                         <div className="flex-1 min-w-0">
                             <div className="flex items-start gap-3 sm:gap-4 mb-1">
                                 <button onClick={() => setSelectedClient(null)} className="p-2 bg-slate-700/50 text-slate-400 hover:text-white rounded-xl border border-slate-600 transition-colors shadow-sm flex-shrink-0 mt-0.5" title="Voltar"><X size={18}/></button>
-                                
                                 <div className="min-w-0 flex-1">
                                     {!isEditing ? (
                                         <div className="flex flex-col">
                                             <div className="flex items-start gap-2">
-                                                {/* NOME DO CLIENTE: break-words e line-clamp-2 garantem visualização total */}
                                                 <h2 className="text-lg sm:text-2xl font-bold text-white tracking-tight leading-tight break-words line-clamp-2 pr-2">{selectedClient.name}</h2>
                                                 {canEditClient && <button onClick={() => { setEditForm({ name: selectedClient.name, email: selectedClient.email, phone: selectedClient.phone }); setIsEditing(true); }} className="text-slate-500 hover:text-neon-blue transition-colors p-1.5 bg-slate-800/50 rounded-lg border border-slate-700 flex-shrink-0 mt-0.5"><Pencil size={12}/></button>}
                                             </div>
@@ -315,8 +301,6 @@ const CRM: React.FC = () => {
                                 </div>
                             </div>
                         </div>
-
-                        {/* CONTAINER DE BOTÕES: EMPILHADOS VERTICALMENTE */}
                         {!isEditing ? (
                             <div className="flex flex-col gap-2 flex-shrink-0 w-28 sm:w-32">
                                 <button onClick={() => openWhatsApp(selectedClient.phone)} className="w-full flex items-center justify-center gap-1.5 bg-green-600 hover:bg-green-500 text-white py-2 rounded-xl font-bold transition shadow-lg text-[10px] uppercase tracking-tighter">

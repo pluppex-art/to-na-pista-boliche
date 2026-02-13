@@ -84,8 +84,8 @@ const Agenda: React.FC = () => {
       setAllReservationsForAlerts(validReservations);
 
       const phoneMap: Record<string, string> = {};
-      (allClients || []).forEach(c => { if(c && c.id) phoneMap[c.id] = c.phone; });
-      setClientPhones(phoneMap);
+      /* Fix: db.clients.getAll() returns { data: Client[], count: number }. Accessing .data property. */
+      (allClients?.data || []).forEach(c => { if(c && c.id) phoneMap[c.id] = c.phone; });
 
       const uMap: Record<string, string> = {};
       (allUsers || []).forEach(u => { uMap[u.id] = u.name; });

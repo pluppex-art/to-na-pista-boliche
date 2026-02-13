@@ -198,10 +198,29 @@ export const db = {
         return { success: !error, error: error?.message };
     },
     logout: async () => { await supabase.auth.signOut(); },
-    getAll: async (): Promise<Client[]> => {
-      const { data, error } = await supabase.from('clientes').select('*').limit(5000);
+    getAll: async (from = 0, to = 999): Promise<{ data: Client[], count: number }> => {
+      // Usando range para superar o limite de 1000 e trazer a contagem total
+      const { data, error, count } = await supabase
+        .from('clientes')
+        .select('*', { count: 'exact' })
+        .order('name', { ascending: true })
+        .range(from, to);
+        
       if (error) throw error;
-      return (data || []).map((c: any) => ({ id: c.client_id, name: c.name || 'Sem Nome', phone: c.phone || '', email: c.email, photoUrl: c.photo_url, address: c.address, tags: safeTags(c.tags), createdAt: c.created_at, lastContactAt: c.last_contact_at, funnelStage: c.funnel_stage, loyaltyBalance: data.loyalty_balance || 0 }));
+      const mapped = (data || []).map((c: any) => ({ 
+          id: c.client_id, 
+          name: c.name || 'Sem Nome', 
+          phone: c.phone || '', 
+          email: c.email, 
+          photoUrl: c.photo_url, 
+          address: c.address, 
+          tags: safeTags(c.tags), 
+          createdAt: c.created_at, 
+          lastContactAt: c.last_contact_at, 
+          funnelStage: c.funnel_stage, 
+          loyaltyBalance: c.loyalty_balance || 0 
+      }));
+      return { data: mapped, count: count || 0 };
     },
     getById: async (id: string): Promise<Client | null> => {
       const { data } = await supabase.from('clientes').select('*').eq('client_id', id).maybeSingle();
@@ -258,12 +277,12 @@ export const db = {
 
   reservations: {
     getByClient: async (clientId: string): Promise<Reservation[]> => {
-        const { data, error } = await supabase.from('reservas').select('*').eq('client_id', clientId).order('date', { ascending: false }).limit(500);
+        const { data, error = null } = await supabase.from('reservas').select('*').eq('client_id', clientId).order('date', { ascending: false }).limit(500);
         if (error) return [];
         return db.reservations._mapReservations(data);
     },
     getByDateRange: async (startDate: string, endDate: string): Promise<Reservation[]> => {
-        const { data, error } = await supabase.from('reservas').select('*').gte('date', startDate).lte('date', endDate).limit(2000);
+        const { data, error = null } = await supabase.from('reservas').select('*').gte('date', startDate).lte('date', endDate).limit(2000);
         if (error) return [];
         return db.reservations._mapReservations(data);
     },
@@ -338,6 +357,7 @@ export const db = {
         total_value: res.totalValue, event_type: res.eventType, observations: res.observations, status: res.status,
         payment_status: res.paymentStatus, payment_method: res.paymentMethod, payment_details: res.paymentDetails,
         checked_in_ids: res.checkedInIds || [], no_show_ids: res.noShowIds || [], has_table_reservation: res.hasTableReservation, 
+        /* Fix: Property 'table_seat_count' does not exist on type 'Reservation'. Changed to tableSeatCount. */
         table_seat_count: res.tableSeatCount, pistas_usadas: res.lanesAssigned,
         pay_on_site: res.payOnSite, comanda_id: res.comandaId
       }).eq('id', res.id);
