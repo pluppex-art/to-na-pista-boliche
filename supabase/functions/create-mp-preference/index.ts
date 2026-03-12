@@ -74,7 +74,13 @@ Deno.serve(async (req: Request) => {
       },
       auto_return: "approved",
       notification_url: `${supabaseUrl}/functions/v1/mp-webhook`,
-      statement_descriptor: "TONAPISTA"
+      statement_descriptor: "TONAPISTA",
+      payment_methods: {
+        excluded_payment_types: [
+          { id: "ticket" }
+        ],
+        installments: 1
+      }
     }
 
     const mpResponse = await fetch('https://api.mercadopago.com/checkout/preferences', {

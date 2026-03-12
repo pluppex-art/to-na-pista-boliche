@@ -21,11 +21,15 @@ export enum PaymentStatus {
 }
 
 export enum FunnelStage {
-  NOVO = 'Novo contato',
-  INTERESSADO = 'Interessado',
+  NOVO = 'Novo',
+  INTERESSE = 'Interesse',
+  PENDENTE = 'Pendente',
   AGENDADO = 'Agendado',
+  REVISAO = 'Revisão',
   POS_VENDA = 'Pós Venda',
-  NO_SHOW = 'No Show'
+  D7 = '7 dias depois',
+  D15 = '15 dias depois',
+  D30 = '30 dias depois'
 }
 
 export enum EventType {
@@ -67,11 +71,24 @@ export interface Client {
   password?: string;
   photoUrl?: string;
   address?: string;
+  birthDate?: string; // YYYY-MM-DD
+  company?: string;
+  document?: string; // CPF/CNPJ
   tags: string[];
   createdAt: string;
   lastContactAt: string;
   funnelStage?: string; 
   loyaltyBalance?: number;
+}
+
+export interface Interaction {
+  id: string;
+  clientId: string;
+  userId: string;
+  userName: string;
+  type: 'CALL' | 'WHATSAPP' | 'EMAIL' | 'MEETING' | 'NOTE';
+  content: string;
+  createdAt: string;
 }
 
 export interface Feedback {

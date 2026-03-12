@@ -11,7 +11,8 @@ import {
   Menu,
   X,
   LogOut,
-  PieChart
+  PieChart,
+  LayoutList
 } from 'lucide-react';
 
 interface LayoutProps {

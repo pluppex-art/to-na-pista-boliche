@@ -74,18 +74,34 @@ const Agenda: React.FC = () => {
   const loadData = async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
-      const [allReservations, allClients, allUsers] = await Promise.all([
+      const [allReservations, allUsers] = await Promise.all([
           db.reservations.getAll(),
-          db.clients.getAll(),
           db.users.getAll()
       ]);
 
       const validReservations = (allReservations || []).filter(r => r && r.id);
       setAllReservationsForAlerts(validReservations);
 
+      // Identificar quais clientes precisamos buscar o telefone
+      // 1. Reservas do dia selecionado
+      const sDate = String(selectedDate || "").trim().substring(0, 10);
+      const dayResIds = validReservations
+        .filter(r => String(r.date || "").trim().substring(0, 10) === sDate)
+        .map(r => r.clientId);
+
+      // 2. Reservas que aparecem nos alertas (pendências, etc)
+      const alertResIds = validReservations
+        .filter(r => r.status !== ReservationStatus.CANCELADA && r.paymentStatus !== PaymentStatus.PAGO)
+        .map(r => r.clientId);
+
+      // Unificar IDs únicos
+      const uniqueClientIds = Array.from(new Set([...dayResIds, ...alertResIds])).filter(id => !!id);
+
+      // Buscar apenas os clientes necessários
+      const neededClients = await db.clients.getByIds(uniqueClientIds);
+
       const phoneMap: Record<string, string> = {};
-      /* Fix: db.clients.getAll() returns { data: Client[], count: number }. Accessing .data property. */
-      (allClients?.data || []).forEach(c => { if(c && c.id) phoneMap[c.id] = c.phone; });
+      neededClients.forEach(c => { if(c && c.id) phoneMap[c.id] = c.phone; });
       setClientPhones(phoneMap);
 
       const uMap: Record<string, string> = {};

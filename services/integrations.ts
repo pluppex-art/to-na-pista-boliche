@@ -1,5 +1,5 @@
 import { AppSettings } from '../types';
-import { supabase } from './supabaseClient';
+import { supabase, SUPABASE_URL, SUPABASE_KEY } from './supabaseClient';
 
 export const Integrations = {
   createMercadoPagoPreference: async (
@@ -9,9 +9,9 @@ export const Integrations = {
     try {
       console.log(`[Checkout] Solicitando link para reserva: ${reservation.id}`);
 
-      // ✅ Pega direto do cliente já configurado
-      const supabaseUrl = supabase.supabaseUrl;
-      const anonKey = supabase.supabaseKey;
+      // ✅ Pega direto das constantes exportadas
+      const supabaseUrl = SUPABASE_URL;
+      const anonKey = SUPABASE_KEY;
 
       const response = await fetch(
         `${supabaseUrl}/functions/v1/create-mp-preference`,

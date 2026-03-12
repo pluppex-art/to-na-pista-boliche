@@ -1,5 +1,5 @@
 
-import { AppSettings, Client, FunnelCard, Reservation, ReservationStatus, PaymentStatus, UserRole, FunnelStage, FunnelStageConfig, LoyaltyTransaction, AuditLog, User, EventType, Feedback, Suggestion } from '../types';
+import { AppSettings, Client, FunnelCard, Reservation, ReservationStatus, PaymentStatus, UserRole, FunnelStage, FunnelStageConfig, LoyaltyTransaction, AuditLog, User, EventType, Feedback, Suggestion, Interaction } from '../types';
 import { supabase } from './supabaseClient';
 import { INITIAL_SETTINGS } from '../constants';
 import { v4 as uuidv4 } from 'uuid';
@@ -73,6 +73,45 @@ export const db = {
       });
       if (error) throw error;
       return { success: true };
+    }
+  },
+
+  interactions: {
+    getByClient: async (clientId: string): Promise<Interaction[]> => {
+      const { data, error } = await supabase.from('interacoes').select('*').eq('client_id', clientId).order('created_at', { ascending: false });
+      if (error) return [];
+      return (data || []).map((i: any) => ({
+        id: i.id,
+        clientId: i.client_id,
+        userId: i.user_id,
+        userName: i.user_name,
+        type: i.type,
+        content: i.content,
+        createdAt: i.created_at
+      }));
+    },
+    create: async (interaction: Omit<Interaction, 'id' | 'createdAt'>): Promise<Interaction> => {
+      const { data, error } = await supabase.from('interacoes').insert({
+        client_id: interaction.clientId,
+        user_id: interaction.userId,
+        user_name: interaction.userName,
+        type: interaction.type,
+        content: interaction.content
+      }).select().single();
+      if (error) throw error;
+      return {
+        id: data.id,
+        clientId: data.client_id,
+        userId: data.user_id,
+        userName: data.user_name,
+        type: data.type,
+        content: data.content,
+        createdAt: data.created_at
+      };
+    },
+    delete: async (id: string) => {
+      const { error } = await supabase.from('interacoes').delete().eq('id', id);
+      if (error) throw error;
     }
   },
 
@@ -179,15 +218,57 @@ export const db = {
       if (authError) return { error: authError.message };
       const { data, error } = await supabase.from('clientes').select('*').eq('client_id', authData.user.id).maybeSingle();
       if (error || !data) return { error: 'Perfil de cliente não encontrado.' };
-      return { client: { id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url, address: data.address, tags: safeTags(data.tags), createdAt: data.created_at, lastContactAt: data.last_contact_at, funnelStage: data.funnel_stage, loyaltyBalance: data.loyalty_balance || 0 } };
+      return { client: { 
+        id: data.client_id, 
+        name: data.name, 
+        phone: data.phone, 
+        email: data.email, 
+        photoUrl: data.photo_url, 
+        address: data.address, 
+        birthDate: data.birth_date,
+        company: data.company,
+        document: data.document,
+        tags: safeTags(data.tags), 
+        createdAt: data.created_at, 
+        lastContactAt: data.last_contact_at, 
+        funnelStage: data.funnel_stage, 
+        loyaltyBalance: data.loyalty_balance || 0 
+      } };
     },
     register: async (client: any, password: string) => {
       const { data: authData, error: authError } = await supabase.auth.signUp({ email: client.email, password: password, options: { data: { name: client.name } } });
       if (authError) return { error: authError.message };
       const phoneToInsert = cleanPhone(client.phone);
-      const { data, error } = await supabase.from('clientes').insert({ client_id: authData.user.id, name: client.name, phone: phoneToInsert, email: client.email || null, address: client.address || null, tags: client.tags || [], funnel_stage: 'Novo', last_contact_at: new Date().toISOString() }).select().single();
+      const { data, error } = await supabase.from('clientes').insert({ 
+        client_id: authData.user.id, 
+        name: client.name, 
+        phone: phoneToInsert, 
+        email: client.email || null, 
+        address: client.address || null, 
+        birth_date: client.birthDate || null,
+        company: client.company || null,
+        document: client.document || null,
+        tags: client.tags || [], 
+        funnel_stage: 'Novo', 
+        last_contact_at: new Date().toISOString() 
+      }).select().single();
       if (error) return { error: error.message };
-      return { client: { id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url, address: data.address, tags: safeTags(data.tags), createdAt: data.created_at, last_contact_at: data.last_contact_at, funnelStage: data.funnel_stage, loyaltyBalance: data.loyalty_balance || 0 } };
+      return { client: { 
+        id: data.client_id, 
+        name: data.name, 
+        phone: data.phone, 
+        email: data.email, 
+        photoUrl: data.photo_url, 
+        address: data.address, 
+        birthDate: data.birth_date,
+        company: data.company,
+        document: data.document,
+        tags: safeTags(data.tags), 
+        createdAt: data.created_at, 
+        last_contact_at: data.last_contact_at, 
+        funnelStage: data.funnel_stage, 
+        loyaltyBalance: data.loyalty_balance || 0 
+      } };
     },
     forgotPassword: async (email: string) => {
       const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/#/reset-password` });
@@ -198,41 +279,116 @@ export const db = {
         return { success: !error, error: error?.message };
     },
     logout: async () => { await supabase.auth.signOut(); },
-    getAll: async (from = 0, to = 999): Promise<{ data: Client[], count: number }> => {
-      // Usando range para superar o limite de 1000 e trazer a contagem total
-      const { data, error, count } = await supabase
-        .from('clientes')
-        .select('*', { count: 'exact' })
-        .order('name', { ascending: true })
-        .range(from, to);
+    getAll: async (fromParam?: number, toParam?: number): Promise<{ data: Client[], count: number }> => {
+      // Se passarmos parâmetros específicos, respeitamos a paginação simples (usado na lista)
+      // Se não passar nada, fazemos a busca exaustiva (usado no funil)
+      if (fromParam !== undefined && toParam !== undefined) {
+          const { data, error, count } = await supabase
+            .from('clientes')
+            .select('*', { count: 'exact' })
+            .order('name', { ascending: true })
+            .range(fromParam, toParam);
+            
+          if (error) throw error;
+          const mapped = (data || []).map((c: any) => ({ 
+              id: c.client_id, 
+              name: c.name || 'Sem Nome', 
+              phone: c.phone || '', 
+              email: c.email, 
+              photoUrl: c.photo_url, 
+              address: c.address, 
+              birthDate: c.birth_date,
+              company: c.company,
+              document: c.document,
+              tags: safeTags(c.tags), 
+              createdAt: c.created_at, 
+              lastContactAt: c.last_contact_at, 
+              funnelStage: c.funnel_stage, 
+              loyaltyBalance: c.loyalty_balance || 0 
+          }));
+          return { data: mapped, count: count || 0 };
+      }
+
+      let allData: any[] = [];
+      let from = 0;
+      const step = 1000;
+
+      while (true) {
+        const { data, error } = await supabase
+          .from('clientes')
+          .select('*', { count: 'exact' })
+          .order('name', { ascending: true })
+          .range(from, from + step - 1);
+          
+        if (error) throw error;
+        if (!data || data.length === 0) break;
         
-      if (error) throw error;
-      const mapped = (data || []).map((c: any) => ({ 
+        allData = [...allData, ...data];
+        if (data.length < step) break;
+        from += step;
+        
+        if (from > 10000) break; 
+      }
+
+      const mapped = allData.map((c: any) => ({ 
           id: c.client_id, 
           name: c.name || 'Sem Nome', 
           phone: c.phone || '', 
           email: c.email, 
           photoUrl: c.photo_url, 
           address: c.address, 
+          birthDate: c.birth_date,
+          company: c.company,
+          document: c.document,
           tags: safeTags(c.tags), 
           createdAt: c.created_at, 
           lastContactAt: c.last_contact_at, 
           funnelStage: c.funnel_stage, 
           loyaltyBalance: c.loyalty_balance || 0 
       }));
-      return { data: mapped, count: count || 0 };
+      return { data: mapped, count: allData.length };
     },
     getById: async (id: string): Promise<Client | null> => {
       const { data } = await supabase.from('clientes').select('*').eq('client_id', id).maybeSingle();
       if (!data) return null;
-      return { id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url, address: data.address, tags: safeTags(data.tags), createdAt: data.created_at, lastContactAt: data.last_contact_at, funnelStage: data.funnel_stage, loyaltyBalance: data.loyalty_balance || 0 };
+      return { 
+        id: data.client_id, 
+        name: data.name, 
+        phone: data.phone, 
+        email: data.email, 
+        photoUrl: data.photo_url, 
+        address: data.address, 
+        birthDate: data.birth_date,
+        company: data.company,
+        document: data.document,
+        tags: safeTags(data.tags), 
+        createdAt: data.created_at, 
+        lastContactAt: data.last_contact_at, 
+        funnelStage: data.funnel_stage, 
+        loyaltyBalance: data.loyalty_balance || 0 
+      };
     },
     getByPhone: async (phone: string | null): Promise<Client | null> => {
       const clean = cleanPhone(phone);
       if (!clean) return null;
       const { data } = await supabase.from('clientes').select('*').eq('phone', clean).maybeSingle();
       if (!data) return null;
-      return { id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url, address: data.address, tags: safeTags(data.tags), createdAt: data.created_at, lastContactAt: data.last_contact_at, funnelStage: data.funnel_stage, loyaltyBalance: data.loyalty_balance || 0 };
+      return { 
+        id: data.client_id, 
+        name: data.name, 
+        phone: data.phone, 
+        email: data.email, 
+        photoUrl: data.photo_url, 
+        address: data.address, 
+        birthDate: data.birth_date,
+        company: data.company,
+        document: data.document,
+        tags: safeTags(data.tags), 
+        createdAt: data.created_at, 
+        lastContactAt: data.last_contact_at, 
+        funnelStage: data.funnel_stage, 
+        loyaltyBalance: data.loyalty_balance || 0 
+      };
     },
     create: async (client: any, userId?: string): Promise<Client> => {
       const phoneCleaned = cleanPhone(client.phone);
@@ -241,16 +397,54 @@ export const db = {
           if (existing) return existing;
       }
       const clientId = client.id || uuidv4();
-      const { data, error } = await supabase.from('clientes').insert({ client_id: clientId, name: client.name, phone: phoneCleaned, email: client.email?.trim() || null, address: client.address || null, tags: client.tags || ['Lead'], funnel_stage: client.funnelStage || 'Novo', last_contact_at: new Date().toISOString() }).select().single();
+      const { data, error } = await supabase.from('clientes').insert({ 
+        client_id: clientId, 
+        name: client.name, 
+        phone: phoneCleaned, 
+        email: client.email?.trim() || null, 
+        address: client.address || null, 
+        birth_date: client.birthDate || null,
+        company: client.company || null,
+        document: client.document || null,
+        tags: client.tags || ['Lead'], 
+        funnel_stage: client.funnelStage || 'Novo', 
+        last_contact_at: new Date().toISOString() 
+      }).select().single();
       if (error) throw error;
       if (userId) {
           const staff = await db.users.getById(userId);
           db.audit.log(userId, staff?.name || 'STAFF', 'CREATE_CLIENT', `Criou cliente ${client.name}`, data.client_id);
       }
-      return { id: data.client_id, name: data.name, phone: data.phone, email: data.email, photoUrl: data.photo_url, address: data.address, tags: safeTags(data.tags), createdAt: data.created_at, lastContactAt: data.last_contact_at, funnelStage: data.funnel_stage, loyaltyBalance: data.loyalty_balance || 0 };
+      return { 
+        id: data.client_id, 
+        name: data.name, 
+        phone: data.phone, 
+        email: data.email, 
+        photoUrl: data.photo_url, 
+        address: data.address, 
+        birthDate: data.birth_date,
+        company: data.company,
+        document: data.document,
+        tags: safeTags(data.tags), 
+        createdAt: data.created_at, 
+        lastContactAt: data.last_contact_at, 
+        funnelStage: data.funnel_stage, 
+        loyaltyBalance: data.loyalty_balance || 0 
+      };
     },
     update: async (client: Client, updatedBy?: string) => {
-      const { error } = await supabase.from('clientes').update({ name: client.name, phone: cleanPhone(client.phone), email: client.email?.trim() || null, address: client.address || null, last_contact_at: client.lastContactAt, photo_url: client.photoUrl, funnel_stage: client.funnelStage }).eq('client_id', client.id);
+      const { error } = await supabase.from('clientes').update({ 
+        name: client.name, 
+        phone: cleanPhone(client.phone), 
+        email: client.email?.trim() || null, 
+        address: client.address || null, 
+        birth_date: client.birthDate || null,
+        company: client.company || null,
+        document: client.document || null,
+        last_contact_at: client.lastContactAt, 
+        photo_url: client.photoUrl, 
+        funnel_stage: client.funnelStage 
+      }).eq('client_id', client.id);
       if (error) throw error;
       if (updatedBy) {
           const staff = await db.users.getById(updatedBy);
@@ -260,6 +454,33 @@ export const db = {
     updateStage: async (clientId: string, newStage: string) => {
         const { error } = await supabase.from('clientes').update({ funnel_stage: newStage }).eq('client_id', clientId);
         if (error) throw error;
+    },
+    syncFunnel: async () => {
+        // Chama a função inteligente que criaremos no banco de dados
+        const { error } = await supabase.rpc('sync_all_funnel_stages');
+        if (error) throw error;
+        return { success: true };
+    },
+    getByIds: async (ids: string[]): Promise<Client[]> => {
+      if (!ids || ids.length === 0) return [];
+      const { data, error } = await supabase.from('clientes').select('*').in('client_id', ids);
+      if (error) throw error;
+      return (data || []).map((c: any) => ({ 
+          id: c.client_id, 
+          name: c.name || 'Sem Nome', 
+          phone: c.phone || '', 
+          email: c.email, 
+          photoUrl: c.photo_url, 
+          address: c.address, 
+          birthDate: c.birth_date,
+          company: c.company,
+          document: c.document,
+          tags: safeTags(c.tags), 
+          createdAt: c.created_at, 
+          lastContactAt: c.last_contact_at, 
+          funnelStage: c.funnel_stage, 
+          loyaltyBalance: c.loyalty_balance || 0 
+      }));
     }
   },
 
@@ -287,9 +508,31 @@ export const db = {
         return db.reservations._mapReservations(data);
     },
     getAll: async (): Promise<Reservation[]> => {
-      const { data, error } = await supabase.from('reservas').select('*').order('date', { ascending: false }).limit(5000);
-      if (error) throw error;
-      return db.reservations._mapReservations(data);
+      let allData: any[] = [];
+      let lastCount = 0;
+      let from = 0;
+      const step = 1000;
+
+      // Busca exaustiva paginada para garantir que pegamos TODAS as reservas do banco
+      while (true) {
+        const { data, error } = await supabase
+          .from('reservas')
+          .select('*')
+          .order('date', { ascending: false })
+          .range(from, from + step - 1);
+        
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        
+        allData = [...allData, ...data];
+        if (data.length < step) break;
+        from += step;
+        
+        // Segurança para não entrar em loop infinito se houver erro de lógica
+        if (from > 50000) break; 
+      }
+
+      return db.reservations._mapReservations(allData);
     },
     _mapReservations: (data: any[]): Reservation[] => {
         return data.map((r: any) => {

@@ -7,7 +7,7 @@ import Login from './pages/Login';
 import PublicBooking from './pages/PublicBooking';
 import Checkout from './pages/Checkout';
 import Agenda from './pages/Agenda';
-import CRM from './pages/CRM';
+import CRM from './pages/CRM/CRM';
 import Settings from './pages/Settings';
 import Financeiro from './pages/Financeiro';
 import ClientDashboard from './pages/ClientDashboard';
