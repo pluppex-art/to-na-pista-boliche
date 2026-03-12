@@ -86,8 +86,10 @@ export interface Interaction {
   clientId: string;
   userId: string;
   userName: string;
-  type: 'CALL' | 'WHATSAPP' | 'EMAIL' | 'MEETING' | 'NOTE';
+  type: 'CALL' | 'WHATSAPP' | 'EMAIL' | 'MEETING' | 'NOTE' | 'SURVEY';
   content: string;
+  npsScore?: number;
+  satisfactionLevel?: 'EXCELENTE' | 'BOM' | 'NEUTRO' | 'RUIM' | 'PESSIMO';
   createdAt: string;
 }
 

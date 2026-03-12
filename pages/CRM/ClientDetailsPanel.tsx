@@ -1,11 +1,13 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Client, Reservation, FunnelStageConfig, User, LoyaltyTransaction, Interaction, ReservationStatus } from '../../types';
-import { X, Pencil, Store, MessageCircle, CalendarPlus, Save, FileText, Gift, Cake, Hash, Clock, Check, Trash2, Coins, ArrowUp, ArrowDown, Loader2, Plus } from 'lucide-react';
+import { X, Pencil, Store, MessageCircle, CalendarPlus, Save, FileText, Gift, Cake, Hash, Clock, Check, Trash2, Coins, ArrowUp, ArrowDown, Loader2, Plus, Star, Smile, Meh, Frown, AlertCircle, ThumbsUp } from 'lucide-react';
+import { db } from '../../services/mockBackend';
 
 interface ClientDetailsPanelProps {
     selectedClient: Client | null;
     setSelectedClient: (client: Client | null) => void;
+    currentUser: User | null;
     isEditing: boolean;
     setIsEditing: (editing: boolean) => void;
     editForm: Partial<Client>;
@@ -17,14 +19,7 @@ interface ClientDetailsPanelProps {
     setDetailTab: (tab: 'INFO' | 'LOYALTY' | 'NOTES') => void;
     clientHistory: Reservation[];
     loyaltyHistory: LoyaltyTransaction[];
-    interactions: Interaction[];
     loadingLoyalty: boolean;
-    loadingInteractions: boolean;
-    newNote: string;
-    setNewNote: (note: string) => void;
-    handleAddNote: () => Promise<void>;
-    handleDeleteNote: (id: string) => Promise<void>;
-    isSavingNote: boolean;
     funnelStages: FunnelStageConfig[];
     updateClientStage: (clientId: string, stage: string) => Promise<void>;
     isUpdatingStage: boolean;
@@ -38,6 +33,7 @@ interface ClientDetailsPanelProps {
 const ClientDetailsPanel: React.FC<ClientDetailsPanelProps> = ({
     selectedClient,
     setSelectedClient,
+    currentUser,
     isEditing,
     setIsEditing,
     editForm,
@@ -49,14 +45,7 @@ const ClientDetailsPanel: React.FC<ClientDetailsPanelProps> = ({
     setDetailTab,
     clientHistory,
     loyaltyHistory,
-    interactions,
     loadingLoyalty,
-    loadingInteractions,
-    newNote,
-    setNewNote,
-    handleAddNote,
-    handleDeleteNote,
-    isSavingNote,
     funnelStages,
     updateClientStage,
     isUpdatingStage,
@@ -66,6 +55,67 @@ const ClientDetailsPanel: React.FC<ClientDetailsPanelProps> = ({
     navigate,
     viewMode
 }) => {
+    const [interactions, setInteractions] = useState<Interaction[]>([]);
+    const [loadingInteractions, setLoadingInteractions] = useState(false);
+    const [newNote, setNewNote] = useState('');
+    const [npsScore, setNpsScore] = useState<number | null>(null);
+    const [satisfaction, setSatisfaction] = useState<Interaction['satisfactionLevel'] | null>(null);
+    const [isSavingNote, setIsSavingNote] = useState(false);
+
+    useEffect(() => {
+        if (selectedClient && detailTab === 'NOTES') {
+            fetchInteractions();
+        }
+    }, [selectedClient, detailTab]);
+
+    const fetchInteractions = async () => {
+        if (!selectedClient) return;
+        setLoadingInteractions(true);
+        try {
+            const data = await db.interactions.getByClient(selectedClient.id);
+            setInteractions(data);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setLoadingInteractions(false);
+        }
+    };
+
+    const handleAddNote = async () => {
+        if (!selectedClient || !currentUser || (!newNote.trim() && npsScore === null && !satisfaction)) return;
+        setIsSavingNote(true);
+        try {
+            const note = await db.interactions.create({
+                clientId: selectedClient.id,
+                userId: currentUser.id,
+                userName: currentUser.name,
+                type: npsScore !== null || satisfaction ? 'SURVEY' : 'NOTE',
+                content: newNote,
+                npsScore: npsScore !== null ? npsScore : undefined,
+                satisfactionLevel: satisfaction || undefined
+            });
+            setInteractions(prev => [note, ...prev]);
+            setNewNote('');
+            setNpsScore(null);
+            setSatisfaction(null);
+        } catch (e: any) {
+            console.error("Erro ao salvar nota:", e);
+            alert(`Erro ao salvar nota: ${e.message || 'Erro desconhecido'}. Verifique se as colunas 'nps_score' e 'satisfaction_level' existem na tabela 'interacoes'.`);
+        } finally {
+            setIsSavingNote(false);
+        }
+    };
+
+    const handleDeleteNote = async (id: string) => {
+        if (!window.confirm("Excluir esta nota?")) return;
+        try {
+            await db.interactions.delete(id);
+            setInteractions(prev => prev.filter(i => i.id !== id));
+        } catch (e) {
+            alert("Erro ao excluir.");
+        }
+    };
+
     if (!selectedClient) {
         if (viewMode === 'KANBAN') return null;
         
@@ -218,51 +268,128 @@ const ClientDetailsPanel: React.FC<ClientDetailsPanelProps> = ({
                     </div>
                 ) : detailTab === 'NOTES' ? (
                     <div className="space-y-6 animate-fade-in">
-                        <div className="bg-slate-800 border border-slate-700 rounded-2xl p-4 shadow-xl">
-                            <textarea 
-                                placeholder="Adicionar uma nota comercial ou registro de contato..."
-                                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-white text-sm focus:border-neon-blue outline-none transition min-h-[100px] resize-none"
-                                value={newNote}
-                                onChange={e => setNewNote(e.target.value)}
-                            />
-                            <div className="flex justify-end mt-3">
+                        <div className="bg-slate-800 border border-slate-700 rounded-2xl p-5 shadow-xl space-y-5">
+                            <div className="space-y-3">
+                                <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500">Pesquisa de Satisfação (NPS)</label>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(score => (
+                                        <button 
+                                            key={score}
+                                            onClick={() => setNpsScore(score === npsScore ? null : score)}
+                                            className={`w-8 h-8 rounded-lg text-[10px] font-bold transition-all border ${
+                                                npsScore === score 
+                                                ? 'bg-neon-blue text-white border-neon-blue shadow-lg scale-110' 
+                                                : 'bg-slate-900 text-slate-500 border-slate-700 hover:border-slate-500'
+                                            }`}
+                                        >
+                                            {score}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="space-y-3">
+                                <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500">Nível de Satisfação</label>
+                                <div className="grid grid-cols-5 gap-2">
+                                    {(['PESSIMO', 'RUIM', 'NEUTRO', 'BOM', 'EXCELENTE'] as const).map(level => {
+                                        const Icon = level === 'EXCELENTE' ? ThumbsUp : level === 'BOM' ? Smile : level === 'NEUTRO' ? Meh : level === 'RUIM' ? Frown : AlertCircle;
+                                        const color = level === 'EXCELENTE' ? 'text-green-400' : level === 'BOM' ? 'text-blue-400' : level === 'NEUTRO' ? 'text-yellow-400' : level === 'RUIM' ? 'text-orange-400' : 'text-red-400';
+                                        const isActive = satisfaction === level;
+                                        
+                                        return (
+                                            <button 
+                                                key={level}
+                                                onClick={() => setSatisfaction(isActive ? null : level)}
+                                                className={`flex flex-col items-center gap-1.5 p-2 rounded-xl border transition-all ${
+                                                    isActive 
+                                                    ? `bg-slate-700 border-slate-500 shadow-inner ${color}` 
+                                                    : 'bg-slate-900 border-slate-700 text-slate-600 hover:border-slate-600'
+                                                }`}
+                                            >
+                                                <Icon size={18} />
+                                                <span className="text-[8px] font-black uppercase tracking-tighter">{level}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            <div className="space-y-3">
+                                <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500">Observações / Sugestões</label>
+                                <textarea 
+                                    placeholder="Adicionar uma nota comercial ou registro de contato..."
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-white text-sm focus:border-neon-blue outline-none transition min-h-[100px] resize-none"
+                                    value={newNote}
+                                    onChange={e => setNewNote(e.target.value)}
+                                />
+                            </div>
+
+                            <div className="flex justify-end pt-2">
                                 <button 
                                     onClick={handleAddNote}
-                                    disabled={isSavingNote || !newNote.trim()}
-                                    className="bg-neon-blue hover:bg-blue-600 text-white px-6 py-2 rounded-xl font-bold text-[10px] uppercase tracking-widest flex items-center gap-2 disabled:opacity-50 transition-all shadow-lg"
+                                    disabled={isSavingNote || (!newNote.trim() && npsScore === null && !satisfaction)}
+                                    className="bg-neon-blue hover:bg-blue-600 text-white px-8 py-3 rounded-xl font-bold text-[10px] uppercase tracking-widest flex items-center gap-2 disabled:opacity-50 transition-all shadow-lg active:scale-95"
                                 >
                                     {isSavingNote ? <Loader2 size={14} className="animate-spin"/> : <Plus size={14}/>}
-                                    Salvar Nota
+                                    Salvar Registro
                                 </button>
                             </div>
                         </div>
 
                         <div className="space-y-4">
-                            <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2 border-l-2 border-slate-600 pl-3">Histórico de Interações</h3>
+                            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 border-l-4 border-slate-700 pl-3">Histórico de Interações</h3>
                             {loadingInteractions ? (
                                 <div className="flex justify-center py-12"><Loader2 className="animate-spin text-neon-blue" size={32}/></div>
                             ) : interactions.length === 0 ? (
-                                <div className="text-center py-12 bg-slate-900/20 border border-slate-700 rounded-3xl text-slate-600 text-xs font-bold uppercase">Nenhuma nota registrada</div>
+                                <div className="text-center py-12 bg-slate-900/20 border border-slate-700 rounded-3xl text-slate-600 text-[10px] font-black uppercase tracking-widest">Nenhuma nota registrada</div>
                             ) : (
                                 <div className="space-y-4">
                                     {interactions.map(note => (
-                                        <div key={note.id} className="bg-slate-900/40 border border-slate-800 p-4 rounded-2xl relative group">
-                                            <div className="flex justify-between items-start mb-2">
-                                                <div className="flex items-center gap-2">
-                                                    <div className="w-6 h-6 bg-slate-800 rounded-full flex items-center justify-center text-[10px] font-bold text-neon-blue border border-slate-700">
+                                        <div key={note.id} className="bg-slate-900/40 border border-slate-800 p-5 rounded-2xl relative group hover:border-slate-700 transition-all">
+                                            <div className="flex justify-between items-start mb-3">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-8 h-8 bg-slate-800 rounded-xl flex items-center justify-center text-xs font-black text-neon-blue border border-slate-700 shadow-inner">
                                                         {note.userName.charAt(0)}
                                                     </div>
-                                                    <span className="text-[10px] font-bold text-slate-300 uppercase tracking-tighter">{note.userName}</span>
-                                                    <span className="text-[9px] text-slate-600 font-bold">{new Date(note.createdAt).toLocaleString('pt-BR')}</span>
+                                                    <div>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-[10px] font-black text-slate-200 uppercase tracking-tight">{note.userName}</span>
+                                                            <span className="bg-slate-800 text-slate-500 px-1.5 py-0.5 rounded text-[8px] font-black uppercase border border-slate-700">{note.type}</span>
+                                                        </div>
+                                                        <span className="text-[9px] text-slate-600 font-bold">{new Date(note.createdAt).toLocaleString('pt-BR')}</span>
+                                                    </div>
                                                 </div>
                                                 <button 
                                                     onClick={() => handleDeleteNote(note.id)}
-                                                    className="text-slate-700 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                                                    className="text-slate-700 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 p-1"
                                                 >
                                                     <Trash2 size={14}/>
                                                 </button>
                                             </div>
-                                            <p className="text-slate-300 text-sm leading-relaxed whitespace-pre-wrap">{note.content}</p>
+                                            
+                                            {(note.npsScore !== undefined || note.satisfactionLevel) && (
+                                                <div className="flex gap-3 mb-3 p-3 bg-slate-900/60 rounded-xl border border-slate-800/50">
+                                                    {note.npsScore !== undefined && (
+                                                        <div className="flex flex-col">
+                                                            <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">NPS</span>
+                                                            <span className="text-sm font-black text-neon-blue">{note.npsScore}</span>
+                                                        </div>
+                                                    )}
+                                                    {note.satisfactionLevel && (
+                                                        <div className="flex flex-col border-l border-slate-800 pl-3">
+                                                            <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">Satisfação</span>
+                                                            <span className={`text-[10px] font-black uppercase ${
+                                                                note.satisfactionLevel === 'EXCELENTE' ? 'text-green-400' : 
+                                                                note.satisfactionLevel === 'BOM' ? 'text-blue-400' : 
+                                                                note.satisfactionLevel === 'NEUTRO' ? 'text-yellow-400' : 
+                                                                note.satisfactionLevel === 'RUIM' ? 'text-orange-400' : 'text-red-400'
+                                                            }`}>{note.satisfactionLevel}</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {note.content && <p className="text-slate-300 text-sm leading-relaxed whitespace-pre-wrap font-medium">{note.content}</p>}
                                         </div>
                                     ))}
                                 </div>

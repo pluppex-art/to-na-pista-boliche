@@ -30,12 +30,8 @@ const ClientList: React.FC = () => {
   
   const [funnelStages, setFunnelStages] = useState<FunnelStageConfig[]>([]);
   const [loyaltyHistory, setLoyaltyHistory] = useState<LoyaltyTransaction[]>([]);
-  const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [loadingLoyalty, setLoadingLoyalty] = useState(false);
-  const [loadingInteractions, setLoadingInteractions] = useState(false);
   const [detailTab, setDetailTab] = useState<'INFO' | 'LOYALTY' | 'NOTES'>('INFO');
-  const [newNote, setNewNote] = useState('');
-  const [isSavingNote, setIsSavingNote] = useState(false);
 
   // Filtros Avançados
   const [filterStage, setFilterStage] = useState<string>('ALL');
@@ -56,13 +52,13 @@ const ClientList: React.FC = () => {
   const canEditClient = isAdmin || currentUser?.perm_edit_client;
   const canCreateReservation = isAdmin || currentUser?.perm_create_reservation;
 
-  const fetchData = async (isLoadMore = false) => {
+  const fetchData = async (isLoadMore = false, search = searchTerm, stage = filterStage) => {
     if (isLoadMore) setLoadingMore(true);
     else setLoading(true);
 
     try {
         const nextOffset = isLoadMore ? loadedOffset + PAGE_SIZE : 0;
-        const { data: clientsData, count } = await db.clients.getAll(nextOffset, nextOffset + PAGE_SIZE - 1);
+        const { data: clientsData, count } = await db.clients.getAll(nextOffset, nextOffset + PAGE_SIZE - 1, search, stage);
         const [reservationsData, stagesData] = await Promise.all([
             db.reservations.getAll(),
             db.funnelStages.getAll()
@@ -105,12 +101,18 @@ const ClientList: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchData();
+    const timer = setTimeout(() => {
+        fetchData(false, searchTerm, filterStage);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchTerm, filterStage]);
+
+  useEffect(() => {
     const channel = supabase.channel('crm-list-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => fetchData(false))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => fetchData(false, searchTerm, filterStage))
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, []);
+  }, [searchTerm, filterStage]);
 
   useEffect(() => {
     const fetchDetails = async () => {
@@ -126,14 +128,6 @@ const ClientList: React.FC = () => {
             } catch(e) { console.error(e); }
             finally { setLoadingLoyalty(false); }
         }
-
-        if (detailTab === 'NOTES') {
-            setLoadingInteractions(true);
-            try {
-                setInteractions(await db.interactions.getByClient(selectedClient.id));
-            } catch(e) { console.error(e); }
-            finally { setLoadingInteractions(false); }
-        }
       }
     };
     fetchDetails();
@@ -141,9 +135,6 @@ const ClientList: React.FC = () => {
 
   const filteredClients = useMemo(() => {
     return clients.filter(c => {
-        const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                             c.phone.includes(searchTerm);
-        const matchesStage = filterStage === 'ALL' || c.funnelStage === filterStage;
         const matchesTier = filterTier === 'ALL' || (clientMetrics[c.id]?.tier === filterTier);
         
         let matchesBirthday = true;
@@ -155,34 +146,9 @@ const ClientList: React.FC = () => {
             matchesBirthday = false;
         }
 
-        return matchesSearch && matchesStage && matchesTier && matchesBirthday;
+        return matchesTier && matchesBirthday;
     });
-  }, [clients, searchTerm, filterStage, filterTier, showBirthdaysOnly, clientMetrics]);
-
-  const handleAddNote = async () => {
-      if (!selectedClient || !newNote.trim() || !currentUser) return;
-      setIsSavingNote(true);
-      try {
-          const note = await db.interactions.create({
-              clientId: selectedClient.id,
-              userId: currentUser.id,
-              userName: currentUser.name,
-              type: 'NOTE',
-              content: newNote
-          });
-          setInteractions(prev => [note, ...prev]);
-          setNewNote('');
-      } catch (e) { alert("Erro ao salvar nota."); }
-      finally { setIsSavingNote(false); }
-  };
-
-  const handleDeleteNote = async (id: string) => {
-      if (!window.confirm("Excluir esta nota?")) return;
-      try {
-          await db.interactions.delete(id);
-          setInteractions(prev => prev.filter(i => i.id !== id));
-      } catch (e) { alert("Erro ao excluir."); }
-  };
+  }, [clients, filterTier, showBirthdaysOnly, clientMetrics]);
 
   const openWhatsApp = (phone: string) => {
     window.open(`https://wa.me/55${phone.replace(/\D/g, '')}`, '_blank');
@@ -275,19 +241,19 @@ const ClientList: React.FC = () => {
                         
                         <div className="grid grid-cols-2 gap-2 mb-3">
                             <select 
-                                className="bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-bold uppercase p-2 rounded-lg outline-none"
+                                className="bg-slate-800 border border-slate-700 text-slate-300 text-[9px] font-black uppercase tracking-wider px-3 py-3.5 rounded-xl outline-none focus:border-neon-blue transition-all cursor-pointer hover:bg-slate-700/50 h-[46px]"
                                 value={filterStage}
                                 onChange={e => setFilterStage(e.target.value)}
                             >
-                                <option value="ALL">Todas as Etapas</option>
+                                <option value="ALL">Etapas</option>
                                 {funnelStages.map(s => <option key={s.id} value={s.nome}>{s.nome}</option>)}
                             </select>
                             <select 
-                                className="bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-bold uppercase p-2 rounded-lg outline-none"
+                                className="bg-slate-800 border border-slate-700 text-slate-300 text-[9px] font-black uppercase tracking-wider px-3 py-3.5 rounded-xl outline-none focus:border-neon-blue transition-all cursor-pointer hover:bg-slate-700/50 h-[46px]"
                                 value={filterTier}
                                 onChange={e => setFilterTier(e.target.value)}
                             >
-                                <option value="ALL">Todos os Tiers</option>
+                                <option value="ALL">Tiers</option>
                                 <option value="VIP">VIP</option>
                                 <option value="FIEL">Fiel</option>
                                 <option value="NOVO">Novo</option>
@@ -344,6 +310,7 @@ const ClientList: React.FC = () => {
             <ClientDetailsPanel 
                 selectedClient={selectedClient}
                 setSelectedClient={setSelectedClient}
+                currentUser={currentUser}
                 isEditing={isEditing}
                 setIsEditing={setIsEditing}
                 editForm={editForm}
@@ -355,14 +322,7 @@ const ClientList: React.FC = () => {
                 setDetailTab={setDetailTab}
                 clientHistory={clientHistory}
                 loyaltyHistory={loyaltyHistory}
-                interactions={interactions}
                 loadingLoyalty={loadingLoyalty}
-                loadingInteractions={loadingInteractions}
-                newNote={newNote}
-                setNewNote={setNewNote}
-                handleAddNote={handleAddNote}
-                handleDeleteNote={handleDeleteNote}
-                isSavingNote={isSavingNote}
                 funnelStages={funnelStages}
                 updateClientStage={updateClientStage}
                 isUpdatingStage={isUpdatingStage}

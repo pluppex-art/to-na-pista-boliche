@@ -24,12 +24,8 @@ const Funnel: React.FC = () => {
   
   const [funnelStages, setFunnelStages] = useState<FunnelStageConfig[]>([]);
   const [loyaltyHistory, setLoyaltyHistory] = useState<LoyaltyTransaction[]>([]);
-  const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [loadingLoyalty, setLoadingLoyalty] = useState(false);
-  const [loadingInteractions, setLoadingInteractions] = useState(false);
   const [detailTab, setDetailTab] = useState<'INFO' | 'LOYALTY' | 'NOTES'>('INFO');
-  const [newNote, setNewNote] = useState('');
-  const [isSavingNote, setIsSavingNote] = useState(false);
 
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -171,43 +167,10 @@ const Funnel: React.FC = () => {
             } catch(e) { console.error(e); }
             finally { setLoadingLoyalty(false); }
         }
-
-        if (detailTab === 'NOTES') {
-            setLoadingInteractions(true);
-            try {
-                setInteractions(await db.interactions.getByClient(selectedClient.id));
-            } catch(e) { console.error(e); }
-            finally { setLoadingInteractions(false); }
-        }
       }
     };
     fetchDetails();
   }, [selectedClient, detailTab]);
-
-  const handleAddNote = async () => {
-      if (!selectedClient || !newNote.trim() || !currentUser) return;
-      setIsSavingNote(true);
-      try {
-          const note = await db.interactions.create({
-              clientId: selectedClient.id,
-              userId: currentUser.id,
-              userName: currentUser.name,
-              type: 'NOTE',
-              content: newNote
-          });
-          setInteractions(prev => [note, ...prev]);
-          setNewNote('');
-      } catch (e) { alert("Erro ao salvar nota."); }
-      finally { setIsSavingNote(false); }
-  };
-
-  const handleDeleteNote = async (id: string) => {
-      if (!window.confirm("Excluir esta nota?")) return;
-      try {
-          await db.interactions.delete(id);
-          setInteractions(prev => prev.filter(i => i.id !== id));
-      } catch (e) { alert("Erro ao excluir."); }
-  };
 
   const openWhatsApp = (phone: string) => {
     window.open(`https://wa.me/55${phone.replace(/\D/g, '')}`, '_blank');
@@ -509,6 +472,7 @@ const Funnel: React.FC = () => {
             <ClientDetailsPanel 
                 selectedClient={selectedClient}
                 setSelectedClient={setSelectedClient}
+                currentUser={currentUser}
                 isEditing={isEditing}
                 setIsEditing={setIsEditing}
                 editForm={editForm}
@@ -520,14 +484,7 @@ const Funnel: React.FC = () => {
                 setDetailTab={setDetailTab}
                 clientHistory={clientHistory}
                 loyaltyHistory={loyaltyHistory}
-                interactions={interactions}
                 loadingLoyalty={loadingLoyalty}
-                loadingInteractions={loadingInteractions}
-                newNote={newNote}
-                setNewNote={setNewNote}
-                handleAddNote={handleAddNote}
-                handleDeleteNote={handleDeleteNote}
-                isSavingNote={isSavingNote}
                 funnelStages={funnelStages}
                 updateClientStage={updateClientStage}
                 isUpdatingStage={isUpdatingStage}
