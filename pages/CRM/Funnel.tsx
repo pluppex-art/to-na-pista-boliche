@@ -2,19 +2,28 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { db, cleanPhone } from '../../services/mockBackend';
 import { Client, Reservation, FunnelStageConfig, User, UserRole, ReservationStatus, PaymentStatus, LoyaltyTransaction, Interaction } from '../../types';
-import { Loader2, Settings, Crown, Star, MessageCircle, MoreHorizontal, RefreshCw, Trash2, Plus, ChevronUp, ChevronDown } from 'lucide-react';
+import { 
+    Loader2, Settings, Crown, Star, MessageCircle, MoreHorizontal, 
+    RefreshCw, Trash2, Plus, ChevronUp, ChevronDown, TrendingUp, 
+    TrendingDown, Target, Users, Award, Activity, BarChart3, PieChart 
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../services/supabaseClient';
 import ClientDetailsPanel from './ClientDetailsPanel';
 
 type ClientTier = 'VIP' | 'FIEL' | 'NOVO';
 
-const Funnel: React.FC = () => {
+interface FunnelProps {
+  viewMode: 'KANBAN' | 'DASHBOARD';
+}
+
+const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
   const navigate = useNavigate();
   
   // Dados Principais
   const [clients, setClients] = useState<Client[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   
@@ -43,6 +52,74 @@ const Funnel: React.FC = () => {
   const canCreateReservation = isAdmin || currentUser?.perm_create_reservation;
 
   const [isSyncing, setIsSyncing] = useState(false);
+
+  const performanceMetrics = useMemo(() => {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    
+    const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+    const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+
+    // 1. Carrinhos Recuperados
+    const recoveredThisMonth = reservations.filter(r => {
+        if (!r.recoveredAt) return false;
+        const d = new Date(r.recoveredAt);
+        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+    });
+    const totalRecoveredValue = recoveredThisMonth.reduce((acc, r) => acc + r.totalValue, 0);
+
+    const recoveredLastMonth = reservations.filter(r => {
+        if (!r.recoveredAt) return false;
+        const d = new Date(r.recoveredAt);
+        return d.getMonth() === lastMonth && d.getFullYear() === lastMonthYear;
+    });
+    const totalRecoveredValueLastMonth = recoveredLastMonth.reduce((acc, r) => acc + r.totalValue, 0);
+
+    const recoveryGrowth = totalRecoveredValueLastMonth > 0 
+        ? ((totalRecoveredValue - totalRecoveredValueLastMonth) / totalRecoveredValueLastMonth) * 100 
+        : 100;
+
+    // 2. NPS Geral
+    const interactionsWithNps = interactions.filter(i => i.npsScore !== undefined && i.npsScore !== null);
+    const avgNps = interactionsWithNps.length > 0 
+        ? interactionsWithNps.reduce((acc, i) => acc + (i.npsScore || 0), 0) / interactionsWithNps.length 
+        : 0;
+
+    // 3. Clientes Reativados
+    const prospectingInteractions = interactions.filter(i => i.isProspecting);
+    const reactivatedClients = new Set();
+    
+    prospectingInteractions.forEach(i => {
+        // Busca reservas anteriores a este contato para ver se ele estava "sumido"
+        const previousReservations = reservations.filter(r => 
+            r.clientId === i.clientId && 
+            new Date(r.date) < new Date(i.createdAt) &&
+            r.status !== ReservationStatus.CANCELADA
+        ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+        const lastVisit = previousReservations.length > 0 ? new Date(previousReservations[0].date) : null;
+        const diffDays = lastVisit ? (new Date(i.createdAt).getTime() - lastVisit.getTime()) / (1000 * 60 * 60 * 24) : 999;
+
+        if (diffDays > 7) {
+            const newReservations = reservations.filter(r => 
+                r.clientId === i.clientId && 
+                new Date(r.createdAt) > new Date(i.createdAt) &&
+                r.status !== ReservationStatus.CANCELADA
+            );
+            if (newReservations.length > 0) {
+                reactivatedClients.add(i.clientId);
+            }
+        }
+    });
+
+    return {
+        totalRecoveredValue,
+        recoveryGrowth,
+        avgNps,
+        reactivatedCount: reactivatedClients.size
+    };
+  }, [reservations, interactions]);
 
   const handleSyncFunnel = async () => {
     if (!isAdmin) return;
@@ -80,9 +157,10 @@ const Funnel: React.FC = () => {
     setLoading(true);
     try {
         const { data: clientsData } = await db.clients.getAll(); 
-        const [reservationsData, stagesData] = await Promise.all([
+        const [reservationsData, stagesData, interactionsData] = await Promise.all([
             db.reservations.getAll(),
-            db.funnelStages.getAll()
+            db.funnelStages.getAll(),
+            db.interactions.getAll()
         ]);
         
         let finalStages = stagesData;
@@ -118,6 +196,7 @@ const Funnel: React.FC = () => {
 
         setClients(clientsData);
         setReservations(reservationsData);
+        setInteractions(interactionsData);
         setFunnelStages(finalStages.sort((a, b) => a.ordem - b.ordem));
 
         const metrics: Record<string, { count: number, tier: ClientTier }> = {};
@@ -253,9 +332,104 @@ const Funnel: React.FC = () => {
   };
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      <div className="flex-1 flex flex-col lg:flex-row gap-6 overflow-hidden min-h-0 relative px-1">
-            <div className={`flex-1 overflow-x-auto custom-scrollbar h-full ${selectedClient ? 'hidden lg:flex' : 'flex'}`}>
+    <div className="h-full flex flex-col overflow-hidden bg-slate-950/20">
+      {viewMode === 'DASHBOARD' ? (
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 animate-fade-in">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 max-w-7xl mx-auto">
+            {/* KPI 1: Carrinhos Recuperados */}
+            <div className="bg-slate-900/60 border border-slate-800 p-6 rounded-3xl shadow-xl relative overflow-hidden group hover:border-neon-blue/30 transition-all duration-500">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <BarChart3 size={64} className="text-neon-blue" />
+              </div>
+              <div className="relative z-10">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-10 h-10 bg-neon-blue/10 rounded-xl flex items-center justify-center border border-neon-blue/20">
+                    <TrendingUp size={20} className="text-neon-blue" />
+                  </div>
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Carrinhos Recuperados</h3>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl sm:text-4xl font-black text-white tracking-tighter">
+                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(performanceMetrics.totalRecoveredValue)}
+                  </span>
+                  <div className={`flex items-center gap-0.5 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                    performanceMetrics.recoveryGrowth >= 0 
+                    ? 'bg-green-500/10 text-green-400 border-green-500/20' 
+                    : 'bg-red-500/10 text-red-400 border-red-500/20'
+                  }`}>
+                    {performanceMetrics.recoveryGrowth >= 0 ? <TrendingUp size={10}/> : <TrendingDown size={10}/>}
+                    {Math.abs(performanceMetrics.recoveryGrowth).toFixed(1)}%
+                  </div>
+                </div>
+                <p className="text-[9px] text-slate-500 font-bold mt-2 uppercase tracking-wider">Performance vs mês anterior</p>
+              </div>
+            </div>
+
+            {/* KPI 2: NPS Geral */}
+            <div className="bg-slate-900/60 border border-slate-800 p-6 rounded-3xl shadow-xl relative overflow-hidden group hover:border-neon-orange/30 transition-all duration-500">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <Target size={64} className="text-neon-orange" />
+              </div>
+              <div className="relative z-10">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-10 h-10 bg-neon-orange/10 rounded-xl flex items-center justify-center border border-neon-orange/20">
+                    <Activity size={20} className="text-neon-orange" />
+                  </div>
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">NPS Geral (Satisfação)</h3>
+                </div>
+                <div className="flex items-center gap-4">
+                  <span className="text-4xl sm:text-6xl font-black text-white tracking-tighter">
+                    {performanceMetrics.avgNps.toFixed(1)}
+                  </span>
+                  <div className="flex-1 space-y-2">
+                    <div className="h-3 bg-slate-800 rounded-full overflow-hidden border border-slate-700 p-0.5">
+                      <div 
+                        className={`h-full rounded-full transition-all duration-1000 ${
+                          performanceMetrics.avgNps >= 8 ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 
+                          performanceMetrics.avgNps >= 6 ? 'bg-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]' : 
+                          'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]'
+                        }`}
+                        style={{ width: `${performanceMetrics.avgNps * 10}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-[8px] font-black text-slate-600 uppercase tracking-tighter">
+                      <span>Crítico</span>
+                      <span>Neutro</span>
+                      <span>Excelente</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* KPI 3: Clientes Reativados */}
+            <div className="bg-slate-900/60 border border-slate-800 p-6 rounded-3xl shadow-xl relative overflow-hidden group hover:border-green-500/30 transition-all duration-500">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <Users size={64} className="text-green-500" />
+              </div>
+              <div className="relative z-10">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-10 h-10 bg-green-500/10 rounded-xl flex items-center justify-center border border-green-500/20">
+                    <RefreshCw size={20} className="text-green-500" />
+                  </div>
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Clientes Reativados</h3>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-4xl sm:text-6xl font-black text-white tracking-tighter">
+                    {performanceMetrics.reactivatedCount}
+                  </span>
+                  <div className="bg-green-500/10 text-green-400 px-3 py-1 rounded-xl border border-green-500/20 text-[10px] font-black uppercase tracking-widest">
+                    Novas Reservas
+                  </div>
+                </div>
+                <p className="text-[9px] text-slate-500 font-bold mt-2 uppercase tracking-wider">Via prospecção ativa este mês</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="flex-1 flex flex-col lg:flex-row gap-6 overflow-hidden min-h-0 relative px-1">
+              <div className={`flex-1 overflow-x-auto custom-scrollbar h-full ${selectedClient ? 'hidden lg:flex' : 'flex'}`}>
                 {showFunnelSettings ? (
                     <div className="bg-slate-800 border border-slate-700 rounded-2xl p-8 max-w-4xl mx-auto shadow-2xl animate-scale-in">
                         <div className="flex justify-between items-center mb-8">
@@ -490,11 +664,13 @@ const Funnel: React.FC = () => {
                 isUpdatingStage={isUpdatingStage}
                 handleRemoveTag={handleRemoveTag}
                 handleAddTag={handleAddTag}
+                onRefreshData={fetchData}
                 openWhatsApp={openWhatsApp}
                 navigate={navigate}
-                viewMode="KANBAN"
+                viewMode={viewMode === 'KANBAN' ? 'KANBAN' : 'LIST'}
             />
-      </div>
+          </div>
+        )}
     </div>
   );
 };

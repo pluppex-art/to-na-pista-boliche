@@ -89,6 +89,7 @@ export const db = {
         content: i.content,
         npsScore: i.nps_score,
         satisfactionLevel: i.satisfaction_level,
+        isProspecting: i.is_prospecting,
         createdAt: i.created_at
       }));
     },
@@ -98,7 +99,8 @@ export const db = {
         user_id: interaction.userId,
         user_name: interaction.userName,
         type: interaction.type,
-        content: interaction.content
+        content: interaction.content,
+        is_prospecting: interaction.isProspecting || false
       };
       
       if (interaction.npsScore !== undefined && interaction.npsScore !== null) {
@@ -120,12 +122,29 @@ export const db = {
         content: data.content,
         npsScore: data.nps_score,
         satisfactionLevel: data.satisfaction_level,
+        isProspecting: data.is_prospecting,
         createdAt: data.created_at
       };
     },
     delete: async (id: string) => {
       const { error } = await supabase.from('interacoes').delete().eq('id', id);
       if (error) throw error;
+    },
+    getAll: async (): Promise<Interaction[]> => {
+      const { data, error } = await supabase.from('interacoes').select('*').order('created_at', { ascending: false });
+      if (error) return [];
+      return (data || []).map((i: any) => ({
+        id: i.id,
+        clientId: i.client_id,
+        userId: i.user_id,
+        userName: i.user_name,
+        type: i.type,
+        content: i.content,
+        npsScore: i.nps_score,
+        satisfactionLevel: i.satisfaction_level,
+        isProspecting: i.is_prospecting,
+        createdAt: i.created_at
+      }));
     }
   },
 
@@ -613,6 +632,8 @@ export const db = {
                 payOnSite: r.pay_on_site, 
                 comandaId: r.comanda_id, 
                 createdBy: r.created_by, 
+                recoveredBy: r.recovered_by,
+                recoveredAt: r.recovered_at,
                 lanesAssigned: r.pistas_usadas || []
             };
         });
@@ -624,7 +645,8 @@ export const db = {
         event_type: res.eventType, observations: res.observations, status: res.status, payment_status: res.paymentStatus,
         payment_method: res.paymentMethod, payment_details: res.paymentDetails, created_at: res.createdAt, has_table_reservation: res.hasTableReservation, 
         birthday_name: res.birthdayName, table_seat_count: res.tableSeatCount, created_by: createdByUserId || null,
-        pay_on_site: res.payOnSite || false, comanda_id: res.comandaId || null
+        pay_on_site: res.payOnSite || false, comanda_id: res.comandaId || null,
+        recovered_by: res.recoveredBy || null, recovered_at: res.recoveredAt || null
       });
       if (error) throw error;
 
@@ -643,7 +665,8 @@ export const db = {
         checked_in_ids: res.checkedInIds || [], no_show_ids: res.noShowIds || [], has_table_reservation: res.hasTableReservation, 
         /* Fix: Property 'table_seat_count' does not exist on type 'Reservation'. Changed to tableSeatCount. */
         table_seat_count: res.tableSeatCount, pistas_usadas: res.lanesAssigned,
-        pay_on_site: res.payOnSite, comanda_id: res.comandaId
+        pay_on_site: res.payOnSite, comanda_id: res.comandaId,
+        recovered_by: res.recoveredBy, recovered_at: res.recoveredAt
       }).eq('id', res.id);
       if (error) throw error;
 

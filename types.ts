@@ -90,6 +90,7 @@ export interface Interaction {
   content: string;
   npsScore?: number;
   satisfactionLevel?: 'EXCELENTE' | 'BOM' | 'NEUTRO' | 'RUIM' | 'PESSIMO';
+  isProspecting?: boolean;
   createdAt: string;
 }
 
@@ -157,6 +158,8 @@ export interface Reservation {
   payOnSite?: boolean;
   comandaId?: string;
   createdBy?: string;
+  recoveredBy?: string;
+  recoveredAt?: string;
   lanesAssigned?: number[];
   rating?: number;
 }

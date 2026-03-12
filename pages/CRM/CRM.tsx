@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
-import { Users, Kanban as KanbanIcon, LayoutList } from 'lucide-react';
+import { Users, Kanban as KanbanIcon, LayoutList, BarChart3 } from 'lucide-react';
 import ClientList from './ClientList';
 import Funnel from './Funnel';
 import { db } from '../../services/mockBackend';
 
 const CRM: React.FC = () => {
-  const [viewMode, setViewMode] = useState<'LIST' | 'KANBAN'>('LIST');
+  const [viewMode, setViewMode] = useState<'LIST' | 'KANBAN' | 'DASHBOARD'>('KANBAN');
   const [totalClientCount, setTotalClientCount] = useState(0);
 
   useEffect(() => {
@@ -36,10 +36,10 @@ const CRM: React.FC = () => {
           {/* Seletor de Abas (Dentro de Clientes) */}
           <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-700 w-full md:w-auto shadow-lg">
              <button 
-                onClick={() => setViewMode('LIST')} 
-                className={`flex-1 md:flex-none px-6 py-2 rounded-lg flex items-center justify-center gap-2 text-xs font-bold uppercase transition-all ${viewMode === 'LIST' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}
+                onClick={() => setViewMode('DASHBOARD')} 
+                className={`flex-1 md:flex-none px-6 py-2 rounded-lg flex items-center justify-center gap-2 text-xs font-bold uppercase transition-all ${viewMode === 'DASHBOARD' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}
              >
-                <LayoutList size={16} /> Lista
+                <BarChart3 size={16} /> Dashboard
              </button>
              <button 
                 onClick={() => setViewMode('KANBAN')} 
@@ -47,12 +47,22 @@ const CRM: React.FC = () => {
              >
                 <KanbanIcon size={16} /> Funil
              </button>
+             <button 
+                onClick={() => setViewMode('LIST')} 
+                className={`flex-1 md:flex-none px-6 py-2 rounded-lg flex items-center justify-center gap-2 text-xs font-bold uppercase transition-all ${viewMode === 'LIST' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}
+             >
+                <LayoutList size={16} /> Lista
+             </button>
           </div>
       </div>
 
       {/* Renderização Condicional do Conteúdo */}
       <div className="flex-1 min-h-0">
-        {viewMode === 'LIST' ? <ClientList /> : <Funnel />}
+        {viewMode === 'LIST' ? (
+          <ClientList />
+        ) : (
+          <Funnel viewMode={viewMode} />
+        )}
       </div>
     </div>
   );

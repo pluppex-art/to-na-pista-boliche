@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Client, Reservation, FunnelStageConfig, User, LoyaltyTransaction, Interaction, ReservationStatus } from '../../types';
-import { X, Pencil, Store, MessageCircle, CalendarPlus, Save, FileText, Gift, Cake, Hash, Clock, Check, Trash2, Coins, ArrowUp, ArrowDown, Loader2, Plus, Star, Smile, Meh, Frown, AlertCircle, ThumbsUp } from 'lucide-react';
+import { X, Pencil, Store, MessageCircle, CalendarPlus, Save, FileText, Gift, Cake, Hash, Clock, Check, Trash2, Coins, ArrowUp, ArrowDown, Loader2, Plus, Star, Smile, Meh, Frown, AlertCircle, ThumbsUp, TrendingUp } from 'lucide-react';
 import { db } from '../../services/mockBackend';
 
 interface ClientDetailsPanelProps {
@@ -25,6 +25,7 @@ interface ClientDetailsPanelProps {
     isUpdatingStage: boolean;
     handleRemoveTag: (tag: string) => Promise<void>;
     handleAddTag: (tag: string) => Promise<void>;
+    onRefreshData?: () => void;
     openWhatsApp: (phone: string) => void;
     navigate: (path: string, state?: any) => void;
     viewMode: 'LIST' | 'KANBAN';
@@ -51,6 +52,7 @@ const ClientDetailsPanel: React.FC<ClientDetailsPanelProps> = ({
     isUpdatingStage,
     handleRemoveTag,
     handleAddTag,
+    onRefreshData,
     openWhatsApp,
     navigate,
     viewMode
@@ -60,6 +62,7 @@ const ClientDetailsPanel: React.FC<ClientDetailsPanelProps> = ({
     const [newNote, setNewNote] = useState('');
     const [npsScore, setNpsScore] = useState<number | null>(null);
     const [satisfaction, setSatisfaction] = useState<Interaction['satisfactionLevel'] | null>(null);
+    const [isProspecting, setIsProspecting] = useState(false);
     const [isSavingNote, setIsSavingNote] = useState(false);
 
     useEffect(() => {
@@ -92,12 +95,14 @@ const ClientDetailsPanel: React.FC<ClientDetailsPanelProps> = ({
                 type: npsScore !== null || satisfaction ? 'SURVEY' : 'NOTE',
                 content: newNote,
                 npsScore: npsScore !== null ? npsScore : undefined,
-                satisfactionLevel: satisfaction || undefined
+                satisfactionLevel: satisfaction || undefined,
+                isProspecting: isProspecting
             });
             setInteractions(prev => [note, ...prev]);
             setNewNote('');
             setNpsScore(null);
             setSatisfaction(null);
+            setIsProspecting(false);
         } catch (e: any) {
             console.error("Erro ao salvar nota:", e);
             alert(`Erro ao salvar nota: ${e.message || 'Erro desconhecido'}. Verifique se as colunas 'nps_score' e 'satisfaction_level' existem na tabela 'interacoes'.`);
@@ -113,6 +118,22 @@ const ClientDetailsPanel: React.FC<ClientDetailsPanelProps> = ({
             setInteractions(prev => prev.filter(i => i.id !== id));
         } catch (e) {
             alert("Erro ao excluir.");
+        }
+    };
+
+    const handleRecoverReservation = async (res: Reservation) => {
+        if (!currentUser || !selectedClient) return;
+        try {
+            const updatedRes = {
+                ...res,
+                status: ReservationStatus.CONFIRMADA,
+                recoveredBy: currentUser.id,
+                recoveredAt: new Date().toISOString()
+            };
+            await db.reservations.update(updatedRes, currentUser.id, `Recuperou carrinho abandonado de ${res.clientName}`);
+            if (onRefreshData) onRefreshData();
+        } catch (e) {
+            console.error("Erro ao recuperar reserva:", e);
         }
     };
 
@@ -255,7 +276,16 @@ const ClientDetailsPanel: React.FC<ClientDetailsPanelProps> = ({
                                             </div>
                                             <div className="flex gap-2 mt-2">
                                                {isCheckedIn ? <span className="text-[9px] font-bold text-green-400 bg-green-500/20 px-1.5 py-0.5 rounded border border-green-500/30">CHECK-IN</span> : isNoShow ? <span className="text-[9px] font-bold text-red-400 bg-red-600/20 px-1.5 py-0.5 rounded border border-red-500/30">NO-SHOW</span> : <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${res.status === ReservationStatus.CONFIRMADA ? 'text-neon-blue bg-blue-900/40 border-neon-blue/30' : 'text-slate-400 bg-slate-800 border-slate-700'}`}>{res.status}</span>}
+                                               {res.recoveredBy && <span className="text-[9px] font-bold text-neon-blue bg-neon-blue/10 px-1.5 py-0.5 rounded border border-neon-blue/20 flex items-center gap-1"><TrendingUp size={10}/> RECUPERADO</span>}
                                             </div>
+                                            {res.status === ReservationStatus.PENDENTE && (
+                                                <button 
+                                                    onClick={() => handleRecoverReservation(res)}
+                                                    className="mt-3 text-[10px] font-black uppercase tracking-widest text-neon-blue hover:text-blue-400 flex items-center gap-1.5 bg-neon-blue/5 px-3 py-1.5 rounded-lg border border-neon-blue/10 transition-all hover:bg-neon-blue/10"
+                                                >
+                                                    <TrendingUp size={12}/> Recuperar Carrinho
+                                                </button>
+                                            )}
                                         </div>
                                         <div className="text-right">
                                             <span className="text-base font-bold text-green-400">{res.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
@@ -324,6 +354,19 @@ const ClientDetailsPanel: React.FC<ClientDetailsPanelProps> = ({
                                 />
                             </div>
 
+                            <div className="flex items-center gap-3 bg-slate-900/50 p-3 rounded-xl border border-slate-700/50">
+                                <input 
+                                    type="checkbox" 
+                                    id="prospecting" 
+                                    checked={isProspecting} 
+                                    onChange={e => setIsProspecting(e.target.checked)}
+                                    className="w-5 h-5 rounded-lg border-slate-700 bg-slate-800 text-neon-blue focus:ring-neon-blue transition-all cursor-pointer"
+                                />
+                                <label htmlFor="prospecting" className="text-[10px] font-black uppercase tracking-widest text-slate-400 cursor-pointer select-none">
+                                    Marcar como Prospecção Ativa (Contato Comercial)
+                                </label>
+                            </div>
+
                             <div className="flex justify-end pt-2">
                                 <button 
                                     onClick={handleAddNote}
@@ -355,6 +398,9 @@ const ClientDetailsPanel: React.FC<ClientDetailsPanelProps> = ({
                                                         <div className="flex items-center gap-2">
                                                             <span className="text-[10px] font-black text-slate-200 uppercase tracking-tight">{note.userName}</span>
                                                             <span className="bg-slate-800 text-slate-500 px-1.5 py-0.5 rounded text-[8px] font-black uppercase border border-slate-700">{note.type}</span>
+                                                            {note.isProspecting && (
+                                                                <span className="bg-neon-blue/10 text-neon-blue px-1.5 py-0.5 rounded text-[8px] font-black uppercase border border-neon-blue/20">Prospecção</span>
+                                                            )}
                                                         </div>
                                                         <span className="text-[9px] text-slate-600 font-bold">{new Date(note.createdAt).toLocaleString('pt-BR')}</span>
                                                     </div>
