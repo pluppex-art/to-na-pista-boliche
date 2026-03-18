@@ -34,24 +34,27 @@ const CRM: React.FC = () => {
           </div>
 
           {/* Seletor de Abas (Dentro de Clientes) */}
-          <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-700 w-full md:w-auto shadow-lg">
+          <div className="flex bg-slate-900/80 p-1 rounded-xl border border-slate-800 w-full md:w-auto shadow-lg overflow-x-auto no-scrollbar">
              <button 
                 onClick={() => setViewMode('DASHBOARD')} 
-                className={`flex-1 md:flex-none px-6 py-2 rounded-lg flex items-center justify-center gap-2 text-xs font-bold uppercase transition-all ${viewMode === 'DASHBOARD' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}
+                className={`flex-1 md:flex-none px-3 md:px-6 py-2 rounded-lg flex items-center justify-center gap-1.5 md:gap-2 text-[10px] md:text-xs font-bold uppercase transition-all whitespace-nowrap ${viewMode === 'DASHBOARD' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}
              >
-                <BarChart3 size={16} /> Dashboard
+                <BarChart3 size={14} className="md:w-4 md:h-4" /> 
+                <span>Dashboard</span>
              </button>
              <button 
                 onClick={() => setViewMode('KANBAN')} 
-                className={`flex-1 md:flex-none px-6 py-2 rounded-lg flex items-center justify-center gap-2 text-xs font-bold uppercase transition-all ${viewMode === 'KANBAN' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}
+                className={`flex-1 md:flex-none px-3 md:px-6 py-2 rounded-lg flex items-center justify-center gap-1.5 md:gap-2 text-[10px] md:text-xs font-bold uppercase transition-all whitespace-nowrap ${viewMode === 'KANBAN' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}
              >
-                <KanbanIcon size={16} /> Funil
+                <KanbanIcon size={14} className="md:w-4 md:h-4" /> 
+                <span>Funil</span>
              </button>
              <button 
                 onClick={() => setViewMode('LIST')} 
-                className={`flex-1 md:flex-none px-6 py-2 rounded-lg flex items-center justify-center gap-2 text-xs font-bold uppercase transition-all ${viewMode === 'LIST' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}
+                className={`flex-1 md:flex-none px-3 md:px-6 py-2 rounded-lg flex items-center justify-center gap-1.5 md:gap-2 text-[10px] md:text-xs font-bold uppercase transition-all whitespace-nowrap ${viewMode === 'LIST' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}
              >
-                <LayoutList size={16} /> Lista
+                <LayoutList size={14} className="md:w-4 md:h-4" /> 
+                <span>Lista</span>
              </button>
           </div>
       </div>

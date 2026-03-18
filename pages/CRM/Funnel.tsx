@@ -88,6 +88,7 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
     const avgNps = interactionsWithNps.length > 0 
         ? interactionsWithNps.reduce((acc, i) => acc + (i.npsScore || 0), 0) / interactionsWithNps.length 
         : 0;
+    const npsCount = interactionsWithNps.length;
 
     // 3. Clientes Reativados
     const prospectingInteractions = interactions.filter(i => i.isProspecting);
@@ -120,6 +121,7 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
         totalRecoveredValue,
         recoveryGrowth,
         avgNps,
+        npsCount,
         reactivatedCount: reactivatedClients.size
     };
   }, [reservations, interactions]);
@@ -148,6 +150,7 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
   };
 
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
+  const [visibleFeedbacksCount, setVisibleFeedbacksCount] = useState(10);
 
   const showMore = (stageName: string) => {
     setVisibleCounts(prev => ({
@@ -448,6 +451,114 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
               </div>
             </div>
           </div>
+
+          {/* Seção de Feedbacks NPS */}
+          <div className="mt-8 max-w-7xl mx-auto">
+            <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-neon-orange/10 rounded-2xl flex items-center justify-center border border-neon-orange/20">
+                        <MessageCircle size={24} className="text-neon-orange" />
+                    </div>
+                    <div>
+                        <h2 className="text-xl font-black text-white uppercase tracking-tight">Feedbacks Pós-Venda</h2>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Observações e Notas de NPS</p>
+                    </div>
+                </div>
+                <div className="bg-slate-900/80 border border-slate-800 px-4 py-2 rounded-2xl flex items-center gap-3 shadow-lg">
+                    <div className="text-right">
+                        <p className="text-[8px] text-slate-500 font-black uppercase tracking-widest">Total Pesquisados</p>
+                        <p className="text-lg font-black text-white leading-none">{performanceMetrics.npsCount}</p>
+                    </div>
+                    <div className="w-px h-8 bg-slate-800" />
+                    <div className="text-right">
+                        <p className="text-[8px] text-slate-500 font-black uppercase tracking-widest">Média NPS</p>
+                        <p className="text-lg font-black text-neon-orange leading-none">{performanceMetrics.avgNps.toFixed(1)}</p>
+                    </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {interactions.filter(i => i.npsScore !== undefined && i.npsScore !== null).length > 0 ? (
+                    <>
+                        {interactions
+                            .filter(i => i.npsScore !== undefined && i.npsScore !== null)
+                            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                            .slice(0, visibleFeedbacksCount)
+                            .map(feedback => {
+                                const client = clients.find(c => c.id === feedback.clientId);
+                                const clientReservations = reservations.filter(r => r.clientId === feedback.clientId && r.status !== ReservationStatus.CANCELADA);
+                                const lastVisit = clientReservations.length > 0 
+                                    ? new Date(clientReservations.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0].date)
+                                    : null;
+
+                                return (
+                                    <div key={feedback.id} className="bg-slate-900/40 border border-slate-800/60 p-5 rounded-3xl hover:border-neon-orange/20 transition-all group">
+                                        <div className="flex justify-between items-start mb-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 bg-slate-800 rounded-xl flex items-center justify-center text-slate-400 font-bold border border-slate-700">
+                                                    {client?.name?.charAt(0) || '?'}
+                                                </div>
+                                                <div>
+                                                    <h4 className="text-sm font-bold text-white leading-tight">{client?.name || 'Cliente Desconhecido'}</h4>
+                                                    <p className="text-[10px] text-slate-500 font-medium">
+                                                        Última visita: {lastVisit ? lastVisit.toLocaleDateString('pt-BR') : 'N/A'}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className={`px-2 py-1 rounded-lg text-[10px] font-black border ${
+                                                (feedback.npsScore || 0) >= 8 ? 'bg-green-500/10 text-green-400 border-green-500/20' :
+                                                (feedback.npsScore || 0) >= 6 ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
+                                                'bg-red-500/10 text-red-400 border-red-500/20'
+                                            }`}>
+                                                NPS {(feedback.npsScore || 0).toFixed(0)}
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="bg-slate-950/40 p-3 rounded-2xl border border-slate-800/50 mb-3">
+                                            <p className="text-xs text-slate-300 italic leading-relaxed">
+                                                "{feedback.content || 'Sem observações.'}"
+                                            </p>
+                                        </div>
+
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-1.5">
+                                                <div className={`w-2 h-2 rounded-full ${
+                                                    feedback.satisfactionLevel === 'EXCELENTE' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' :
+                                                    feedback.satisfactionLevel === 'BOM' ? 'bg-blue-500' :
+                                                    feedback.satisfactionLevel === 'NEUTRO' ? 'bg-yellow-500' :
+                                                    'bg-red-500'
+                                                }`} />
+                                                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                                                    {feedback.satisfactionLevel || 'NÃO INFORMADO'}
+                                                </span>
+                                            </div>
+                                            <span className="text-[8px] font-bold text-slate-600 uppercase tracking-tighter">
+                                                {new Date(feedback.createdAt).toLocaleDateString('pt-BR')}
+                                            </span>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        
+                        {interactions.filter(i => i.npsScore !== undefined && i.npsScore !== null).length > visibleFeedbacksCount && (
+                            <div className="col-span-full flex justify-center mt-6">
+                                <button 
+                                    onClick={() => setVisibleFeedbacksCount(prev => prev + 10)}
+                                    className="bg-slate-900 border border-slate-800 px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white hover:border-neon-orange/30 transition-all shadow-lg"
+                                >
+                                    Carregar Mais Feedbacks
+                                </button>
+                            </div>
+                        )}
+                    </>
+                ) : (
+                    <div className="col-span-full py-12 flex flex-col items-center justify-center bg-slate-900/20 border border-dashed border-slate-800 rounded-3xl">
+                        <MessageCircle size={48} className="text-slate-700 mb-4" />
+                        <p className="text-slate-500 font-bold uppercase text-xs tracking-widest">Nenhum feedback recebido ainda</p>
+                    </div>
+                )}
+            </div>
+          </div>
         </div>
       ) : (
         <div className="flex-1 flex flex-col lg:flex-row gap-6 overflow-hidden min-h-0 relative px-1">
@@ -574,55 +685,57 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
                     </div>
                 ) : (
                     <div className="flex flex-col h-full overflow-hidden">
-                            <div className="flex flex-wrap justify-end items-center gap-3 mb-4 px-2">
-                            <div className="flex items-center gap-2 bg-slate-900/50 p-1.5 rounded-xl border border-slate-800">
-                                <span className="text-[10px] font-bold text-white uppercase tracking-widest ml-2">Filtrar:</span>
+                            <div className="flex flex-col sm:flex-row justify-end items-center gap-2 sm:gap-3 mb-4 px-2">
+                                <div className="flex items-center gap-1 sm:gap-1.5 bg-slate-900/50 p-1 rounded-xl border border-slate-800 w-full sm:w-auto justify-center sm:justify-start order-2 sm:order-1">
                                 <input 
                                     type="date" 
                                     value={startDate} 
                                     onChange={(e) => setStartDate(e.target.value)}
-                                    className="bg-transparent text-[10px] text-white outline-none cursor-pointer transition [color-scheme:dark]"
+                                    className="bg-transparent text-[9px] text-white outline-none cursor-pointer transition [color-scheme:dark] px-1 min-w-[90px]"
                                 />
-                                <span className="text-white text-[10px] font-bold">até</span>
+                                <span className="text-white text-[9px] font-bold opacity-60">até</span>
                                 <input 
                                     type="date" 
                                     value={endDate} 
                                     onChange={(e) => setEndDate(e.target.value)}
-                                    className="bg-transparent text-[10px] text-white outline-none cursor-pointer transition [color-scheme:dark]"
+                                    className="bg-transparent text-[9px] text-white outline-none cursor-pointer transition [color-scheme:dark] px-1 min-w-[90px]"
                                 />
                                 {(startDate || endDate) && (
                                     <button 
                                         onClick={() => { setStartDate(''); setEndDate(''); }}
                                         className="ml-1 p-1 text-white hover:text-red-400 transition"
                                     >
-                                        <X size={14} />
+                                        <X size={12} />
                                     </button>
                                 )}
                             </div>
 
-                                {isAdmin && (
-                                    <>
-                                        <button 
-                                            onClick={handleSyncFunnel}
-                                            disabled={isSyncing}
-                                            className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all text-[10px] font-black uppercase tracking-widest ${
-                                                isSyncing 
-                                                ? 'bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed' 
-                                                : 'bg-neon-blue/10 border-neon-blue/30 text-neon-blue hover:bg-neon-blue hover:text-white shadow-[0_0_15px_rgba(0,243,255,0.1)]'
-                                            }`}
-                                        >
-                                            <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''}/>
-                                            {isSyncing ? 'Sincronizando...' : 'Sincronizar CRM'}
-                                        </button>
-                                        <button 
-                                            onClick={() => setShowFunnelSettings(true)}
-                                            className="p-2 bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-slate-700 transition-all"
-                                            title="Configurações do Funil"
-                                        >
-                                            <Settings size={20}/>
-                                        </button>
-                                    </>
-                                )}
+                                <div className="flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-end order-1 sm:order-2">
+                                    {isAdmin && (
+                                        <>
+                                            <button 
+                                                onClick={handleSyncFunnel}
+                                                disabled={isSyncing}
+                                                className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-xl border transition-all text-[10px] font-black uppercase tracking-widest ${
+                                                    isSyncing 
+                                                    ? 'bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed' 
+                                                    : 'bg-neon-blue/10 border-neon-blue/30 text-neon-blue hover:bg-neon-blue hover:text-white shadow-[0_0_15px_rgba(0,243,255,0.1)]'
+                                                }`}
+                                            >
+                                                <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''}/>
+                                                <span className="hidden sm:inline">{isSyncing ? 'Sincronizando...' : 'Sincronizar CRM'}</span>
+                                                <span className="sm:hidden">{isSyncing ? 'Sincronizando...' : 'Sincronizar'}</span>
+                                            </button>
+                                            <button 
+                                                onClick={() => setShowFunnelSettings(true)}
+                                                className="p-2 bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-slate-700 transition-all"
+                                                title="Configurações do Funil"
+                                            >
+                                                <Settings size={20}/>
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
                             </div>
                         <div className="flex gap-4 flex-1 overflow-x-auto pb-4 custom-scrollbar">
                         {funnelStages.map(stage => {
