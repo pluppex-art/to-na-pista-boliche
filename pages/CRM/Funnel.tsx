@@ -5,7 +5,7 @@ import { Client, Reservation, FunnelStageConfig, User, UserRole, ReservationStat
 import { 
     Loader2, Settings, Crown, Star, MessageCircle, MoreHorizontal, 
     RefreshCw, Trash2, Plus, ChevronUp, ChevronDown, TrendingUp, 
-    TrendingDown, Target, Users, Award, Activity, BarChart3, PieChart 
+    TrendingDown, Target, Users, Award, Activity, BarChart3, PieChart, X
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../services/supabaseClient';
@@ -41,6 +41,9 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
   const [editForm, setEditForm] = useState<Partial<Client>>({});
   const [isUpdatingStage, setIsUpdatingStage] = useState(false);
   const [showFunnelSettings, setShowFunnelSettings] = useState(false);
+
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
 
   useEffect(() => {
     const stored = localStorage.getItem('tonapista_auth');
@@ -296,7 +299,26 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
     const grouped: Record<string, Client[]> = {};
     funnelStages.forEach(s => grouped[s.nome] = []);
 
-    clients.forEach(client => {
+    const filtered = clients.filter(c => {
+        const dateToFilter = c.createdAt;
+        if (!dateToFilter) return true;
+        
+        const clientDate = new Date(dateToFilter).getTime();
+        
+        if (startDate) {
+            const start = new Date(startDate + 'T00:00:00').getTime();
+            if (clientDate < start) return false;
+        }
+        
+        if (endDate) {
+            const end = new Date(endDate + 'T23:59:59').getTime();
+            if (clientDate > end) return false;
+        }
+        
+        return true;
+    });
+
+    filtered.forEach(client => {
         const stage = client.funnelStage || (funnelStages[0]?.nome);
         if (grouped[stage]) {
             grouped[stage].push(client);
@@ -307,7 +329,7 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
     });
 
     return grouped;
-  }, [clients, funnelStages]);
+  }, [clients, funnelStages, startDate, endDate]);
 
   const onDragStart = (e: React.DragEvent, clientId: string) => {
       e.dataTransfer.setData('clientId', clientId);
@@ -552,7 +574,32 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
                     </div>
                 ) : (
                     <div className="flex flex-col h-full overflow-hidden">
-                            <div className="flex justify-end items-center gap-3 mb-4 px-2">
+                            <div className="flex flex-wrap justify-end items-center gap-3 mb-4 px-2">
+                            <div className="flex items-center gap-2 bg-slate-900/50 p-1.5 rounded-xl border border-slate-800">
+                                <span className="text-[10px] font-bold text-white uppercase tracking-widest ml-2">Filtrar:</span>
+                                <input 
+                                    type="date" 
+                                    value={startDate} 
+                                    onChange={(e) => setStartDate(e.target.value)}
+                                    className="bg-transparent text-[10px] text-white outline-none cursor-pointer transition [color-scheme:dark]"
+                                />
+                                <span className="text-white text-[10px] font-bold">até</span>
+                                <input 
+                                    type="date" 
+                                    value={endDate} 
+                                    onChange={(e) => setEndDate(e.target.value)}
+                                    className="bg-transparent text-[10px] text-white outline-none cursor-pointer transition [color-scheme:dark]"
+                                />
+                                {(startDate || endDate) && (
+                                    <button 
+                                        onClick={() => { setStartDate(''); setEndDate(''); }}
+                                        className="ml-1 p-1 text-white hover:text-red-400 transition"
+                                    >
+                                        <X size={14} />
+                                    </button>
+                                )}
+                            </div>
+
                                 {isAdmin && (
                                     <>
                                         <button 
