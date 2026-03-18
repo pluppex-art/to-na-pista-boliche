@@ -171,7 +171,6 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
             "Agendado",
             "Revisão",
             "Pós Venda",
-            "Standby",
             "7 dias depois",
             "15 dias depois",
             "30 dias depois"
@@ -439,9 +438,8 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
                                 <button 
                                     onClick={handleSyncFunnel}
                                     disabled={isSyncing}
-                                    className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${isSyncing ? 'text-slate-500' : 'text-neon-blue hover:text-blue-400'} transition-colors`}
+                                    className={`text-[10px] font-black uppercase tracking-widest ${isSyncing ? 'text-slate-500' : 'text-neon-blue hover:text-blue-400'} transition-colors`}
                                 >
-                                    <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''}/>
                                     {isSyncing ? 'Sincronizando...' : 'Sincronizar CRM'}
                                 </button>
                                 <button 
