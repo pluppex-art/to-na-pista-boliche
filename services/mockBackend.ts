@@ -145,6 +145,42 @@ export const db = {
         isProspecting: i.is_prospecting,
         createdAt: i.created_at
       }));
+    },
+    getNpsMetrics: async () => {
+      const { data, error } = await supabase
+        .from('interacoes')
+        .select('nps_score')
+        .not('nps_score', 'is', null);
+      
+      if (error || !data) return { count: 0, average: 0 };
+      
+      const count = data.length;
+      const sum = data.reduce((acc, i) => acc + (i.nps_score || 0), 0);
+      const average = count > 0 ? sum / count : 0;
+      
+      return { count, average };
+    },
+    getRecentFeedbacks: async (limit: number = 10, offset: number = 0): Promise<Interaction[]> => {
+      const { data, error } = await supabase
+        .from('interacoes')
+        .select('*')
+        .not('nps_score', 'is', null)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+      
+      if (error) return [];
+      return (data || []).map((i: any) => ({
+        id: i.id,
+        clientId: i.client_id,
+        userId: i.user_id,
+        userName: i.user_name,
+        type: i.type,
+        content: i.content,
+        npsScore: i.nps_score,
+        satisfactionLevel: i.satisfaction_level,
+        isProspecting: i.is_prospecting,
+        createdAt: i.created_at
+      }));
     }
   },
 

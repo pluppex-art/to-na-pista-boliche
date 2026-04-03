@@ -84,11 +84,8 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
         : 100;
 
     // 2. NPS Geral
-    const interactionsWithNps = interactions.filter(i => i.npsScore !== undefined && i.npsScore !== null);
-    const avgNps = interactionsWithNps.length > 0 
-        ? interactionsWithNps.reduce((acc, i) => acc + (i.npsScore || 0), 0) / interactionsWithNps.length 
-        : 0;
-    const npsCount = interactionsWithNps.length;
+    const avgNps = serverNpsMetrics.average;
+    const npsCount = serverNpsMetrics.count;
 
     // 3. Clientes Reativados
     const prospectingInteractions = interactions.filter(i => i.isProspecting);
@@ -149,8 +146,10 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
     }
   };
 
+  const [serverNpsMetrics, setServerNpsMetrics] = useState({ count: 0, average: 0 });
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
   const [visibleFeedbacksCount, setVisibleFeedbacksCount] = useState(10);
+  const [isLoadingMoreFeedbacks, setIsLoadingMoreFeedbacks] = useState(false);
 
   const showMore = (stageName: string) => {
     setVisibleCounts(prev => ({
@@ -163,12 +162,17 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
     setLoading(true);
     try {
         const { data: clientsData } = await db.clients.getAll(); 
-        const [reservationsData, stagesData, interactionsData] = await Promise.all([
+        const [reservationsData, stagesData, npsMetrics, recentInteractions] = await Promise.all([
             db.reservations.getAll(),
             db.funnelStages.getAll(),
-            db.interactions.getAll()
+            db.interactions.getNpsMetrics(),
+            db.interactions.getRecentFeedbacks(10, 0)
         ]);
         
+        setServerNpsMetrics(npsMetrics);
+        setInteractions(recentInteractions);
+        setVisibleFeedbacksCount(recentInteractions.length);
+
         let finalStages = stagesData;
         const requestedStages = [
             "Novo",
@@ -202,7 +206,6 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
 
         setClients(clientsData);
         setReservations(reservationsData);
-        setInteractions(interactionsData);
         setFunnelStages(finalStages.sort((a, b) => a.ordem - b.ordem));
 
         const metrics: Record<string, { count: number, tier: ClientTier }> = {};
@@ -227,6 +230,21 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
     } 
     finally { 
         setLoading(false);
+    }
+  };
+
+  const loadMoreFeedbacks = async () => {
+    setIsLoadingMoreFeedbacks(true);
+    try {
+        const nextOffset = interactions.length;
+        const more = await db.interactions.getRecentFeedbacks(10, nextOffset);
+        if (more.length > 0) {
+            setInteractions(prev => [...prev, ...more]);
+        }
+    } catch (e) {
+        console.error("Erro ao carregar mais feedbacks:", e);
+    } finally {
+        setIsLoadingMoreFeedbacks(false);
     }
   };
 
@@ -478,12 +496,9 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {interactions.filter(i => i.npsScore !== undefined && i.npsScore !== null).length > 0 ? (
+                {interactions.length > 0 ? (
                     <>
                         {interactions
-                            .filter(i => i.npsScore !== undefined && i.npsScore !== null)
-                            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                            .slice(0, visibleFeedbacksCount)
                             .map(feedback => {
                                 const client = clients.find(c => c.id === feedback.clientId);
                                 const clientReservations = reservations.filter(r => r.clientId === feedback.clientId && r.status !== ReservationStatus.CANCELADA);
@@ -540,13 +555,14 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
                                 );
                             })}
                         
-                        {interactions.filter(i => i.npsScore !== undefined && i.npsScore !== null).length > visibleFeedbacksCount && (
+                        {performanceMetrics.npsCount > interactions.length && (
                             <div className="col-span-full flex justify-center mt-6">
                                 <button 
-                                    onClick={() => setVisibleFeedbacksCount(prev => prev + 10)}
-                                    className="bg-slate-900 border border-slate-800 px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white hover:border-neon-orange/30 transition-all shadow-lg"
+                                    onClick={loadMoreFeedbacks}
+                                    disabled={isLoadingMoreFeedbacks}
+                                    className="bg-slate-900 border border-slate-800 px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white hover:border-neon-orange/30 transition-all shadow-lg disabled:opacity-50"
                                 >
-                                    Carregar Mais Feedbacks
+                                    {isLoadingMoreFeedbacks ? 'Carregando...' : 'Carregar Mais Feedbacks'}
                                 </button>
                             </div>
                         )}
