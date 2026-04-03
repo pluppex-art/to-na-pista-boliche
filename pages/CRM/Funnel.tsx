@@ -84,8 +84,11 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
         : 100;
 
     // 2. NPS Geral
-    const avgNps = serverNpsMetrics.average;
-    const npsCount = serverNpsMetrics.count;
+    const interactionsWithNps = interactions.filter(i => i.npsScore !== undefined && i.npsScore !== null);
+    const avgNps = interactionsWithNps.length > 0 
+        ? interactionsWithNps.reduce((acc, i) => acc + (i.npsScore || 0), 0) / interactionsWithNps.length 
+        : 0;
+    const npsCount = interactionsWithNps.length;
 
     // 3. Clientes Reativados
     const prospectingInteractions = interactions.filter(i => i.isProspecting);
@@ -146,10 +149,7 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
     }
   };
 
-  const [serverNpsMetrics, setServerNpsMetrics] = useState({ count: 0, average: 0 });
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
-  const [visibleFeedbacksCount, setVisibleFeedbacksCount] = useState(10);
-  const [isLoadingMoreFeedbacks, setIsLoadingMoreFeedbacks] = useState(false);
 
   const showMore = (stageName: string) => {
     setVisibleCounts(prev => ({
@@ -162,17 +162,12 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
     setLoading(true);
     try {
         const { data: clientsData } = await db.clients.getAll(); 
-        const [reservationsData, stagesData, npsMetrics, recentInteractions] = await Promise.all([
+        const [reservationsData, stagesData, interactionsData] = await Promise.all([
             db.reservations.getAll(),
             db.funnelStages.getAll(),
-            db.interactions.getNpsMetrics(),
-            db.interactions.getRecentFeedbacks(10, 0)
+            db.interactions.getAll()
         ]);
         
-        setServerNpsMetrics(npsMetrics);
-        setInteractions(recentInteractions);
-        setVisibleFeedbacksCount(recentInteractions.length);
-
         let finalStages = stagesData;
         const requestedStages = [
             "Novo",
@@ -206,6 +201,7 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
 
         setClients(clientsData);
         setReservations(reservationsData);
+        setInteractions(interactionsData);
         setFunnelStages(finalStages.sort((a, b) => a.ordem - b.ordem));
 
         const metrics: Record<string, { count: number, tier: ClientTier }> = {};
@@ -230,21 +226,6 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
     } 
     finally { 
         setLoading(false);
-    }
-  };
-
-  const loadMoreFeedbacks = async () => {
-    setIsLoadingMoreFeedbacks(true);
-    try {
-        const nextOffset = interactions.length;
-        const more = await db.interactions.getRecentFeedbacks(10, nextOffset);
-        if (more.length > 0) {
-            setInteractions(prev => [...prev, ...more]);
-        }
-    } catch (e) {
-        console.error("Erro ao carregar mais feedbacks:", e);
-    } finally {
-        setIsLoadingMoreFeedbacks(false);
     }
   };
 
@@ -496,77 +477,65 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {interactions.length > 0 ? (
-                    <>
-                        {interactions
-                            .map(feedback => {
-                                const client = clients.find(c => c.id === feedback.clientId);
-                                const clientReservations = reservations.filter(r => r.clientId === feedback.clientId && r.status !== ReservationStatus.CANCELADA);
-                                const lastVisit = clientReservations.length > 0 
-                                    ? new Date(clientReservations.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0].date)
-                                    : null;
+                {interactions.filter(i => i.npsScore !== undefined && i.npsScore !== null).length > 0 ? (
+                    interactions
+                        .filter(i => i.npsScore !== undefined && i.npsScore !== null)
+                        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                        .map(feedback => {
+                            const client = clients.find(c => c.id === feedback.clientId);
+                            const clientReservations = reservations.filter(r => r.clientId === feedback.clientId && r.status !== ReservationStatus.CANCELADA);
+                            const lastVisit = clientReservations.length > 0 
+                                ? new Date(clientReservations.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0].date)
+                                : null;
 
-                                return (
-                                    <div key={feedback.id} className="bg-slate-900/40 border border-slate-800/60 p-5 rounded-3xl hover:border-neon-orange/20 transition-all group">
-                                        <div className="flex justify-between items-start mb-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 bg-slate-800 rounded-xl flex items-center justify-center text-slate-400 font-bold border border-slate-700">
-                                                    {client?.name?.charAt(0) || '?'}
-                                                </div>
-                                                <div>
-                                                    <h4 className="text-sm font-bold text-white leading-tight">{client?.name || 'Cliente Desconhecido'}</h4>
-                                                    <p className="text-[10px] text-slate-500 font-medium">
-                                                        Última visita: {lastVisit ? lastVisit.toLocaleDateString('pt-BR') : 'N/A'}
-                                                    </p>
-                                                </div>
+                            return (
+                                <div key={feedback.id} className="bg-slate-900/40 border border-slate-800/60 p-5 rounded-3xl hover:border-neon-orange/20 transition-all group">
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 bg-slate-800 rounded-xl flex items-center justify-center text-slate-400 font-bold border border-slate-700">
+                                                {client?.name?.charAt(0) || '?'}
                                             </div>
-                                            <div className={`px-2 py-1 rounded-lg text-[10px] font-black border ${
-                                                (feedback.npsScore || 0) >= 8 ? 'bg-green-500/10 text-green-400 border-green-500/20' :
-                                                (feedback.npsScore || 0) >= 6 ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
-                                                'bg-red-500/10 text-red-400 border-red-500/20'
-                                            }`}>
-                                                NPS {(feedback.npsScore || 0).toFixed(0)}
+                                            <div>
+                                                <h4 className="text-sm font-bold text-white leading-tight">{client?.name || 'Cliente Desconhecido'}</h4>
+                                                <p className="text-[10px] text-slate-500 font-medium">
+                                                    Última visita: {lastVisit ? lastVisit.toLocaleDateString('pt-BR') : 'N/A'}
+                                                </p>
                                             </div>
                                         </div>
-                                        
-                                        <div className="bg-slate-950/40 p-3 rounded-2xl border border-slate-800/50 mb-3">
-                                            <p className="text-xs text-slate-300 italic leading-relaxed">
-                                                "{feedback.content || 'Sem observações.'}"
-                                            </p>
-                                        </div>
-
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-1.5">
-                                                <div className={`w-2 h-2 rounded-full ${
-                                                    feedback.satisfactionLevel === 'EXCELENTE' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' :
-                                                    feedback.satisfactionLevel === 'BOM' ? 'bg-blue-500' :
-                                                    feedback.satisfactionLevel === 'NEUTRO' ? 'bg-yellow-500' :
-                                                    'bg-red-500'
-                                                }`} />
-                                                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
-                                                    {feedback.satisfactionLevel || 'NÃO INFORMADO'}
-                                                </span>
-                                            </div>
-                                            <span className="text-[8px] font-bold text-slate-600 uppercase tracking-tighter">
-                                                {new Date(feedback.createdAt).toLocaleDateString('pt-BR')}
-                                            </span>
+                                        <div className={`px-2 py-1 rounded-lg text-[10px] font-black border ${
+                                            (feedback.npsScore || 0) >= 8 ? 'bg-green-500/10 text-green-400 border-green-500/20' :
+                                            (feedback.npsScore || 0) >= 6 ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
+                                            'bg-red-500/10 text-red-400 border-red-500/20'
+                                        }`}>
+                                            NPS {(feedback.npsScore || 0).toFixed(0)}
                                         </div>
                                     </div>
-                                );
-                            })}
-                        
-                        {performanceMetrics.npsCount > interactions.length && (
-                            <div className="col-span-full flex justify-center mt-6">
-                                <button 
-                                    onClick={loadMoreFeedbacks}
-                                    disabled={isLoadingMoreFeedbacks}
-                                    className="bg-slate-900 border border-slate-800 px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white hover:border-neon-orange/30 transition-all shadow-lg disabled:opacity-50"
-                                >
-                                    {isLoadingMoreFeedbacks ? 'Carregando...' : 'Carregar Mais Feedbacks'}
-                                </button>
-                            </div>
-                        )}
-                    </>
+                                    
+                                    <div className="bg-slate-950/40 p-3 rounded-2xl border border-slate-800/50 mb-3">
+                                        <p className="text-xs text-slate-300 italic leading-relaxed">
+                                            "{feedback.content || 'Sem observações.'}"
+                                        </p>
+                                    </div>
+
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-1.5">
+                                            <div className={`w-2 h-2 rounded-full ${
+                                                feedback.satisfactionLevel === 'EXCELENTE' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' :
+                                                feedback.satisfactionLevel === 'BOM' ? 'bg-blue-500' :
+                                                feedback.satisfactionLevel === 'NEUTRO' ? 'bg-yellow-500' :
+                                                'bg-red-500'
+                                            }`} />
+                                            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                                                {feedback.satisfactionLevel || 'NÃO INFORMADO'}
+                                            </span>
+                                        </div>
+                                        <span className="text-[8px] font-bold text-slate-600 uppercase tracking-tighter">
+                                            {new Date(feedback.createdAt).toLocaleDateString('pt-BR')}
+                                        </span>
+                                    </div>
+                                </div>
+                            );
+                        })
                 ) : (
                     <div className="col-span-full py-12 flex flex-col items-center justify-center bg-slate-900/20 border border-dashed border-slate-800 rounded-3xl">
                         <MessageCircle size={48} className="text-slate-700 mb-4" />
