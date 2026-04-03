@@ -43,43 +43,28 @@ export const EngagementFunnelChart: React.FC<EngagementFunnelProps> = ({ data })
         </div>
       </div>
 
-      <div className="flex-1 w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart
-            layout="vertical"
-            data={funnelData}
-            margin={{ top: 5, right: 100, left: 40, bottom: 5 }}
-          >
-            <XAxis type="number" hide />
-            <YAxis 
-              dataKey="name" 
-              type="category" 
-              width={120} 
-              axisLine={false} 
-              tickLine={false} 
-              tick={{ fill: '#94a3b8', fontWeight: 'bold', fontSize: 11 }}
-            />
-            <Tooltip 
-              cursor={{fill: 'rgba(255,255,255,0.05)'}}
-              contentStyle={tooltipStyle}
-              itemStyle={{color: '#fff', fontWeight: 'bold'}}
-              formatter={(val: number) => [val, 'Usuários']}
-            />
-            <Bar dataKey="value" radius={[0, 8, 8, 0]} barSize={45}>
-              {funnelData.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.fill} />
-              ))}
-              <LabelList 
-                dataKey="label" 
-                position="right" 
-                style={{ fill: '#fff', fontWeight: 'black', fontSize: 12, textShadow: '0 2px 4px rgba(0,0,0,0.5)' }} 
+      <div className="flex-1 flex flex-col justify-between py-2">
+        {funnelData.map((item, index) => (
+          <div key={index} className="space-y-2">
+            <div className="flex justify-between items-end px-1">
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{item.name}</span>
+              <span className="text-xs font-black text-white">{item.label}</span>
+            </div>
+            <div className="h-3 w-full bg-slate-900/50 rounded-full overflow-hidden border border-slate-700/30">
+              <div 
+                className="h-full rounded-full transition-all duration-1000 ease-out shadow-[0_0_15px_rgba(0,0,0,0.2)]"
+                style={{ 
+                  width: `${(item.value / data.visits) * 100}%`,
+                  backgroundColor: item.fill,
+                  boxShadow: `0 0 20px ${item.fill}33`
+                }}
               />
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+            </div>
+          </div>
+        ))}
       </div>
       
-      <div className="mt-6 flex justify-between items-center px-4 py-3 bg-slate-900/40 rounded-2xl border border-slate-700/50">
+      <div className="mt-8 flex justify-between items-center px-4 py-3 bg-slate-900/40 rounded-2xl border border-slate-700/50">
         <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase">
           <Users size={14}/> <span>Tráfego baseado em IDs Anônimos persistentes</span>
         </div>

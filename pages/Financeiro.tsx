@@ -15,6 +15,7 @@ import { RevenueByOriginChart } from '../components/Financeiro/RevenueByOriginCh
 import { RevenueByMethodChart } from '../components/Financeiro/RevenueByMethodChart';
 import { RevenueByTypeChart } from '../components/Financeiro/RevenueByTypeChart';
 import { EngagementFunnelChart } from '../components/Financeiro/EngagementFunnelChart';
+import { SalesFunnelChart } from '../components/Financeiro/SalesFunnelChart';
 
 const DATE_PRESETS = [
     { id: 'HOJE', label: 'HOJE' },
@@ -32,6 +33,8 @@ const Financeiro: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [backgroundLoading, setBackgroundLoading] = useState(false);
   const [rawReservations, setRawReservations] = useState<Reservation[]>([]);
+  const [historicalRevenue, setHistoricalRevenue] = useState<any[]>([]);
+  const [allClients, setAllClients] = useState<any[]>([]);
   const [analyticsData, setAnalyticsData] = useState({ visits: 0, clicks: 0, bookingStarts: 0, conversions: 0 });
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [currentPreset, setCurrentPreset] = useState<string>('MONTH');
@@ -68,12 +71,14 @@ const Financeiro: React.FC = () => {
         const startTimestamp = `${dateRange.start}T00:00:00`;
         const endTimestamp = `${dateRange.end}T23:59:59`;
 
-        const [resData, usersData, visitsCount, clicksCount] = await Promise.all([
+        const [resData, usersData, visitsCount, clicksCount, histData, clientsData] = await Promise.all([
             db.reservations.getByDateRange(dateRange.start, dateRange.end),
             db.users.getAll(),
             // Agregações de Analytics
             supabase.from('analytics_events').select('*', { count: 'exact', head: true }).eq('event_name', 'visit_home').gte('created_at', startTimestamp).lte('created_at', endTimestamp),
             supabase.from('analytics_events').select('*', { count: 'exact', head: true }).eq('event_name', 'click_reserve_cta').gte('created_at', startTimestamp).lte('created_at', endTimestamp),
+            db.historicalRevenue.getAll(),
+            db.clients.getAll()
         ]);
 
         // NOVA LÓGICA DO FUNIL:
@@ -85,6 +90,8 @@ const Financeiro: React.FC = () => {
 
         setRawReservations(resData || []);
         setAllUsers(usersData || []);
+        setHistoricalRevenue(histData || []);
+        setAllClients(clientsData.data || []);
         setAnalyticsData({
             visits: visitsCount.count || 0,
             clicks: clicksCount.count || 0,
@@ -162,13 +169,44 @@ const Financeiro: React.FC = () => {
     const cancelledCount = cancelledLossReservations.length;
     const totalMeaningfulReservations = rawReservations.length || 1;
     
+    // Novas métricas para comparação e projeção
+    const start = new Date(dateRange.start + 'T00:00:00');
+    const end = new Date(dateRange.end + 'T23:59:59');
+    const currentMonth = start.getMonth();
+    const currentYear = start.getFullYear();
+    
+    // Buscar faturamento do ano anterior para o mesmo mês (se for visão mensal)
+    const prevYear = currentYear - 1;
+    const historicalMatch = historicalRevenue.find(h => {
+        const hMes = h.mes || h.Mes || h.month || h.Month;
+        const hAno = h.ano || h.Ano || h.year || h.Year;
+        return Number(hMes) === (currentMonth + 1) && Number(hAno) === prevYear;
+    });
+    const previousYearRev = historicalMatch ? Number(historicalMatch.valor_arrecadado || historicalMatch.valor || 0) : 0;
+    
+    // Projeção Final (se for o mês atual)
+    let revenueProjection = totalRev;
+    const isCurrentMonth = today.getMonth() === currentMonth && today.getFullYear() === currentYear;
+    if (isCurrentMonth && effectiveDays > 0) {
+        const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+        // Projeção linear baseada nos dias úteis que já passaram
+        revenueProjection = (totalRev / effectiveDays) * daysInMonth; 
+    }
+
+    const revenueDiff = totalRev - previousYearRev;
+    const pluppexCommission = revenueDiff > 0 ? revenueDiff * 0.1 : 0;
+
     return { 
         totalRev, pendingRev, totalHrs, 
         avgTicket: totalHrs > 0 ? totalRev / totalHrs : 0, 
         avgDaily: totalHrs / effectiveDays,
-        cancelRate: (cancelledCount / totalMeaningfulReservations) * 100 
+        cancelRate: (cancelledCount / totalMeaningfulReservations) * 100,
+        previousYearRev,
+        revenueDiff,
+        revenueProjection,
+        pluppexCommission
     };
-  }, [realizedReservations, rawReservations, dateRange, settings]);
+  }, [realizedReservations, rawReservations, dateRange, settings, historicalRevenue]);
 
   const occupancyStats = useMemo(() => {
     if (!dateRange.start || !dateRange.end || !settings) return { totalCapacity: 0, occupiedTotal: 0, percentage: 0, byDay: [], byHour: [] };
@@ -225,6 +263,34 @@ const Financeiro: React.FC = () => {
     });
     return { trend: Array.from(trendMap.entries()).map(([date, value]) => ({ date, value })).sort((a,b) => a.date.localeCompare(b.date)), origin: Array.from(originMap.entries()).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value), method: Array.from(methodMap.entries()).map(([name, value]) => ({ name, value })), type: Array.from(typeMap.entries()).map(([name, value]) => ({ name, value })) };
   }, [realizedReservations, allUsers]);
+
+  const salesFunnelData = useMemo(() => {
+    const order = [
+        'Novo', 
+        'Interesse', 
+        'Agendado', 
+        'Revisão', 
+        'Pós Venda', 
+        '7 dias depois', 
+        '15 dias depois', 
+        '30 dias depois'
+    ];
+    
+    const stagesMap = new Map<string, number>();
+    // Inicializa o mapa com as etapas na ordem correta para garantir que todas apareçam
+    order.forEach(stage => stagesMap.set(stage, 0));
+
+    allClients.forEach(c => {
+        const stage = c.funnelStage || 'Novo';
+        // Normalização básica para bater com o array de ordem
+        const normalizedStage = order.find(o => o.toLowerCase() === stage.toLowerCase()) || stage;
+        stagesMap.set(normalizedStage, (stagesMap.get(normalizedStage) || 0) + 1);
+    });
+
+    return Array.from(stagesMap.entries())
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
+  }, [allClients]);
 
   const toggleFullScreen = () => {
     if (!isFullScreen) {
@@ -299,7 +365,20 @@ const Financeiro: React.FC = () => {
         </div>
 
         <div className="space-y-12 animate-fade-in relative">
-            <SummaryCards totalRevenue={metrics.totalRev} pendingRevenue={metrics.pendingRev} avgTicket={metrics.avgTicket} avgDaily={metrics.avgDaily} totalHours={metrics.totalHrs} cancellationRate={metrics.cancelRate} onDrillDown={setDrillDownType} />
+            <SummaryCards 
+                totalRevenue={metrics.totalRev} 
+                pendingRevenue={metrics.pendingRev} 
+                avgTicket={metrics.avgTicket} 
+                avgDaily={metrics.avgDaily} 
+                totalHours={metrics.totalHrs} 
+                cancellationRate={metrics.cancelRate} 
+                onDrillDown={setDrillDownType}
+                previousYearRev={metrics.previousYearRev}
+                revenueDiff={metrics.revenueDiff}
+                revenueProjection={metrics.revenueProjection}
+                pluppexCommission={metrics.pluppexCommission}
+                maxCapacityHours={occupancyStats.totalCapacity}
+            />
             
             <OccupancyCharts stats={occupancyStats} />
             
@@ -309,9 +388,12 @@ const Financeiro: React.FC = () => {
                 <div className="lg:col-span-6"><RevenueByTypeChart data={financialData.type} typeColors={{'Jogo normal': '#3b82f6', 'Aniversário': '#f97316', 'Empresa': '#a855f7', 'Família': '#22c55e'}} fallbackColors={['#22c55e', '#3b82f6']} /></div>
             </div>
 
-            {/* Funil e Evolução por último */}
+            {/* Funis e Evolução por último */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 <EngagementFunnelChart data={analyticsData} />
+                <SalesFunnelChart data={salesFunnelData} />
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-1 gap-8">
                 <RevenueEvolutionChart data={financialData.trend} />
             </div>
         </div>
@@ -326,12 +408,62 @@ const Financeiro: React.FC = () => {
                     <div className="p-8 space-y-8 max-h-[70vh] overflow-y-auto custom-scrollbar">
                         <div className="space-y-3">
                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Atalhos Rápidos</label>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            <select 
+                                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3.5 text-white font-bold text-xs outline-none focus:border-neon-blue transition-colors appearance-none cursor-pointer"
+                                value={currentPreset}
+                                onChange={(e) => handlePresetChange(e.target.value)}
+                            >
+                                <option value="CUSTOM" disabled>SELECIONE UM ATALHO</option>
                                 {DATE_PRESETS.map(preset => (
-                                    <button key={preset.id} onClick={() => handlePresetChange(preset.id)} className={`p-3 rounded-xl text-[10px] font-black uppercase transition-all border ${currentPreset === preset.id ? 'bg-neon-blue border-neon-blue text-white shadow-lg' : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-500'}`}>{preset.label}</button>
+                                    <option key={preset.id} value={preset.id}>{preset.label}</option>
                                 ))}
+                            </select>
+                        </div>
+
+                        <div className="space-y-3 pt-6 border-t border-slate-700/50">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Selecionar Mês/Ano</label>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-1.5">
+                                    <label className="text-[9px] font-bold text-slate-600 uppercase ml-1">Mês:</label>
+                                    <select 
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3.5 text-white font-bold text-xs outline-none focus:border-neon-blue transition-colors"
+                                        value={new Date(dateRange.start + 'T00:00:00').getMonth()}
+                                        onChange={(e) => {
+                                            const month = parseInt(e.target.value);
+                                            const year = new Date(dateRange.start + 'T00:00:00').getFullYear();
+                                            const start = new Date(year, month, 1);
+                                            const end = new Date(year, month + 1, 0);
+                                            setDateRange({ start: toLocalISO(start), end: toLocalISO(end) });
+                                            setCurrentPreset('CUSTOM');
+                                        }}
+                                    >
+                                        {['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'].map((m, i) => (
+                                            <option key={i} value={i}>{m}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label className="text-[9px] font-bold text-slate-600 uppercase ml-1">Ano:</label>
+                                    <select 
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3.5 text-white font-bold text-xs outline-none focus:border-neon-blue transition-colors"
+                                        value={new Date(dateRange.start + 'T00:00:00').getFullYear()}
+                                        onChange={(e) => {
+                                            const year = parseInt(e.target.value);
+                                            const month = new Date(dateRange.start + 'T00:00:00').getMonth();
+                                            const start = new Date(year, month, 1);
+                                            const end = new Date(year, month + 1, 0);
+                                            setDateRange({ start: toLocalISO(start), end: toLocalISO(end) });
+                                            setCurrentPreset('CUSTOM');
+                                        }}
+                                    >
+                                        {[2024, 2025, 2026, 2027].map(y => (
+                                            <option key={y} value={y}>{y}</option>
+                                        ))}
+                                    </select>
+                                </div>
                             </div>
                         </div>
+
                         <div className="space-y-4 pt-6 border-t border-slate-700/50">
                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Intervalo Personalizado</label>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

@@ -121,78 +121,7 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
         }
     });
 
-    // 4. Comparativo de Faturamento (Mês Selecionado vs Ano Anterior)
-    const today = new Date();
-    const isCurrentMonth = today.getMonth() === currentMonth && today.getFullYear() === currentYear;
-    const currentDay = isCurrentMonth ? today.getDate() : new Date(currentYear, currentMonth + 1, 0).getDate();
-    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-
-    // Tenta encontrar faturamento histórico para o mês/ano selecionado (ex: se selecionou 2025)
-    const currentHistoricalMatch = historicalRevenue.find(h => {
-        const hMes = h.mes || h.Mes || h.month || h.Month;
-        const hAno = h.ano || h.Ano || h.year || h.Year;
-        return Number(hMes) === (currentMonth + 1) && Number(hAno) === currentYear;
-    });
-    
-    let currentMonthRevenue = 0;
-    
-    if (currentHistoricalMatch) {
-        // Se existe no histórico, usamos o valor de lá (ex: Jan-Nov 2025)
-        const hValue = currentHistoricalMatch.valor_arrecadado || currentHistoricalMatch.Valor_Arrecadado || currentHistoricalMatch.valor || currentHistoricalMatch.amount;
-        currentMonthRevenue = Number(hValue);
-    } else {
-        // Caso contrário, calculamos das reservas atuais do sistema
-        const currentMonthReservations = reservations.filter(r => {
-            const dateParts = r.date.split('-');
-            if (dateParts.length !== 3) return false;
-            const y = parseInt(dateParts[0]);
-            const m = parseInt(dateParts[1]);
-            const isThisMonth = (m - 1) === currentMonth && y === currentYear;
-            const isRealized = r.status === ReservationStatus.CONFIRMADA || r.status === ReservationStatus.CHECK_IN;
-            const isPaid = r.paymentStatus === PaymentStatus.PAGO;
-            return isThisMonth && isRealized && isPaid;
-        });
-        currentMonthRevenue = currentMonthReservations.reduce((acc, r) => acc + r.totalValue, 0);
-    }
-
-    // Projeção: (Faturamento Atual / Dias Decorridos) * Total de Dias no Mês
-    // Se for um mês passado, a projeção é o próprio faturamento realizado
-    const elapsedDays = Math.max(1, currentDay);
-    const revenueProjection = isCurrentMonth 
-        ? (currentMonthRevenue / elapsedDays) * daysInMonth 
-        : currentMonthRevenue;
-
-    const prevYear = currentYear - 1;
-    const historicalMatch = historicalRevenue.find(h => {
-        const hMes = h.mes || h.Mes || h.month || h.Month;
-        const hAno = h.ano || h.Ano || h.year || h.Year;
-        return Number(hMes) === (currentMonth + 1) && Number(hAno) === prevYear;
-    });
-    
-    const hPrevValue = historicalMatch ? (historicalMatch.valor_arrecadado || historicalMatch.Valor_Arrecadado || historicalMatch.valor || historicalMatch.amount) : 0;
-    const previousYearRevenue = Number(hPrevValue);
-
-    const revenueGrowth = previousYearRevenue > 0 
-        ? ((currentMonthRevenue - previousYearRevenue) / previousYearRevenue) * 100 
-        : 100;
-    
-    const projectionGrowth = previousYearRevenue > 0
-        ? ((revenueProjection - previousYearRevenue) / previousYearRevenue) * 100
-        : 100;
-
-    // 5. Metas e Capacidade
-    let maxCapacityHours = 0;
-    for (let d = 1; d <= daysInMonth; d++) {
-        const date = new Date(currentYear, currentMonth, d);
-        const dayOfWeek = date.getDay(); // 0-6
-        const config = settings.businessHours[dayOfWeek];
-        if (config && config.isOpen) {
-            const startH = config.start;
-            const endH = config.end === 0 ? 24 : config.end;
-            maxCapacityHours += (endH - startH) * settings.activeLanes;
-        }
-    }
-
+    // 4. Metas e Capacidade
     const totalSoldHours = reservations.filter(r => {
         const dateParts = r.date.split('-');
         if (dateParts.length !== 3) return false;
@@ -201,32 +130,13 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
         return (m - 1) === currentMonth && y === currentYear && r.status !== ReservationStatus.CANCELADA;
     }).reduce((acc, r) => acc + (r.duration * r.laneCount), 0);
 
-    const capacityPercentage = maxCapacityHours > 0 ? (totalSoldHours / maxCapacityHours) * 100 : 0;
-    const goalPercentage = 70; // Meta de 70%
-    const goalHours = maxCapacityHours * (goalPercentage / 100);
-
-    // 6. Comissão Pluppex
-    const revenueDiff = currentMonthRevenue - previousYearRevenue;
-    const pluppexCommission = revenueDiff > 0 ? revenueDiff * 0.1 : 0;
-
     return {
         totalRecoveredValue,
         recoveryGrowth,
         avgNps,
         npsCount,
         reactivatedCount: reactivatedClients.size,
-        currentMonthRevenue,
-        previousYearRevenue,
-        revenueGrowth,
-        revenueProjection,
-        projectionGrowth,
-        revenueDiff,
-        pluppexCommission,
-        maxCapacityHours,
-        totalSoldHours,
-        capacityPercentage,
-        goalPercentage,
-        goalHours
+        totalSoldHours
     };
   }, [reservations, interactions, historicalRevenue, selectedMonth, selectedYear, settings]);
 
@@ -511,116 +421,7 @@ const Funnel: React.FC<FunnelProps> = ({ viewMode }) => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6 max-w-7xl mx-auto">
-            {/* KPI 0: Faturamento vs Ano Anterior */}
-            <div className="bg-slate-900/40 border border-slate-800/50 p-4 sm:p-6 rounded-2xl sm:rounded-[2rem] shadow-2xl relative overflow-hidden group hover:border-emerald-500/40 transition-all duration-500 backdrop-blur-sm min-h-[220px] sm:min-h-[240px] flex flex-col justify-between">
-              <div className="absolute -top-6 -right-6 p-8 opacity-[0.03] group-hover:opacity-[0.08] transition-all duration-700 rotate-12 group-hover:rotate-0">
-                <BarChart3 size={120} className="text-emerald-500" />
-              </div>
-              <div className="relative z-10 h-full flex flex-col">
-                <div className="flex items-center justify-between mb-3 sm:mb-6">
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <div className="w-9 h-9 sm:w-12 sm:h-12 bg-emerald-500/10 rounded-xl sm:rounded-2xl flex items-center justify-center border border-emerald-500/20 shadow-inner">
-                      <TrendingUp size={18} className="text-emerald-500 sm:size-6" />
-                    </div>
-                    <div>
-                      <h3 className="text-[8px] sm:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] sm:tracking-[0.25em]">Faturamento</h3>
-                      <p className="text-[9px] sm:text-[11px] font-bold text-emerald-500/80">Realizado</p>
-                    </div>
-                  </div>
-                  <div className={`flex items-center gap-1 text-[9px] sm:text-[11px] font-black px-2 sm:px-3 py-1 rounded-full border shadow-sm shrink-0 ${
-                    performanceMetrics.revenueGrowth >= 0 
-                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
-                    : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
-                  }`}>
-                    {performanceMetrics.revenueGrowth >= 0 ? <TrendingUp size={10} className="sm:size-3"/> : <TrendingDown size={10} className="sm:size-3"/>}
-                    {Math.abs(performanceMetrics.revenueGrowth).toFixed(1)}%
-                  </div>
-                </div>
-                
-                <div className="mb-3 sm:mb-6 flex-1">
-                  <span className="text-xl sm:text-2xl lg:text-3xl xl:text-4xl font-black text-white tracking-tighter block mb-1 leading-none">
-                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(performanceMetrics.currentMonthRevenue)}
-                  </span>
-                  <div className="flex flex-col gap-1 sm:gap-1.5 mt-2">
-                    <div className="flex items-center justify-between sm:justify-start sm:gap-2">
-                      <span className="text-[8px] sm:text-[10px] font-bold text-slate-500 uppercase tracking-wider shrink-0">vs Ano Anterior:</span>
-                      <span className="text-[9px] sm:text-[10px] font-black text-slate-300">
-                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(performanceMetrics.previousYearRevenue)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between sm:justify-start sm:gap-2">
-                      <span className="text-[8px] sm:text-[10px] font-bold text-slate-500 uppercase tracking-wider shrink-0">Diferença:</span>
-                      <span className={`text-[9px] sm:text-[10px] font-black ${performanceMetrics.revenueDiff >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {performanceMetrics.revenueDiff >= 0 ? '+' : ''}
-                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(performanceMetrics.revenueDiff)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="pt-3 sm:pt-6 border-t border-slate-800/80 mt-auto">
-                  <div className="flex items-center justify-between mb-1 sm:mb-2">
-                    <span className="text-[8px] sm:text-[10px] font-black text-slate-500 uppercase tracking-[0.15em] sm:tracking-[0.2em]">Projeção Final</span>
-                    <span className={`text-[8px] sm:text-[10px] font-black px-1.5 sm:px-2 py-0.5 rounded-md ${performanceMetrics.projectionGrowth >= 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
-                      {performanceMetrics.projectionGrowth >= 0 ? '+' : ''}{performanceMetrics.projectionGrowth.toFixed(1)}%
-                    </span>
-                  </div>
-                  <p className="text-lg sm:text-xl lg:text-2xl font-black text-white tracking-tight">
-                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(performanceMetrics.revenueProjection)}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* KPI 1: Comissão Pluppex */}
-            <div className="bg-slate-900/40 border border-slate-800/50 p-4 sm:p-6 rounded-2xl sm:rounded-[2rem] shadow-2xl relative overflow-hidden group hover:border-blue-500/40 transition-all duration-500 backdrop-blur-sm min-h-[220px] sm:min-h-[240px] flex flex-col justify-between">
-              <div className="absolute -top-6 -right-6 p-8 opacity-[0.03] group-hover:opacity-[0.08] transition-all duration-700 rotate-12 group-hover:rotate-0">
-                <HandCoins size={120} className="text-blue-500" />
-              </div>
-              <div className="relative z-10 h-full flex flex-col">
-                <div className="flex items-center justify-between mb-3 sm:mb-6">
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <div className="w-9 h-9 sm:w-12 sm:h-12 bg-blue-500/10 rounded-xl sm:rounded-2xl flex items-center justify-center border border-blue-500/20 shadow-inner">
-                      <HandCoins size={18} className="text-blue-500 sm:size-6" />
-                    </div>
-                    <div>
-                      <h3 className="text-[8px] sm:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] sm:tracking-[0.25em]">Comissão</h3>
-                      <p className="text-[9px] sm:text-[11px] font-bold text-blue-500/80">Pluppex</p>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="mb-3 sm:mb-6 flex-1">
-                  <span className="text-xl sm:text-2xl lg:text-3xl xl:text-4xl font-black text-white tracking-tighter block mb-1 leading-none">
-                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(performanceMetrics.pluppexCommission)}
-                  </span>
-                  <p className="text-[8px] sm:text-[10px] font-bold text-slate-500 uppercase tracking-wider leading-relaxed max-w-[140px] sm:max-w-[180px]">
-                    10% sobre o crescimento real vs ano anterior
-                  </p>
-                </div>
-
-                <div className="pt-3 sm:pt-6 border-t border-slate-800/80 mt-auto">
-                  <div className="flex items-center justify-between mb-1 sm:mb-2">
-                    <span className="text-[8px] sm:text-[10px] font-black text-slate-500 uppercase tracking-[0.15em] sm:tracking-[0.2em]">Meta Produtiva (+70%)</span>
-                    <span className={`text-[8px] sm:text-[10px] font-black ${performanceMetrics.capacityPercentage >= 70 ? 'text-emerald-500' : 'text-blue-400'}`}>
-                      {performanceMetrics.capacityPercentage.toFixed(1)}%
-                    </span>
-                  </div>
-                  <div className="w-full h-1.5 sm:h-2 bg-slate-800 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full transition-all duration-1000 ${performanceMetrics.capacityPercentage >= 70 ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-blue-500'}`}
-                      style={{ width: `${Math.min(100, performanceMetrics.capacityPercentage)}%` }}
-                    />
-                  </div>
-                  <div className="flex justify-between mt-1.5 sm:mt-2">
-                    <span className="text-[7px] sm:text-[9px] text-slate-600 font-bold uppercase tracking-tighter">Vendido: {performanceMetrics.totalSoldHours.toFixed(0)}h</span>
-                    <span className="text-[7px] sm:text-[9px] text-slate-600 font-bold uppercase tracking-tighter">Meta: {performanceMetrics.goalHours.toFixed(0)}h</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6 max-w-7xl mx-auto">
             {/* KPI 2: Carrinhos Recuperados */}
             <div className="bg-slate-900/40 border border-slate-800/50 p-4 sm:p-6 rounded-2xl sm:rounded-[2rem] shadow-2xl relative overflow-hidden group hover:border-blue-500/40 transition-all duration-500 backdrop-blur-sm min-h-[220px] sm:min-h-[240px] flex flex-col justify-between">
               <div className="absolute -top-6 -right-6 p-8 opacity-[0.03] group-hover:opacity-[0.08] transition-all duration-700 rotate-12 group-hover:rotate-0">
