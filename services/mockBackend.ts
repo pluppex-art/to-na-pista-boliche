@@ -148,6 +148,22 @@ export const db = {
     }
   },
 
+  historicalRevenue: {
+    getAll: async () => {
+      try {
+        const { data, error } = await supabase.from('faturamento_historico').select('*');
+        if (error) {
+          console.error("Erro ao buscar faturamento histórico:", error);
+          return [];
+        }
+        return data || [];
+      } catch (e) {
+        console.error("Erro inesperado ao buscar faturamento histórico:", e);
+        return [];
+      }
+    }
+  },
+
   audit: {
       log: async (userId: string, userName: string, actionType: string, details: string, entityId?: string) => {
           try {

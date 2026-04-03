@@ -14,10 +14,10 @@ interface EngagementFunnelProps {
 
 export const EngagementFunnelChart: React.FC<EngagementFunnelProps> = ({ data }) => {
   const funnelData = [
-    { name: 'Visitas (Site)', value: data.visits, fill: '#3b82f6', label: '100%' },
-    { name: 'Interesse (Botão)', value: data.clicks, fill: '#f97316', label: `${data.visits > 0 ? Math.round((data.clicks / data.visits) * 100) : 0}%` },
-    { name: 'Pré-Reserva (Site)', value: data.bookingStarts, fill: '#a855f7', label: `${data.clicks > 0 ? Math.round((data.bookingStarts / data.clicks) * 100) : 0}%` },
-    { name: 'Vendas Pagas', value: data.conversions, fill: '#22c55e', label: `${data.bookingStarts > 0 ? Math.round((data.conversions / data.bookingStarts) * 100) : 0}%` },
+    { name: 'Visitas (Site)', value: data.visits, fill: '#3b82f6', label: `${data.visits} (100%)` },
+    { name: 'Interesse (Botão)', value: data.clicks, fill: '#f97316', label: `${data.clicks} (${data.visits > 0 ? Math.round((data.clicks / data.visits) * 100) : 0}%)` },
+    { name: 'Pré-Reserva (Site)', value: data.bookingStarts, fill: '#a855f7', label: `${data.bookingStarts} (${data.clicks > 0 ? Math.round((data.bookingStarts / data.clicks) * 100) : 0}%)` },
+    { name: 'Vendas Pagas', value: data.conversions, fill: '#22c55e', label: `${data.conversions} (${data.bookingStarts > 0 ? Math.round((data.conversions / data.bookingStarts) * 100) : 0}%)` },
   ];
 
   const tooltipStyle = {
@@ -48,7 +48,7 @@ export const EngagementFunnelChart: React.FC<EngagementFunnelProps> = ({ data })
           <BarChart
             layout="vertical"
             data={funnelData}
-            margin={{ top: 5, right: 80, left: 40, bottom: 5 }}
+            margin={{ top: 5, right: 100, left: 40, bottom: 5 }}
           >
             <XAxis type="number" hide />
             <YAxis 

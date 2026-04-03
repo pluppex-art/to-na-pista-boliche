@@ -139,10 +139,25 @@ const Financeiro: React.FC = () => {
     const totalRev = realizedReservations.reduce((acc, r) => acc + r.totalValue, 0);
     const pendingRev = rawReservations.filter(r => r.status === ReservationStatus.PENDENTE || (r.status !== ReservationStatus.CANCELADA && r.paymentStatus !== PaymentStatus.PAGO)).reduce((acc, r) => acc + r.totalValue, 0);
     const totalHrs = realizedReservations.reduce((acc, r) => acc + (r.laneCount * r.duration), 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     const startDate = new Date(dateRange.start + 'T00:00:00');
     const endDate = new Date(dateRange.end + 'T00:00:00');
-    const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    
+    // Calcular dias úteis (abertos) no período que já passaram
+    let workingDaysCount = 0;
+    const calcEnd = endDate > today ? today : endDate;
+    
+    for (let d = new Date(startDate); d <= calcEnd; d.setDate(d.getDate() + 1)) {
+        const dayIdx = d.getDay();
+        const config = settings?.businessHours?.[dayIdx];
+        if (!config || config.isOpen) {
+            workingDaysCount++;
+        }
+    }
+    
+    const effectiveDays = Math.max(1, workingDaysCount);
+
     const cancelledLossReservations = rawReservations.filter(r => r.status === ReservationStatus.CANCELADA && (r.createdBy || r.paymentStatus === PaymentStatus.REEMBOLSADO));
     const cancelledCount = cancelledLossReservations.length;
     const totalMeaningfulReservations = rawReservations.length || 1;
@@ -150,10 +165,10 @@ const Financeiro: React.FC = () => {
     return { 
         totalRev, pendingRev, totalHrs, 
         avgTicket: totalHrs > 0 ? totalRev / totalHrs : 0, 
-        avgDaily: diffDays > 0 ? totalHrs / diffDays : 0,
+        avgDaily: totalHrs / effectiveDays,
         cancelRate: (cancelledCount / totalMeaningfulReservations) * 100 
     };
-  }, [realizedReservations, rawReservations, dateRange]);
+  }, [realizedReservations, rawReservations, dateRange, settings]);
 
   const occupancyStats = useMemo(() => {
     if (!dateRange.start || !dateRange.end || !settings) return { totalCapacity: 0, occupiedTotal: 0, percentage: 0, byDay: [], byHour: [] };
