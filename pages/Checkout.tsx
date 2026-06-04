@@ -8,15 +8,15 @@ import { CheckCircle, CreditCard, Loader2, ShieldCheck, Store, Lock, Hash, Arrow
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../services/supabaseClient';
 
-type PaymentMethodStaff = 'DINHEIRO' | 'PIX' | 'DEBITO' | 'CREDITO';
+type PaymentMethodStaff = 'DINHEIRO' | 'PIX' | 'DEBITO' | 'CREDITO' | 'CORTESIA';
 
-const METHODS: PaymentMethodStaff[] = ['DINHEIRO', 'PIX', 'DEBITO', 'CREDITO'];
+const METHODS: PaymentMethodStaff[] = ['DINHEIRO', 'PIX', 'DEBITO', 'CREDITO', 'CORTESIA'];
 
 const Checkout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);h
   
   const [staffMethod, setStaffMethod] = useState<PaymentMethodStaff>('DINHEIRO');
   const [isSplitPayment, setIsSplitPayment] = useState(false);
@@ -147,6 +147,7 @@ const Checkout: React.FC = () => {
         let finalMethod = 'PENDENTE';
         let isPayOnSite = false;
         let finalPaymentDetails: PaymentDetail[] = [];
+        let finalAmount = reservationData.totalValue;
 
         if (mode === 'STAFF_CONFIRM' || mode === 'STAFF_COMANDA_PAID') { 
             finalStatus = ReservationStatus.CONFIRMADA; 
@@ -157,7 +158,10 @@ const Checkout: React.FC = () => {
                 finalPaymentDetails = splitDetails;
             } else {
                 finalMethod = mode === 'STAFF_COMANDA_PAID' ? 'COMANDA' : staffMethod;
-                finalPaymentDetails = [{ method: finalMethod, amount: reservationData.totalValue }];
+                if (finalMethod === 'CORTESIA') {
+                    finalAmount = 0;
+                }
+                finalPaymentDetails = [{ method: finalMethod, amount: finalAmount }];
             }
         } else if (mode === 'STAFF_LATER') { 
             isPayOnSite = true;
@@ -184,7 +188,8 @@ const Checkout: React.FC = () => {
                          paymentMethod: finalMethod,
                          paymentDetails: finalPaymentDetails,
                          payOnSite: isPayOnSite, 
-                         comandaId: comandaInput || existingRes.comandaId
+                         comandaId: comandaInput || existingRes.comandaId,
+                         totalValue: finalAmount
                      }, currentUser?.id);
                      currentTrackedIds.push(id);
                      if (!firstReservationId) firstReservationId = id;
@@ -201,7 +206,7 @@ const Checkout: React.FC = () => {
                 peopleCount: reservationData.people, 
                 laneCount: reservationData.lanes, 
                 duration: reservationData.duration,
-                totalValue: reservationData.totalValue, 
+                totalValue: finalAmount, 
                 eventType: reservationData.type as EventType, 
                 status: finalStatus,
                 paymentStatus: paymentStatus,
@@ -259,6 +264,9 @@ const Checkout: React.FC = () => {
     );
   }
 
+  const methodsToShow = currentUser?.role === 'ADMIN' ? METHODS : METHODS.filter(m => m !== 'CORTESIA');
+  const displayTotalValue = (!isSplitPayment && staffMethod === 'CORTESIA') ? 0 : reservationData?.totalValue;
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 flex flex-col">
        <header className="bg-slate-900 p-4 shadow-md border-b border-slate-800">
@@ -290,7 +298,7 @@ const Checkout: React.FC = () => {
                 </div>
                 <div className="border-t border-slate-700 pt-4 flex justify-between items-center">
                   <span className="font-bold text-lg">Total</span>
-                  <span className="font-bold text-2xl text-neon-green">{reservationData?.totalValue?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                  <span className="font-bold text-2xl text-neon-green">{displayTotalValue?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                 </div>
               </div>
             </div>
@@ -323,7 +331,7 @@ const Checkout: React.FC = () => {
 
                             {!isSplitPayment ? (
                                 <div className="grid grid-cols-2 gap-2">
-                                    {METHODS.map(m => ( 
+                                    {methodsToShow.map(m => ( 
                                         <button 
                                             key={m} 
                                             onClick={() => setStaffMethod(m)} 
@@ -342,7 +350,7 @@ const Checkout: React.FC = () => {
                                                 value={detail.method}
                                                 onChange={e => updateSplitRow(idx, 'method', e.target.value)}
                                             >
-                                                {METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                                                {methodsToShow.map(m => <option key={m} value={m}>{m}</option>)}
                                             </select>
                                             <div className="relative flex-1">
                                                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500">R$</span>
