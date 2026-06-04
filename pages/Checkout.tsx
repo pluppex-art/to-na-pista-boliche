@@ -16,7 +16,7 @@ const Checkout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);h
   
   const [staffMethod, setStaffMethod] = useState<PaymentMethodStaff>('DINHEIRO');
   const [isSplitPayment, setIsSplitPayment] = useState(false);
