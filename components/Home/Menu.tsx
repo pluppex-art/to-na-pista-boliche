@@ -9,7 +9,7 @@ export const Menu: React.FC = () => {
       desc: 'Massa artesanal, presunto copa, mussarela, bacon em cubos, palmito, ervilha fresca, cebola roxa e catupiry.',
       icon: <Pizza className="text-orange-500" size={28} />,
       tag: 'Assinatura',
-      price: 'R$ 85,00',
+      price: 'R$ 93,00',
       image: 'https://images.unsplash.com/photo-1513104890138-7c749659a591?q=80&w=500&auto=format&fit=crop'
     },
     {
@@ -17,7 +17,7 @@ export const Menu: React.FC = () => {
       desc: 'Pão brioche, burger 120g, provolone, bacon, cebola caramelizada, geléia de abacaxi apimentada, alface e fritas.',
       icon: <Utensils className="text-blue-500" size={28} />,
       tag: 'Mais Pedido',
-      price: 'R$ 32,00',
+      price: 'R$ 38,00',
       image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?q=80&w=500&auto=format&fit=crop'
     },
     {
@@ -33,7 +33,7 @@ export const Menu: React.FC = () => {
       desc: 'Tiras de carne de sol na manteiga com cebola, acompanha palitos de mandioca frita e farofa.',
       icon: <Beef className="text-red-500" size={28} />,
       tag: 'Regional',
-      price: 'R$ 58,00',
+      price: 'R$ 66,00',
       image: 'https://images.unsplash.com/photo-1603360946369-dc9bb6258143?q=80&w=500&auto=format&fit=crop'
     }
   ];
@@ -58,19 +58,19 @@ export const Menu: React.FC = () => {
           {features.map((item, i) => (
             <div key={i} className="group bg-slate-900/80 border border-slate-800 rounded-[2rem] overflow-hidden hover:border-neon-orange/40 transition-all shadow-xl flex flex-col">
               <div className="h-48 overflow-hidden relative bg-slate-800">
-                <img 
-                  src={item.image} 
-                  alt={item.title} 
-                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 opacity-70 group-hover:opacity-100" 
+                <img
+                  src={item.image}
+                  alt={item.title}
+                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 opacity-70 group-hover:opacity-100"
                   loading="lazy"
                 />
                 <div className="absolute top-4 left-4">
                   <span className="bg-neon-orange text-white text-[8px] font-black uppercase px-3 py-1 rounded-full shadow-lg flex items-center gap-1">
-                    <Flame size={10} fill="currentColor"/> {item.tag}
+                    <Flame size={10} fill="currentColor" /> {item.tag}
                   </span>
                 </div>
               </div>
-              
+
               <div className="p-6 space-y-3 flex-1 flex flex-col">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-slate-800 rounded-lg border border-slate-700">
@@ -83,7 +83,7 @@ export const Menu: React.FC = () => {
                 </p>
                 <div className="pt-4 border-t border-slate-800 flex justify-between items-center">
                   <span className="text-[10px] font-black text-neon-green uppercase tracking-widest">{item.price}</span>
-                  <Star size={14} className="text-slate-700" fill="currentColor"/>
+                  <Star size={14} className="text-slate-700" fill="currentColor" />
                 </div>
               </div>
             </div>
@@ -95,7 +95,7 @@ export const Menu: React.FC = () => {
           <div className="absolute top-0 right-0 p-10 opacity-5 -rotate-12 pointer-events-none group-hover:rotate-0 transition-transform duration-1000">
             <Beer size={150} className="hidden md:block text-white" />
           </div>
-          
+
           <div className="space-y-3 relative z-10 text-center md:text-left">
             <h4 className="text-2xl md:text-4xl font-black text-white uppercase tracking-tighter leading-none">
               Cardápio Completo
@@ -105,10 +105,10 @@ export const Menu: React.FC = () => {
             </p>
           </div>
 
-          <a 
-            href="https://drive.google.com/file/d/1E0Ll4HRz8qmoxenrr3R09vv_iPWMwqkG/view" 
-            target="_blank" 
-            rel="noopener noreferrer" 
+          <a
+            href="https://drive.google.com/file/d/1sJ2-a65o65f9oMJTqTHr9FRbuK5MIaj_/view?usp=drivesdk"
+            target="_blank"
+            rel="noopener noreferrer"
             className="w-full md:w-auto bg-white text-black px-10 py-5 rounded-2xl font-black uppercase text-xs tracking-[0.3em] hover:bg-neon-orange hover:text-white transition-all shadow-xl relative z-10 text-center flex items-center justify-center gap-3 group"
           >
             VER MENU DIGITAL <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
