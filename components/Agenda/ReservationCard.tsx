@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Reservation, ReservationStatus } from '../../types';
-import { Users, Clock, Hash, Utensils, Cake, Check, Ban, Tag, User, Globe, Store } from 'lucide-react';
+import { Users, Clock, Hash, Utensils, Cake, Check, Ban, Tag, User, Globe, Store, FileText } from 'lucide-react';
 
 interface ReservationCardProps {
   res: Reservation;
@@ -128,6 +128,22 @@ export const ReservationCard: React.FC<ReservationCardProps> = ({
                   <Utensils size={10} className="text-orange-500" />
                   <span className="text-[8px] font-black text-orange-500 uppercase">Mesa: {res.tableSeatCount}L</span>
               </div>
+          )}
+      </div>
+
+      <div className="mt-1 bg-slate-800/60 p-2 rounded-lg border border-slate-700/50">
+          <div className="flex items-center gap-1 mb-1">
+              <FileText size={10} className="text-slate-400" />
+              <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Observações Internas</span>
+          </div>
+          {res.observations ? (
+            <p className="text-[9px] text-slate-200 italic leading-snug line-clamp-2">
+                {res.observations}
+            </p>
+          ) : (
+            <p className="text-[9px] text-slate-500 italic leading-snug">
+                Sem Observação
+            </p>
           )}
       </div>
     </div>
