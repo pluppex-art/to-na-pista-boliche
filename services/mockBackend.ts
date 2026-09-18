@@ -1,6 +1,6 @@
 
 import { AppSettings, Client, FunnelCard, Reservation, ReservationStatus, PaymentStatus, UserRole, FunnelStage, FunnelStageConfig, LoyaltyTransaction, AuditLog, User, EventType, Feedback, Suggestion, Interaction } from '../types';
-import { supabase } from './supabaseClient';
+import { supabase, SUPABASE_URL, SUPABASE_KEY } from './supabaseClient';
 import { INITIAL_SETTINGS } from '../constants';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -670,6 +670,14 @@ export const db = {
           const staff = await db.users.getById(createdByUserId);
           await db.audit.log(createdByUserId, staff?.name || 'EQUIPE', 'CREATE_RESERVATION', `Criou nova reserva para ${res.clientName} dia ${res.date} às ${res.time}`, res.id);
       }
+
+      // Sincroniza com o CRM Spy (best-effort — não bloqueia nem falha a reserva
+      // se o Spy estiver fora do ar ou a integração não estiver configurada).
+      fetch(`${SUPABASE_URL}/functions/v1/sync-to-spy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
+        body: JSON.stringify({ reservationId: res.id }),
+      }).catch((e) => console.warn('[Spy Sync] Falha ao sincronizar (não bloqueante):', e));
 
       return res;
     },
