@@ -1,0 +1,87 @@
+[
+  {
+    "reservationId": "6113c93c-8bfe-4a93-8735-e248881a20f9",
+    "reason": "fetch failed",
+    "at": "2026-09-18T23:17:57.929Z"
+  },
+  {
+    "reservationId": "f202f143-a3b0-4679-95d3-a7f997d91e17",
+    "reason": "fetch failed",
+    "at": "2026-09-18T23:18:09.885Z"
+  },
+  {
+    "reservationId": "031d35a9-1b04-4e83-ade6-ae2146850e50",
+    "reason": "fetch failed",
+    "at": "2026-09-18T23:18:21.804Z"
+  },
+  {
+    "reservationId": "0798da34-c36f-4f9d-a485-9d3ff50c3350",
+    "reason": "fetch failed",
+    "at": "2026-09-18T23:18:33.729Z"
+  },
+  {
+    "reservationId": "2e257585-8c05-4e94-bbae-b08e4f8113b8",
+    "reason": "fetch failed",
+    "at": "2026-09-18T23:18:45.655Z"
+  },
+  {
+    "reservationId": "6f4801ac-cd1e-4233-8316-1df9a830e002",
+    "reason": "fetch failed",
+    "at": "2026-09-18T23:18:57.577Z"
+  },
+  {
+    "reservationId": "d0e4d9ea-8fa6-47a4-8d77-119c626ba317",
+    "reason": "fetch failed",
+    "at": "2026-09-18T23:19:09.501Z"
+  },
+  {
+    "reservationId": "26daf4a7-3054-4dd9-af58-0b5be75f026b",
+    "reason": "fetch failed",
+    "at": "2026-09-18T23:19:21.425Z"
+  },
+  {
+    "reservationId": "da45f45b-2594-4c3c-b31d-0b2a5216191a",
+    "reason": "fetch failed",
+    "at": "2026-09-18T23:19:33.351Z"
+  },
+  {
+    "reservationId": "1c966cd4-cf87-44b1-b2d9-1b88173d8100",
+    "reason": "fetch failed",
+    "at": "2026-09-18T23:19:45.277Z"
+  },
+  {
+    "reservationId": "7ea03947-0046-47a5-9795-9ba0ee0c8148",
+    "reason": "fetch failed",
+    "at": "2026-09-18T23:19:57.205Z"
+  },
+  {
+    "reservationId": "57262812-0c83-4041-a39b-d83aee315324",
+    "reason": "fetch failed",
+    "at": "2026-09-18T23:20:09.132Z"
+  },
+  {
+    "reservationId": "4f60e5fb-e094-4b3d-84eb-5c88abb32178",
+    "reason": "fetch failed",
+    "at": "2026-09-18T23:20:21.055Z"
+  },
+  {
+    "reservationId": "26c929ba-5e00-41a8-8b37-b5c04bdec311",
+    "reason": "fetch failed",
+    "at": "2026-09-18T23:20:32.981Z"
+  },
+  {
+    "reservationId": "3c945077-2b2e-486b-8b47-fe8786454beb",
+    "reason": "fetch failed",
+    "at": "2026-09-18T23:20:44.907Z"
+  },
+  {
+    "reservationId": "70c83afc-1150-48f8-b2be-e52789f9480a",
+    "reason": "fetch failed",
+    "at": "2026-09-18T23:20:56.837Z"
+  },
+  {
+    "reservationId": "02be7811-c614-4ebb-96dd-01f68ce81254",
+    "reason": "fetch failed",
+    "at": "2026-09-18T23:21:08.764Z"
+  }
+]

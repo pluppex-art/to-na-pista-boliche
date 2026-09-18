@@ -26,6 +26,19 @@ function stageForReservationStatus(status: string | null | undefined): string {
   return 'tnp-reservas-0'
 }
 
+// Status do lead no funil de vendas do Spy (campo "status", separado do
+// stageId/Kanban) — é o que alimenta Win Rate e os relatórios ("Fechado"
+// conta como ganho em Dashboard.tsx, Leads.tsx, RelatoriosExecutivos.tsx
+// etc). Reserva confirmada ou já realizada (compareceu) é negócio fechado;
+// cancelada/no-show é perdido; o resto continua em aberto.
+function leadStatusForReservationStatus(status: string | null | undefined): string {
+  const s = (status || '').toLowerCase()
+  if (s.includes('cancel') || s.includes('no-show') || s.includes('no show')
+    || s.includes('não compare') || s.includes('nao compare')) return 'Perdido'
+  if (s.includes('confirmad') || s.includes('check')) return 'Fechado'
+  return 'Novo'
+}
+
 // Catálogo "Pista de Boliche" (products), criado no Spy pra esse tenant —
 // preço por pista/hora varia entre dia útil e fim de semana.
 const PRODUCT_DIA_UTIL = 'e9aafbbc-3415-4d30-961a-c1741ebd1ac3'
@@ -126,7 +139,7 @@ Deno.serve(async (req: Request) => {
         cnpj: cliente.document || '',
         company: cliente.company || '',
         source,
-        status: 'Novo',
+        status: reservationPayload ? leadStatusForReservationStatus(reservationPayload.status as string) : 'Novo',
         priority: 'Média',
         value: reservationPayload?.totalValue ?? 0,
         clientName: name,

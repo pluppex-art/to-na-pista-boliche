@@ -94,6 +94,17 @@ function stageForReservationStatus(status) {
   return 'tnp-reservas-0';
 }
 
+// Status do lead no funil de vendas (campo "status", separado do stageId) —
+// alimenta Win Rate e relatórios ("Fechado" = ganho). Confirmada/Compareceu
+// vira negócio fechado; cancelada/no-show vira perdido.
+function leadStatusForReservationStatus(status) {
+  const s = (status || '').toLowerCase();
+  if (s.includes('cancel') || s.includes('no-show') || s.includes('no show')
+    || s.includes('não compare') || s.includes('nao compare')) return 'Perdido';
+  if (s.includes('confirmad') || s.includes('check')) return 'Fechado';
+  return 'Novo';
+}
+
 // Catálogo "Pista de Boliche" (products) — preço por pista/hora varia entre
 // dia útil e fim de semana.
 const PRODUCT_DIA_UTIL = 'e9aafbbc-3415-4d30-961a-c1741ebd1ac3';
@@ -118,7 +129,7 @@ async function syncOne(reserva) {
     cnpj: cliente.document || '',
     company: cliente.company || '',
     source: 'To Na Pista - Migração histórica',
-    status: 'Novo',
+    status: leadStatusForReservationStatus(reserva.status),
     priority: 'Média',
     value: reserva.total_value,
     clientName: name,
