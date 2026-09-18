@@ -14,7 +14,6 @@
 // (60 req/min) com folga, é resumível (grava um checkpoint local) e loga falhas
 // num arquivo separado pra reprocessar só o que deu erro.
 
-import { createClient } from '@supabase/supabase-js';
 import { writeFileSync, readFileSync, existsSync } from 'fs';
 
 const SUPABASE_URL = 'https://rmirkhebjgvsqqenszts.supabase.co';
@@ -31,8 +30,19 @@ const DELAY_MS = 1400; // ~43 req/min, com folga sob o limite de 60/min do Axis
 const CHECKPOINT_FILE = new URL('./.migrate-to-spy-checkpoint.json', import.meta.url);
 const FAILURES_FILE = new URL('./.migrate-to-spy-failures.json', import.meta.url);
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// fetch puro contra o REST/PostgREST do Supabase — evita depender de
+// @supabase/supabase-js estar instalado (node_modules não existe neste
+// checkout). Mesma chave pública que o frontend já usa.
+async function supabaseSelect(table, params) {
+  const url = `${SUPABASE_URL}/rest/v1/${table}?${params}`;
+  const res = await fetch(url, {
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+  });
+  if (!res.ok) throw new Error(`Supabase REST ${res.status}: ${await res.text()}`);
+  return res.json();
+}
 
 function loadCheckpoint() {
   if (!existsSync(CHECKPOINT_FILE)) return { doneIds: [] };
@@ -53,19 +63,45 @@ async function fetchAllReservas() {
   let all = [];
   let from = 0;
   const step = 1000;
+  const select = encodeURIComponent(
+    'id,client_name,date,time,people_count,lane_count,duration,total_value,event_type,status,payment_status,created_at,clientes(name,email,phone,document,company)'
+  );
   while (true) {
-    const { data, error } = await supabase
-      .from('reservas')
-      .select('id, client_name, date, time, people_count, lane_count, duration, total_value, event_type, status, payment_status, created_at, clientes(name, email, phone, document, company)')
-      .order('created_at', { ascending: true })
-      .range(from, from + step - 1);
-    if (error) throw error;
+    const data = await supabaseSelect(
+      'reservas',
+      `select=${select}&order=created_at.asc&limit=${step}&offset=${from}`
+    );
     if (!data || data.length === 0) break;
     all = all.concat(data);
     if (data.length < step) break;
     from += step;
   }
   return all;
+}
+
+// Funil "Reservas To Na Pista" (crm_funis.id = tnp-reservas). O front-end do
+// Spy só reconhece pipelineId "comercial"/"sdr" pro filtro do Kanban — funis
+// extras diferenciam-se só pelo stageId `${funilId}-${índice na lista de
+// etapas}` (0-indexed), não pelo id salvo em crm_pipeline_stages.
+const SPY_PIPELINE_ID = 'comercial';
+function stageForReservationStatus(status) {
+  const s = (status || '').toLowerCase();
+  // Agendado(0), Confirmado(1), Compareceu(2), Cancelado(3), Não Compareceu(4)
+  if (s.includes('cancel')) return 'tnp-reservas-3';
+  if (s.includes('no-show') || s.includes('no show') || s.includes('não compare') || s.includes('nao compare')) return 'tnp-reservas-4';
+  if (s.includes('check')) return 'tnp-reservas-2';
+  if (s.includes('confirmad')) return 'tnp-reservas-1';
+  return 'tnp-reservas-0';
+}
+
+// Catálogo "Pista de Boliche" (products) — preço por pista/hora varia entre
+// dia útil e fim de semana.
+const PRODUCT_DIA_UTIL = 'e9aafbbc-3415-4d30-961a-c1741ebd1ac3';
+const PRODUCT_FIM_DE_SEMANA = 'b8d14def-f3ee-4e9d-929b-0e1a36b81d3f';
+function productForDate(dateStr) {
+  if (!dateStr) return [];
+  const day = new Date(`${dateStr}T00:00:00`).getUTCDay();
+  return [day === 0 || day === 6 ? PRODUCT_FIM_DE_SEMANA : PRODUCT_DIA_UTIL];
 }
 
 async function syncOne(reserva) {
@@ -87,6 +123,9 @@ async function syncOne(reserva) {
     value: reserva.total_value,
     clientName: name,
     tenantName: 'To Na Pista Boliche',
+    pipelineId: SPY_PIPELINE_ID,
+    stageId: stageForReservationStatus(reserva.status),
+    productIds: productForDate(reserva.date),
     customFields: {
       origin: 'to-na-pista',
       reservation: {

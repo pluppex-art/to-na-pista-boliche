@@ -491,7 +491,17 @@ export const db = {
           const staff = await db.users.getById(userId);
           db.audit.log(userId, staff?.name || 'STAFF', 'CREATE_CLIENT', `Criou cliente ${client.name}`, data.client_id);
       }
-      return { 
+
+      // Sincroniza com o CRM Spy (best-effort — não bloqueia nem falha o
+      // cadastro se o Spy estiver fora do ar ou a integração não estiver
+      // configurada).
+      fetch(`${SUPABASE_URL}/functions/v1/sync-to-spy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
+        body: JSON.stringify({ clientId: data.client_id }),
+      }).catch((e) => console.warn('[Spy Sync] Falha ao sincronizar (não bloqueante):', e));
+
+      return {
         id: data.client_id, 
         name: data.name, 
         phone: data.phone, 
