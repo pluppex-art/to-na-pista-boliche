@@ -1,5 +1,6 @@
 
 declare const Deno: any;
+// @ts-expect-error Deno resolves HTTPS imports at runtime.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const corsHeaders = {
@@ -49,15 +50,11 @@ function productForDate(dateStr: string | null | undefined): string[] {
   return [day === 0 || day === 6 ? PRODUCT_FIM_DE_SEMANA : PRODUCT_DIA_UTIL]
 }
 
-// Sincroniza um cliente ou uma reserva com o CRM Spy (best-effort). Nunca deve
-// derrubar o fluxo do usuário — qualquer falha aqui é logada e respondida com
-// 200, porque quem chama (mockBackend.ts) dispara isso em fire-and-forget
-// depois que o registro já foi gravado com sucesso no to na pista.
-//
-// Aceita { reservationId } (reserva feita — Checkout/PublicBooking) ou
-// { clientId } (cliente/lead cadastrado direto no CRM interno, sem reserva
-// ainda). Nos dois casos cai no mesmo POST /api/v1/leads do Spy; a diferença
-// é só se `customFields.reservation` vai preenchido ou não.
+const INTERACTION_TYPE_LABEL: Record<string, string> = {
+  CALL: 'Ligação', WHATSAPP: 'WhatsApp', EMAIL: 'E-mail',
+  MEETING: 'Reunião', NOTE: 'Nota', SURVEY: 'Pesquisa de Satisfação',
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
@@ -68,9 +65,11 @@ Deno.serve(async (req: Request) => {
     })
 
   try {
-    const { reservationId, clientId } = await req.json()
-    if (!reservationId && !clientId) {
-      return respond({ success: false, error: 'Informe reservationId ou clientId.' }, 400)
+    const {
+      reservationId, clientId, interactionId, evaluationId, suggestionId, financeEntryId,
+    } = await req.json()
+    if (!reservationId && !clientId && !interactionId && !evaluationId && !suggestionId && !financeEntryId) {
+      return respond({ success: false, error: 'Informe reservationId, clientId, interactionId, evaluationId, suggestionId ou financeEntryId.' }, 400)
     }
 
     const spyApiUrl = (Deno.env.get('SPY_API_URL') ?? '').replace(/\/$/, '')
@@ -84,6 +83,98 @@ Deno.serve(async (req: Request) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     const supabaseAdmin = createClient(supabaseUrl, supabaseKey)
 
+    const postToSpy = async (path: string, body: Record<string, unknown>) => {
+      const r = await fetch(`${spyApiUrl}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': spyApiKey },
+        body: JSON.stringify(body),
+      })
+      const data = await r.json().catch(() => ({}))
+      return { ok: r.ok, status: r.status, data }
+    }
+
+    // ── Lançamento financeiro (faturamento_historico) ──────────────────────
+    // Essa tabela nunca é escrita pelo app (só lida em Financeiro.tsx) — é
+    // alimentada por fechamento manual/externo. Por isso o "gatilho ao vivo"
+    // aqui vem de um trigger de banco (pg_net), não de uma chamada fire-and-
+    // forget no front, mas a lógica de sincronização fica centralizada aqui
+    // como as demais.
+    if (financeEntryId) {
+      const { data: row, error } = await supabaseAdmin
+        .from('faturamento_historico').select('*').eq('id', financeEntryId).single()
+      if (error || !row) throw new Error('Lançamento de faturamento histórico não encontrado.')
+
+      const mes = String(row.mes).padStart(2, '0')
+      const { ok, data } = await postToSpy('/api/v1/finance-entries', {
+        externalId: row.id,
+        description: `Faturamento histórico ${mes}/${row.ano}`,
+        value: row.valor_arrecadado ?? 0,
+        date: `${row.ano}-${mes}-01`,
+        category: 'Faturamento Histórico',
+        type: 'Receber',
+        status: 'Pago',
+      })
+      if (!ok) { console.error('[sync-to-spy] Spy recusou finance-entry:', data); return respond({ success: false, error: data?.error || 'Falha ao sincronizar lançamento.' }) }
+      return respond({ success: true, deduped: !!data?.deduped })
+    }
+
+    // ── Interações / Avaliações / Sugestões → lead_activities do Spy ───────
+    if (interactionId || evaluationId || suggestionId) {
+      let clienteId: string | null = null
+      let activity: { type: string; title: string; description: string; date: string; seller: string; externalId: string } | null = null
+
+      if (interactionId) {
+        const { data: row, error } = await supabaseAdmin
+          .from('interacoes').select('*, clientes(name, email, phone)').eq('id', interactionId).single()
+        if (error || !row) throw new Error('Interação não encontrada.')
+        clienteId = row.client_id
+        const typeLabel = INTERACTION_TYPE_LABEL[row.type] || row.type || 'Interação'
+        const extra = [
+          row.nps_score != null ? `NPS: ${row.nps_score}` : null,
+          row.satisfaction_level ? `Satisfação: ${row.satisfaction_level}` : null,
+        ].filter(Boolean).join(' · ')
+        activity = {
+          type: typeLabel, title: `${typeLabel} (To Na Pista)`,
+          description: [row.content, extra].filter(Boolean).join('\n') || '(sem conteúdo registrado)',
+          date: (row.created_at || new Date().toISOString()).slice(0, 10),
+          seller: row.user_name || '', externalId: `interacao_${row.id}`,
+        }
+      } else if (evaluationId) {
+        const { data: row, error } = await supabaseAdmin
+          .from('avaliacoes').select('*, clientes(name, email, phone)').eq('id', evaluationId).single()
+        if (error || !row) throw new Error('Avaliação não encontrada.')
+        clienteId = row.cliente_id
+        activity = {
+          type: 'Pesquisa de Satisfação', title: 'Avaliação de satisfação (To Na Pista)',
+          description: `Nota: ${row.nota ?? '-'}/5${row.comentario ? ' — ' + row.comentario : ''}`,
+          date: (row.created_at || new Date().toISOString()).slice(0, 10),
+          seller: '', externalId: `avaliacao_${row.id}`,
+        }
+      } else if (suggestionId) {
+        const { data: row, error } = await supabaseAdmin
+          .from('sugestoes').select('*, clientes(name, email, phone)').eq('id', suggestionId).single()
+        if (error || !row) throw new Error('Sugestão não encontrada.')
+        clienteId = row.cliente_id
+        activity = {
+          type: 'Sugestão', title: row.titulo || 'Sugestão de cliente (To Na Pista)',
+          description: row.descricao || '(sem descrição)',
+          date: (row.created_at || new Date().toISOString()).slice(0, 10),
+          seller: '', externalId: `sugestao_${row.id}`,
+        }
+      }
+
+      if (!clienteId || !activity) return respond({ skipped: true, reason: 'Registro sem cliente associado.' })
+      const { data: cliente } = await supabaseAdmin.from('clientes').select('name, email, phone').eq('client_id', clienteId).single()
+      const phone = cliente?.phone || ''
+      const email = cliente?.email || ''
+      if (!phone && !email) return respond({ skipped: true, reason: 'Cliente sem telefone e sem e-mail.' })
+
+      const { ok, data } = await postToSpy('/api/v1/lead-activities', { phone, email, ...activity })
+      if (!ok) { console.error('[sync-to-spy] Spy recusou lead-activity:', data); return respond({ success: false, error: data?.error || 'Falha ao sincronizar atividade.' }) }
+      return respond({ success: true, deduped: !!data?.deduped, skipped: !!data?.skipped })
+    }
+
+    // ── Reserva ou cliente → POST /api/v1/leads (cria e mantém atualizado) ─
     let cliente: any = {}
     let reservationPayload: Record<string, unknown> | null = null
     let source = 'To Na Pista - Cadastro CRM'
@@ -114,7 +205,7 @@ Deno.serve(async (req: Request) => {
     } else {
       const { data: clienteRow, error: clienteError } = await supabaseAdmin
         .from('clientes')
-        .select('name, email, phone, document, company')
+        .select('name, email, phone, document, company, address, birth_date, tags, funnel_stage, loyalty_balance')
         .eq('client_id', clientId)
         .single()
       if (clienteError || !clienteRow) throw new Error('Cliente não encontrado.')
@@ -128,6 +219,15 @@ Deno.serve(async (req: Request) => {
     if (!phone && !email) {
       return respond({ skipped: true, reason: 'Cliente sem telefone e sem e-mail.' })
     }
+
+    // Perfil completo do cliente (Clientes.tsx) — só existe quando a chamada
+    // veio de clientId (reserva usa customFields.reservation, que já traz o
+    // que interessa do agendamento em si).
+    const clienteProfile = !reservationPayload ? {
+      address: cliente.address || '', birthDate: cliente.birth_date || '',
+      tags: cliente.tags || [], funnelStage: cliente.funnel_stage || '',
+      loyaltyBalance: cliente.loyalty_balance || 0,
+    } : undefined
 
     const spyResponse = await fetch(`${spyApiUrl}/api/v1/leads`, {
       method: 'POST',
@@ -149,7 +249,7 @@ Deno.serve(async (req: Request) => {
         productIds: reservationPayload ? productForDate(reservationPayload.date as string) : [],
         customFields: reservationPayload
           ? { origin: 'to-na-pista', reservation: reservationPayload }
-          : { origin: 'to-na-pista' },
+          : { origin: 'to-na-pista', clienteProfile },
       }),
     })
 

@@ -6,6 +6,17 @@ import { v4 as uuidv4 } from 'uuid';
 
 const SETTINGS_ID = 'e7a04692-b6ea-4827-afca-53886112938c';
 
+// Sincroniza (best-effort) com o CRM Spy sempre que algo relevante muda —
+// nunca bloqueia nem derruba o fluxo do usuário se o Spy estiver fora do ar
+// ou a integração não estiver configurada neste ambiente.
+const syncToSpy = (payload: Record<string, string>) => {
+  fetch(`${SUPABASE_URL}/functions/v1/sync-to-spy`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
+    body: JSON.stringify(payload),
+  }).catch((e) => console.warn('[Spy Sync] Falha ao sincronizar (não bloqueante):', e));
+};
+
 export const cleanPhone = (phone: string | null | undefined): string | null => {
   if (!phone) return null;
   const cleaned = phone.replace(/\D/g, '');
@@ -55,6 +66,7 @@ export const db = {
         comentario: feedback.comentario
       }, { onConflict: 'reserva_id' }).select().single();
       if (error) throw error;
+      syncToSpy({ evaluationId: data.id });
       return data;
     },
     getByClient: async (clientId: string) => {
@@ -65,13 +77,14 @@ export const db = {
 
   suggestions: {
     create: async (suggestion: Suggestion) => {
-      const { error } = await supabase.from('sugestoes').insert({
+      const { data, error } = await supabase.from('sugestoes').insert({
         cliente_id: suggestion.cliente_id,
         titulo: suggestion.titulo,
         descricao: suggestion.descricao,
         status: 'Pendente'
-      });
+      }).select().single();
       if (error) throw error;
+      syncToSpy({ suggestionId: data.id });
       return { success: true };
     }
   },
@@ -113,6 +126,7 @@ export const db = {
 
       const { data, error } = await supabase.from('interacoes').insert(payload).select().single();
       if (error) throw error;
+      syncToSpy({ interactionId: data.id });
       return {
         id: data.id,
         clientId: data.client_id,
@@ -492,17 +506,10 @@ export const db = {
           db.audit.log(userId, staff?.name || 'STAFF', 'CREATE_CLIENT', `Criou cliente ${client.name}`, data.client_id);
       }
 
-      // Sincroniza com o CRM Spy (best-effort — não bloqueia nem falha o
-      // cadastro se o Spy estiver fora do ar ou a integração não estiver
-      // configurada).
-      fetch(`${SUPABASE_URL}/functions/v1/sync-to-spy`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
-        body: JSON.stringify({ clientId: data.client_id }),
-      }).catch((e) => console.warn('[Spy Sync] Falha ao sincronizar (não bloqueante):', e));
+      syncToSpy({ clientId: data.client_id });
 
       return {
-        id: data.client_id, 
+        id: data.client_id,
         name: data.name, 
         phone: data.phone, 
         email: data.email, 
@@ -536,6 +543,7 @@ export const db = {
           const staff = await db.users.getById(updatedBy);
           db.audit.log(updatedBy, staff?.name || 'STAFF', 'UPDATE_CLIENT', `Atualizou dados do cliente ${client.name}`, client.id);
       }
+      syncToSpy({ clientId: client.id });
     },
     updateStage: async (clientId: string, newStage: string) => {
         const { error } = await supabase.from('clientes').update({ funnel_stage: newStage }).eq('client_id', clientId);
@@ -579,6 +587,7 @@ export const db = {
           await supabase.from('loyalty_transactions').insert({ client_id: clientId, amount, description, created_by: userId });
           const { data: client } = await supabase.from('clientes').select('loyalty_balance').eq('client_id', clientId).single();
           await supabase.from('clientes').update({ loyalty_balance: (client?.loyalty_balance || 0) + amount }).eq('client_id', clientId);
+          syncToSpy({ clientId });
       }
   },
 
@@ -681,13 +690,7 @@ export const db = {
           await db.audit.log(createdByUserId, staff?.name || 'EQUIPE', 'CREATE_RESERVATION', `Criou nova reserva para ${res.clientName} dia ${res.date} às ${res.time}`, res.id);
       }
 
-      // Sincroniza com o CRM Spy (best-effort — não bloqueia nem falha a reserva
-      // se o Spy estiver fora do ar ou a integração não estiver configurada).
-      fetch(`${SUPABASE_URL}/functions/v1/sync-to-spy`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
-        body: JSON.stringify({ reservationId: res.id }),
-      }).catch((e) => console.warn('[Spy Sync] Falha ao sincronizar (não bloqueante):', e));
+      syncToSpy({ reservationId: res.id });
 
       return res;
     },
@@ -709,6 +712,7 @@ export const db = {
           const detail = actionDetail || `Alterou reserva de ${res.clientName} (Status: ${res.status})`;
           await db.audit.log(updatedByUserId, staff?.name || 'EQUIPE', 'UPDATE_RESERVATION', detail, res.id);
       }
+      syncToSpy({ reservationId: res.id });
     }
   },
 
