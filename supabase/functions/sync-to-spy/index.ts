@@ -202,6 +202,27 @@ Deno.serve(async (req: Request) => {
         paymentStatus: reserva.payment_status,
         createdAt: reserva.created_at,
       }
+
+      // Receita no Spy sempre reflete o estado ATUAL da reserva — não
+      // depende de a reserva ter contato (telefone/e-mail) pra existir, e
+      // é um upsert determinístico por reservationId (tnp_fat_<id> no
+      // Spy), então repetir a chamada (retry, novo update) nunca duplica.
+      // Isso também resolve retratação automática: se a reserva vira
+      // Cancelada/Reembolsada depois de já ter gerado receita, o valor aqui
+      // cai pra 0 e ZERA o lançamento anterior — sem precisar de nenhuma
+      // reconciliação manual.
+      const qualifica = ['Check-in', 'Confirmada'].includes(reserva.status) && reserva.payment_status === 'Pago'
+      const clienteNome = cliente.name || reserva.client_name || 'Cliente'
+      const { ok: finOk, data: finData } = await postToSpy('/api/v1/finance-entries', {
+        externalId: reserva.id,
+        description: `Reserva de Boliche: Reserva de Boliche${reserva.event_type ? ' - ' + reserva.event_type : ''} (${clienteNome})`,
+        value: qualifica ? reserva.total_value : 0,
+        date: reserva.date,
+        category: 'Reservas - Boliche',
+        type: 'Receber',
+        status: 'Pago',
+      })
+      if (!finOk) console.error('[sync-to-spy] Spy recusou finance-entry da reserva:', finData)
     } else {
       const { data: clienteRow, error: clienteError } = await supabaseAdmin
         .from('clientes')

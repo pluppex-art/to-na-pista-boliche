@@ -2,6 +2,23 @@
 declare const Deno: any;
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
+// Best-effort, nunca derruba o webhook do Mercado Pago nem propaga erro —
+// esse handler escreve direto em `reservas` via service_role, sem passar
+// por services/mockBackend.ts (onde as demais mutações disparam isso), então
+// sem essa chamada explícita confirmação/estorno automático de pagamento
+// nunca chegava no Spy. Aguarda a chamada (em vez de fire-and-forget) porque
+// esse handler roda como função serverless — trabalho não aguardado depois
+// da resposta pode ser cortado antes de completar.
+async function notifySpy(supabaseUrl: string, reservationId: string) {
+  try {
+    await fetch(`${supabaseUrl}/functions/v1/sync-to-spy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reservationId }),
+    });
+  } catch (e) { console.warn('[mp-webhook] Falha ao sincronizar com o Spy (não bloqueante):', e); }
+}
+
 Deno.serve(async (req: Request) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
@@ -105,6 +122,7 @@ Deno.serve(async (req: Request) => {
                     observations: (res.observations || '') + (diffMinutes > 35 ? ` [PAGO COM ATRASO - VAGA LIVRE]` : '')
                 })
                 .eq('id', reservationId);
+            await notifySpy(supabaseUrl, reservationId);
         } else {
             // --- ESTORNO AUTOMÁTICO POR FALTA DE VAGA ---
             console.log(`[ESTORNO] Iniciando reembolso para ${reservationId} devido a pagamento atrasado sem vagas.`);
@@ -123,6 +141,7 @@ Deno.serve(async (req: Request) => {
                         observations: (res.observations || '') + ` [ESTORNO AUTOMÁTICO: Pagamento recebido aos ${Math.round(diffMinutes)}min, mas a vaga já estava ocupada por outro cliente.]`
                     })
                     .eq('id', reservationId);
+                await notifySpy(supabaseUrl, reservationId);
                 console.log(`[ESTORNO SUCESSO] Pagamento ${resourceId} devolvido.`);
             } else {
                 // Se o estorno falhar por algum motivo da API, avisamos no banco para ação manual
@@ -134,6 +153,7 @@ Deno.serve(async (req: Request) => {
                         observations: (res.observations || '') + ` [ERRO NO ESTORNO AUTO] Realizar devolução manual no Mercado Pago (Atraso de ${Math.round(diffMinutes)}min).`
                     })
                     .eq('id', reservationId);
+                await notifySpy(supabaseUrl, reservationId);
             }
         }
     }
