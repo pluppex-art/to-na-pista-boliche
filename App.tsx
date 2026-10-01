@@ -1,19 +1,19 @@
 
-import React, { useEffect } from 'react';
+import React, { useEffect, Suspense, lazy } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AppProvider, useApp } from './contexts/AppContext'; 
 import Layout from './components/Layout';
-import Login from './pages/Login';
-import PublicBooking from './pages/PublicBooking';
-import Checkout from './pages/Checkout';
-import Agenda from './pages/Agenda';
-import CRM from './pages/CRM/CRM';
-import Settings from './pages/Settings';
-import Financeiro from './pages/Financeiro';
-import ClientDashboard from './pages/ClientDashboard';
-import ResetPassword from './pages/ResetPassword';
-import Home from './pages/Home';
-import LP from './pages/LP';
+const Login = lazy(() => import('./pages/Login'));
+const PublicBooking = lazy(() => import('./pages/PublicBooking'));
+const Checkout = lazy(() => import('./pages/Checkout'));
+const Agenda = lazy(() => import('./pages/Agenda'));
+const CRM = lazy(() => import('./pages/CRM/CRM'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Financeiro = lazy(() => import('./pages/Financeiro'));
+const ClientDashboard = lazy(() => import('./pages/ClientDashboard'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const Home = lazy(() => import('./pages/Home'));
+const LP = lazy(() => import('./pages/LP'));
 import { UserRole, User } from './types';
 import { Analytics } from './services/analytics';
 
@@ -85,6 +85,7 @@ const AppContent: React.FC = () => {
     return (
         <Router>
             <PixelTracker />
+            <Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500">Carregando...</div>}>
             <Routes>
                 <Route path="/" element={<Home />} />
                 <Route path="/lp" element={<LP />} />
@@ -118,6 +119,7 @@ const AppContent: React.FC = () => {
                     </ProtectedRoute>
                 } />
             </Routes>
+            </Suspense>
         </Router>
     );
 };
