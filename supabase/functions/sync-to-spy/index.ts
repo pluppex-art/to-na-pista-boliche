@@ -50,6 +50,19 @@ function productForDate(dateStr: string | null | undefined): string[] {
   return [day === 0 || day === 6 ? PRODUCT_FIM_DE_SEMANA : PRODUCT_DIA_UTIL]
 }
 
+// Reserva paga e (ainda) válida — a mesma regra que gera receita no Spy.
+const RESERVA_PAGA_STATUS = ['Check-in', 'Confirmada']
+
+// Status do compromisso na Agenda do Spy a partir do status da reserva (mesma regra do Spy).
+function agendaStatusForReservationStatus(status: string | null | undefined): string {
+  const s = (status || '').toLowerCase()
+  if (s.includes('cancel') || s.includes('no-show') || s.includes('no show') || s.includes('não compare') || s.includes('nao compare')) return 'Cancelada'
+  if (s.includes('check')) return 'Concluída'
+  return 'Agendada'
+}
+
+const onlyDigits = (v: unknown) => String(v ?? '').replace(/\D/g, '')
+
 const INTERACTION_TYPE_LABEL: Record<string, string> = {
   CALL: 'Ligação', WHATSAPP: 'WhatsApp', EMAIL: 'E-mail',
   MEETING: 'Reunião', NOTE: 'Nota', SURVEY: 'Pesquisa de Satisfação',
@@ -67,9 +80,11 @@ Deno.serve(async (req: Request) => {
   try {
     const {
       reservationId, clientId, interactionId, evaluationId, suggestionId, financeEntryId,
+      loyaltyTransactionId, storeItemId,
     } = await req.json()
-    if (!reservationId && !clientId && !interactionId && !evaluationId && !suggestionId && !financeEntryId) {
-      return respond({ success: false, error: 'Informe reservationId, clientId, interactionId, evaluationId, suggestionId ou financeEntryId.' }, 400)
+    if (!reservationId && !clientId && !interactionId && !evaluationId && !suggestionId && !financeEntryId
+      && !loyaltyTransactionId && !storeItemId) {
+      return respond({ success: false, error: 'Informe reservationId, clientId, interactionId, evaluationId, suggestionId, financeEntryId, loyaltyTransactionId ou storeItemId.' }, 400)
     }
 
     const spyApiUrl = (Deno.env.get('SPY_API_URL') ?? '').replace(/\/$/, '')
@@ -118,8 +133,26 @@ Deno.serve(async (req: Request) => {
       return respond({ success: true, deduped: !!data?.deduped })
     }
 
-    // ── Interações / Avaliações / Sugestões → lead_activities do Spy ───────
-    if (interactionId || evaluationId || suggestionId) {
+    // ── Item da loja (itens_loja) → produto do catálogo do Spy ─────────────
+    if (storeItemId) {
+      const { data: row, error } = await supabaseAdmin.from('itens_loja').select('*').eq('id', storeItemId).single()
+      if (error || !row) throw new Error('Item da loja não encontrado.')
+      const { ok, data } = await postToSpy('/api/v1/products', {
+        externalId: `tnp-loja-${row.id}`,
+        name: row.nome,
+        price: row.preco ?? 0,
+        category: 'Loja',
+        type: row.tipo || 'Produto',
+        active: row.ativo !== false,
+        imageUrl: row.image_url || '',
+        description: 'Item da loja de pontos (To Na Pista).',
+      })
+      if (!ok) { console.error('[sync-to-spy] Spy recusou produto:', data); return respond({ success: false, error: data?.error || 'Falha ao sincronizar item da loja.' }) }
+      return respond({ success: true, created: !!data?.created })
+    }
+
+    // ── Interações / Avaliações / Sugestões / Fidelidade → lead_activities do Spy
+    if (interactionId || evaluationId || suggestionId || loyaltyTransactionId) {
       let clienteId: string | null = null
       let activity: { type: string; title: string; description: string; date: string; seller: string; externalId: string } | null = null
 
@@ -150,6 +183,18 @@ Deno.serve(async (req: Request) => {
           date: (row.created_at || new Date().toISOString()).slice(0, 10),
           seller: '', externalId: `avaliacao_${row.id}`,
         }
+      } else if (loyaltyTransactionId) {
+        const { data: row, error } = await supabaseAdmin
+          .from('loyalty_transactions').select('*').eq('id', loyaltyTransactionId).single()
+        if (error || !row) throw new Error('Transação de fidelidade não encontrada.')
+        clienteId = row.client_id
+        const pts = Number(row.amount) || 0
+        activity = {
+          type: 'Fidelidade', title: `Fidelidade: ${pts >= 0 ? '+' : ''}${pts} ponto(s)`,
+          description: [row.description, row.reservation_id ? `Reserva: ${row.reservation_id}` : null].filter(Boolean).join('\n') || '(sem descrição)',
+          date: (row.created_at || new Date().toISOString()).slice(0, 10),
+          seller: '', externalId: `fidelidade_${row.id}`,
+        }
       } else if (suggestionId) {
         const { data: row, error } = await supabaseAdmin
           .from('sugestoes').select('*, clientes(name, email, phone)').eq('id', suggestionId).single()
@@ -176,18 +221,20 @@ Deno.serve(async (req: Request) => {
 
     // ── Reserva ou cliente → POST /api/v1/leads (cria e mantém atualizado) ─
     let cliente: any = {}
+    let reservaClientId: string | null = null
     let reservationPayload: Record<string, unknown> | null = null
     let source = 'To Na Pista - Cadastro CRM'
 
     if (reservationId) {
       const { data: reserva, error: reservaError } = await supabaseAdmin
         .from('reservas')
-        .select('*, clientes(name, email, phone, document, company)')
+        .select('*, clientes(name, email, phone, document, company, address)')
         .eq('id', reservationId)
         .single()
       if (reservaError || !reserva) throw new Error('Reserva não encontrada.')
 
       cliente = reserva.clientes || { name: reserva.client_name }
+      reservaClientId = reserva.client_id || null
       source = 'To Na Pista - Agendamento'
       reservationPayload = {
         id: reserva.id,
@@ -223,6 +270,28 @@ Deno.serve(async (req: Request) => {
         status: 'Pago',
       })
       if (!finOk) console.error('[sync-to-spy] Spy recusou finance-entry da reserva:', finData)
+
+      // Reserva de quem não deixou telefone nem e-mail: não dá pra criar lead (o Spy exige um contato),
+      // mas o compromisso existe — vai direto pra Agenda do Spy, com o nome que foi informado.
+      if (!cliente.phone && !cliente.email) {
+        const { ok: agOk, data: agData } = await postToSpy('/api/v1/meetings', {
+          externalId: reserva.id,
+          title: `Reserva de Boliche${reserva.event_type ? ' - ' + reserva.event_type : ''}`,
+          date: reserva.date,
+          time: reserva.time,
+          durationMinutes: Math.round((Number(reserva.duration) || 1) * 60),
+          status: agendaStatusForReservationStatus(reserva.status),
+          notes: [
+            reserva.people_count ? `${reserva.people_count} pessoa(s)` : null,
+            reserva.lane_count ? `${reserva.lane_count} pista(s)` : null,
+            reserva.total_value != null ? `R$ ${reserva.total_value}` : null,
+            reserva.observations || null,
+          ].filter(Boolean).join(' · '),
+          name: clienteNome,
+        })
+        if (!agOk) console.error('[sync-to-spy] Spy recusou compromisso da reserva:', agData)
+        return respond({ success: agOk, agendaOnly: true, reason: 'Cliente sem contato: reserva registrada só na agenda.' })
+      }
     } else {
       const { data: clienteRow, error: clienteError } = await supabaseAdmin
         .from('clientes')
@@ -280,7 +349,29 @@ Deno.serve(async (req: Request) => {
       return respond({ success: false, error: spyData?.error || 'Falha ao sincronizar com o Spy.' })
     }
 
-    return respond({ success: true, deduped: !!spyData?.deduped })
+    // Quem já pagou uma reserva é CLIENTE (não só lead): entra na Base de Clientes do Spy, com o cadastro
+    // completo, e os leads dele passam a apontar pra esse cliente. O Spy só faz isso no navegador quando
+    // alguém abre o sistema; aqui garantimos no servidor, no momento do sync.
+    const donoId = reservaClientId || clientId || null
+    let clienteSpy: Record<string, unknown> | null = null
+    if (donoId) {
+      const { data: paga } = await supabaseAdmin.from('reservas').select('id')
+        .eq('client_id', donoId).in('status', RESERVA_PAGA_STATUS).eq('payment_status', 'Pago').limit(1)
+      if (paga && paga.length > 0) {
+        const doc = onlyDigits(cliente.document)
+        const { ok: cliOk, data: cliData } = await postToSpy('/api/v1/clients', {
+          name, phone, email,
+          documento: cliente.document || '',
+          tipoPessoa: doc.length === 14 ? 'PJ' : doc.length === 11 ? 'PF' : null,
+          logradouro: cliente.address || '',
+          industry: 'Entretenimento',
+        })
+        if (!cliOk) console.error('[sync-to-spy] Spy recusou cliente:', cliData)
+        else clienteSpy = { id: cliData?.id, created: !!cliData?.created }
+      }
+    }
+
+    return respond({ success: true, deduped: !!spyData?.deduped, cliente: clienteSpy })
   } catch (error: any) {
     console.error('[sync-to-spy] Erro:', error?.message)
     return respond({ success: false, error: error?.message || 'Erro desconhecido.' })
