@@ -128,6 +128,8 @@ Deno.serve(async (req: Request) => {
         category: 'Faturamento Histórico',
         type: 'Receber',
         status: 'Pago',
+        documentNumber: `FAT-${row.ano}-${mes}`,
+        competenciaDate: `${row.ano}-${mes}-01`,
       })
       if (!ok) { console.error('[sync-to-spy] Spy recusou finance-entry:', data); return respond({ success: false, error: data?.error || 'Falha ao sincronizar lançamento.' }) }
       return respond({ success: true, deduped: !!data?.deduped })
@@ -260,6 +262,12 @@ Deno.serve(async (req: Request) => {
       // reconciliação manual.
       const qualifica = ['Check-in', 'Confirmada'].includes(reserva.status) && reserva.payment_status === 'Pago'
       const clienteNome = cliente.name || reserva.client_name || 'Cliente'
+      // payment_method é gravado pelo mp-webhook (PIX/CREDITO/DEBITO/ONLINE); outros valores passam como estão.
+      const paymentMethodMap: Record<string, string> = {
+        PIX: 'Pix', CREDITO: 'Cartão de crédito', DEBITO: 'Cartão de débito', ONLINE: 'Online', DINHEIRO: 'Dinheiro',
+      }
+      const rawPm = reserva.payment_method ? String(reserva.payment_method).trim() : ''
+      const paymentMethodLabel = rawPm ? (paymentMethodMap[rawPm.toUpperCase()] || rawPm) : ''
       const { ok: finOk, data: finData } = await postToSpy('/api/v1/finance-entries', {
         externalId: reserva.id,
         description: `Reserva de Boliche: Reserva de Boliche${reserva.event_type ? ' - ' + reserva.event_type : ''} (${clienteNome})`,
@@ -268,6 +276,15 @@ Deno.serve(async (req: Request) => {
         category: 'Reservas - Boliche',
         type: 'Receber',
         status: 'Pago',
+        counterparty: clienteNome,
+        clientName: clienteNome,
+        ...(cliente.phone ? { clientPhone: cliente.phone } : {}),
+        ...(cliente.email ? { clientEmail: cliente.email } : {}),
+        ...(cliente.document ? { clientDocument: cliente.document } : {}),
+        ...(paymentMethodLabel ? { paymentMethod: paymentMethodLabel } : {}),
+        documentNumber: `RES-${String(reserva.id).slice(0, 8).toUpperCase()}`,
+        competenciaDate: reserva.date,
+        tags: ['Reserva'],
       })
       if (!finOk) console.error('[sync-to-spy] Spy recusou finance-entry da reserva:', finData)
 
