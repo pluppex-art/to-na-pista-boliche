@@ -3,6 +3,10 @@ import React from 'react';
 import { Plus } from 'lucide-react';
 
 export const FAQ: React.FC = () => {
+  // Mesmo período da promo em Pricing.tsx: 01/11/2026 até 30/11/2026
+  const now = new Date();
+  const isBlackPromo = now >= new Date(2026, 10, 1) && now < new Date(2026, 11, 1);
+
   const faqItems = [
     { q: 'Preciso levar sapato especial?', a: 'Não é necessário. Você pode jogar com seu próprio calçado confortável (tênis/sapato fechado recomendado).' },
     { q: 'Crianças podem jogar?', a: 'Sim! O boliche é diversão para todas as idades. Famílias são muito bem-vindas!' },
@@ -14,7 +18,9 @@ export const FAQ: React.FC = () => {
     { q: 'Preciso reservar com muita antecedência?', a: 'Recomendamos reservar com antecedência, especialmente para sexta a domingo quando a demanda é maior.' },
     { q: 'Qual o horário de funcionamento?', a: 'Funcionamos de terça a quinta, das 18h às 00h, e de sexta a domingo, das 17h às 00h. Às segundas-feiras, estamos fechados para manutenção.' },
     { q: 'Posso dividir o valor com meus amigos?', a: 'Sim! O valor pode ser dividido entre todos os participantes.' },
-    { q: 'Qual a diferença de preço entre os dias?', a: 'Terça a quinta o valor é R$ 99,90 por hora. Sexta a domingo o valor é R$ 140,00 por hora.' }
+    { q: 'Qual a diferença de preço entre os dias?', a: isBlackPromo
+        ? 'Durante a Black November (todo o mês de novembro), o valor é R$ 99,99 por hora de terça a domingo. Fora da promoção, sexta a domingo custa R$ 140,00 por hora.'
+        : 'Terça a quinta o valor é R$ 99,90 por hora. Sexta a domingo o valor é R$ 140,00 por hora.' }
   ];
 
   return (

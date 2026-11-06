@@ -6,7 +6,17 @@ interface PricingProps {
   onReserve: (label: string) => void;
 }
 
+// Promo Black November: R$ 99,99 de terça a domingo durante todo o mês de novembro/2026.
+// Depois de 30/11 a página volta sozinha ao preço normal de fim de semana.
+const PROMO_START = new Date(2026, 10, 1);  // 01/11/2026
+const PROMO_END = new Date(2026, 11, 1);    // 01/12/2026 (exclusivo)
+
 export const Pricing: React.FC<PricingProps> = ({ onReserve }) => {
+  const now = new Date();
+  const isBlackPromo = now >= PROMO_START && now < PROMO_END;
+  const weekendPrice = isBlackPromo ? 'R$ 99,99' : 'R$ 140,00';
+  const weekendPerPerson = isBlackPromo ? 'R$ 16,67' : 'R$ 23,33';
+
   const steps = [
     {
       step: '1',
@@ -36,6 +46,15 @@ export const Pricing: React.FC<PricingProps> = ({ onReserve }) => {
               <div className="inline-flex items-center gap-2 bg-red-600 text-white px-4 py-1.5 rounded-full text-[10px] md:text-xs font-black uppercase tracking-widest animate-pulse">
                   <AlertTriangle size={14}/> Segundas-feiras: FECHADO
               </div>
+              {isBlackPromo && (
+                <div className="max-w-3xl mx-auto mt-4 bg-black border-2 border-yellow-400 rounded-2xl px-6 py-4 shadow-[0_0_40px_rgba(250,204,21,0.2)]">
+                    <p className="text-yellow-400 font-black uppercase text-xs md:text-sm tracking-[0.25em]">Black November • Todos os dias</p>
+                    <p className="text-white font-black uppercase text-lg md:text-2xl tracking-tight mt-1">
+                        <span className="line-through text-slate-500 mr-2">R$ 140,00</span> R$ 99,99 de terça a domingo
+                    </p>
+                    <p className="text-slate-400 text-[10px] md:text-xs font-bold uppercase tracking-widest mt-1">Válido durante todo o mês de novembro</p>
+                </div>
+              )}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-16">
@@ -70,10 +89,16 @@ export const Pricing: React.FC<PricingProps> = ({ onReserve }) => {
                           <span className="text-neon-blue font-black uppercase text-xs tracking-widest">Sexta a Domingo</span>
                           <h3 className="text-2xl md:text-4xl font-black text-white uppercase tracking-tighter mt-2">Fim de Semana</h3>
                       </div>
+                      {isBlackPromo && (
+                        <div className="bg-yellow-400 text-black px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest">Black November!</div>
+                      )}
                   </div>
                   <div className="space-y-6 mb-10">
+                      {isBlackPromo && (
+                        <p className="text-slate-500 font-black uppercase text-sm tracking-widest -mb-4">De <span className="line-through">R$ 140,00</span> por</p>
+                      )}
                       <div className="flex items-baseline gap-2">
-                          <span className="text-4xl md:text-6xl font-black text-white">R$ 140,00</span>
+                          <span className="text-4xl md:text-6xl font-black text-white">{weekendPrice}</span>
                           <span className="text-slate-500 font-bold uppercase text-xs">/ Hora</span>
                       </div>
                       <ul className="space-y-3 text-slate-300 font-bold uppercase text-[10px] tracking-widest">
@@ -126,7 +151,7 @@ export const Pricing: React.FC<PricingProps> = ({ onReserve }) => {
                   </div>
                   <div className="bg-slate-900 p-4 rounded-2xl border border-slate-700">
                       <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Sexta a Domingo</p>
-                      <p className="text-white font-black text-lg">R$ 23,33 <span className="text-[10px] text-neon-blue">/ pessoa</span></p>
+                      <p className="text-white font-black text-lg">{weekendPerPerson} <span className="text-[10px] text-neon-blue">/ pessoa</span></p>
                   </div>
               </div>
           </div>
